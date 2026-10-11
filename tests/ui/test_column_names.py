@@ -8,7 +8,7 @@ cases, because a session (backend, static server, browser) costs more than a pag
 Read for every column: the big name is `.t-title`, the small kind above it `.t-caption`. Each period has its name in
 forms from long to short, and a column shows the longest that fits its room (`lib/fitName.ts`). The rooms the cases
 read are the design's own 184 px (a window of 1470 px, no column open), the 152 px of the everyday state (the same
-window with a column open) and the desktop app's first window, 1320 px.
+window with a column open) and the desktop app's first window, 1320 px, with 163 px and, beside an open column, 134 px.
 """
 
 from __future__ import annotations
@@ -165,7 +165,18 @@ _MEASURE = """(labels) => {
     widest[family] = Math.max(...texts.map((text) => { probe.textContent = text; return probe.getBoundingClientRect().width; }));
   }
   probe.remove();
-  return { widest, room: title.getBoundingClientRect().width, faces: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family) };
+  return { widest, room: title.parentElement.getBoundingClientRect().width, faces: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family) };
+}"""
+# The kind lines against the room the kind has: the title's row, less the 36 px the kind row keeps free at the right.
+_MEASURE_KIND = """(labels) => {
+  const caption = document.querySelector('[data-vertical="week"] .t-caption');
+  const probe = caption.cloneNode(false);
+  probe.style.cssText = 'position:absolute;visibility:hidden;display:inline-block;width:auto;max-width:none;'
+    + 'overflow:visible;text-overflow:clip';
+  caption.parentElement.appendChild(probe);
+  const widths = Object.fromEntries(labels.map((text) => { probe.textContent = text; return [text, probe.getBoundingClientRect().width]; }));
+  probe.remove();
+  return { widths, room: caption.parentElement.getBoundingClientRect().width - 36 };
 }"""
 
 
@@ -176,11 +187,22 @@ def _widest(page: Page, labels: dict[str, list[str]]) -> dict:
     return measured
 
 
+def _widest_kind(page: Page, labels: list[str]) -> dict:
+    page.wait_for_function("() => document.fonts.status === 'loaded'", timeout=5000)
+    return page.evaluate(_MEASURE_KIND, labels)
+
+
+# What a name's shortest form may take beyond its room, `--column-spill` in ColumnHeader.vue.
+SPILL = 8
+
+
 def test_the_forms_fit_the_rooms_the_board_gives_them(ui_f2: UiSession) -> None:
     """The names are set in the board's title type, which does not shrink, so each form is measured, in the font as the app
     loads it, against the room it is meant for: the design's 184 px (a window of 1470 px, no column open) for the forms
-    the board shows there, and the 152 px of the everyday state (the same window with a column open) for the shortest
-    form of each name. A font or a size that makes one too wide cannot cut a name unseen."""
+    the board shows there, the 152 px of the everyday state (the same window with a column open) and the 134 px of the
+    desktop app's first window with a column open for the shortest form of each name, which may take 8 px more. The kind
+    lines are measured the same way against the kind's room. A font or a size that makes one too wide cannot cut a name
+    unseen."""
     rest = _open(ui_f2, NOW, width=1470)
     pairs = [
         f"{start} {MONTHS[m]}–{MONTHS[(m + 1) % 12]}"
@@ -213,6 +235,38 @@ def test_the_forms_fit_the_rooms_the_board_gives_them(ui_f2: UiSession) -> None:
     assert 152 < everyday["room"] < 153, "the other columns' room is 152 px with one open at 1470 px"
     too_wide = {family: round(width, 1) for family, width in everyday["widest"].items() if width > everyday["room"]}
     assert not too_wide, f"the shortest forms are wider than the {everyday['room']:.1f} px beside an open column: {too_wide}"
+
+    kinds = (
+        ["Day", "Week", "Month", "Quarter", "Year", "Three years", "Life"]
+        + [f"{kind} · ’27" for kind in ("Day", "Week", "Month", "Quarter")]
+        + [f"Week · {month}" for month in MONTHS]
+        + [f"Week · {month} ’27" for month in MONTHS]
+    )
+    seen = _widest_kind(rest, kinds)
+    assert seen["room"] == pytest.approx(everyday["room"] - 36, abs=0.01)
+    assert not {k: round(w, 1) for k, w in seen["widths"].items() if w > seen["room"]}, "a kind line is wider than its room"
+
+    # The desktop app's first window with a column open: 134 px for the name, 98 for the kind. Every shortest form but
+    # one fits as it is, and "Apr–May" (134.8) takes 0.8 px of the 8 it may; the kind line "Week · May ’27" (100.7) takes
+    # 2.7 px of its 8.
+    narrow = _open(ui_f2, NOW, width=1320)
+    expand_column(narrow, "quarter")
+    tight = _widest(narrow, {
+        "shortest pairs": [f"{MONTHS[m]}–{MONTHS[(m + 1) % 12]}" for m in range(12)],
+        "weekdays": [day[:3] for day in WEEKDAYS],
+        "months": [name[:3] for name in MONTH_NAMES],
+        "week in one month": [f"{a}–{a + 6}" for a in range(1, 26)],
+        "dates": [f"{d} {MONTHS[m]}" for m in range(12) for d in range(1, LAST_DAY[m] + 1)],
+        "the rest": ["Today", "All time", "Q4", "’26", "’26–’28", "’29–’31", "’98–’00"],
+    })
+    assert tight["room"] == pytest.approx(134, abs=0.01), "the other columns' room is 134 px with one open at 1320 px"
+    beyond = {family: round(width, 1) for family, width in tight["widest"].items() if width > tight["room"] + SPILL}
+    assert not beyond, f"the shortest forms are wider than {tight['room']:.0f} px and {SPILL} px more: {beyond}"
+    assert not {f: w for f, w in tight["widest"].items() if w > tight["room"] and f != "shortest pairs"}, "only a pair may spill"
+    seen = _widest_kind(narrow, kinds)
+    assert seen["room"] == pytest.approx(98, abs=0.01)
+    beyond = {k: round(w, 1) for k, w in seen["widths"].items() if w > seen["room"] + SPILL}
+    assert not beyond, f"a kind line is wider than its {seen['room']:.0f} px and {SPILL} px more: {beyond}"
 
 
 # (the clock, an anchor, the name Day shows). Saturday 8 Aug is in the week Mon 3 – Sun 9 Aug.
@@ -339,7 +393,9 @@ def test_the_year_edge_belongs_to_now_not_to_the_anchor(ui_f2: UiSession) -> Non
 # 134 px beside an open column there. The forms' widths, in px: Wednesday 164.5, Wed 64.8; September 157.0, Sep 53.3;
 # 25–31 May 155.3, 25–31 86.8; 21–27 Dec 145.2, 21–27 85.2; 14–20 Sep 149.4, 14–20 90.1; 27 Apr–3 May 199.3,
 # 27 Apr–May 175.2, Apr–May 134.8. A kind line has the title's room less the 36 px its row keeps free at the right (148, 116,
-# 127 and 98 px in the four layouts), and "Week · Dec ’27" takes 97.1 of the 98.
+# 127 and 98 px in the four layouts): "Week · Dec ’27" takes 97.1 of the 98, "Week · Nov ’27" 98.6, "Week · Mar ’27" 99.0,
+# "Week · May ’27" 100.7. The shortest form of a name, and a kind line, may take 8 px beyond their room before the
+# ellipsis shows (`--column-spill`, ColumnHeader.vue), which is all that "Apr–May" (0.8 px) and those three need.
 LAYOUTS = (
     # 1470 px, nothing open: 184 px, every name whole (a pair across two months in its second form)
     (1470, None, "2026-10-07", {"day": ("Wednesday", "Day"), "week": ("5–11 Oct", "Week")}),
@@ -365,6 +421,12 @@ LAYOUTS = (
     (1320, "quarter", "2026-12-23", {"week": ("21–27", "Week · Dec")}),
     (1320, "quarter", "2026-10-07", {"day": ("Wed", "Day")}),
     (1320, "quarter", "2027-12-23", {"week": ("20–26", "Week · Dec ’27"), "month": ("Dec", "Month · ’27")}),
+    # where the shortest form is wider than the room and takes the spill: "Apr–May", and the kind lines of March, May and
+    # November in another year
+    (1320, "quarter", "2026-04-30", {"week": ("Apr–May", "Week")}),
+    (1320, "quarter", "2027-03-24", {"week": ("22–28", "Week · Mar ’27")}),
+    (1320, "quarter", "2027-05-26", {"week": ("24–30", "Week · May ’27")}),
+    (1320, "quarter", "2027-11-24", {"week": ("22–28", "Week · Nov ’27")}),
 )
 
 
