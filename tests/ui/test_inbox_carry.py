@@ -34,6 +34,12 @@ MAYBE_TASK = "SYNMAY01"  # F2's first Maybe candidate: an older task, a tile in 
 SRC = Path(__file__).resolve().parents[2] / "web" / "src"
 
 
+@pytest.fixture
+def ui_reduced_motion(request: pytest.FixtureRequest) -> str:
+    """The suite runs with motion off; a test that looks at motion asks for it with `parametrize(..., indirect=True)`."""
+    return getattr(request, "param", "reduce")
+
+
 def _written(conn: psycopg.Connection, goal_id: str, ago: str) -> None:
     conn.execute("UPDATE goals SET created_at = now() - %s::interval WHERE owner = %s AND id = %s", (ago, OWNER, goal_id))
 
@@ -415,6 +421,7 @@ def test_a_private_task_waits_with_its_words_hidden(ui_f2: UiSession) -> None:
 def test_the_card_arrives_in_the_field_as_on_the_board_with_no_entrance_of_its_own(ui_f2: UiSession) -> None:
     """Move has no entrance for the waiting card (the field widens round it); the Inbox adds none."""
     page = ui_f2.page
+    assert page.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches") is False  # motion is on
     ids = _seed(ui_f2)
     _open_inbox(ui_f2)
     _carry_and_wait(page, ids["loose"])
