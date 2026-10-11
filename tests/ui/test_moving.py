@@ -11,7 +11,7 @@ from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession
 from tests.ui.test_agent_conversation import ui_agent  # noqa: F401  (the fixture)
-from tests.ui.views import FIELD
+from tests.ui.views import FIELD, tick
 
 SPANS = '[data-role="spans-board"]'
 SPAN = '[data-role="spans-row"] > .pattern-vertical-board__column:not([data-span-edge])'
@@ -205,3 +205,32 @@ def test_words_sent_while_moving_go_to_the_agent_with_the_move(ui_agent: UiSessi
     expect(answer).to_contain_text("Fix the bicycles rack")
     expect(page.locator(SPANS)).to_have_count(0)
     expect(page.locator('[data-role="moving-stack"]')).to_have_count(0)
+
+
+def _park(page: Page) -> None:
+    """The month goal let go over the field while the weeks are open: it waits there (S5.P3.037)."""
+    page.wait_for_selector(f'[data-goal-id="{MONTH_GOAL}"]')
+    dots = _open_weeks(page)
+    _glide(page, dots, _centre(page, ".circle-field__shape"))
+    page.wait_for_timeout(200)
+    page.mouse.up()
+    expect(page.locator('[data-role="moving-goal"]')).to_have_count(1)
+
+
+def test_a_click_after_the_let_go_keeps_the_goal_and_a_tap_picks_it(ui_f2: UiSession) -> None:
+    """S5.P4.017: a click is not a release. On the field it leaves the goal waiting beside "Weeks" with the weeks open; a
+    tap on the goal picks it and a second tap lets go of the pick."""
+    page = ui_f2.page
+    _park(page)
+    waiting = page.locator('[data-role="moving-goal"]')
+    page.mouse.click(*_centre(page, ".circle-field__shape"))
+    expect(waiting).to_have_count(1)
+    expect(page.locator('[data-role="moving-view"]')).to_have_text("Weeks")
+    expect(page.locator(SPANS)).to_have_count(1)
+    tick(page)
+    waiting.click()
+    expect(waiting).to_have_class(re.compile("is-picked"))
+    waiting.click()
+    expect(waiting).not_to_have_class(re.compile("is-picked"))
+    expect(waiting).to_have_count(1)
+    expect(page.locator(SPANS)).to_have_count(1)

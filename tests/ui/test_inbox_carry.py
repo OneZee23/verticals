@@ -328,6 +328,25 @@ def test_a_press_on_the_waiting_card_that_does_not_move_carries_nothing(ui_f2: U
     expect(page.locator(HAND)).to_have_count(0)
 
 
+def test_a_click_after_the_let_go_keeps_the_card_and_a_tap_picks_it(ui_f2: UiSession) -> None:
+    """S5.P4.017 as in Move: a click is not a release. On the field it leaves the card waiting; a tap on the card picks
+    it and a second tap lets go of the pick."""
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    _carry_and_wait(page, ids["loose"])
+    waiting = page.locator(WAITING)
+    page.mouse.click(*_centre(page, SHAPE))
+    expect(waiting).to_have_count(1)
+    tick(page)
+    waiting.click()
+    expect(waiting).to_have_class(re.compile("is-picked"))
+    waiting.click()
+    expect(waiting).not_to_have_class(re.compile("is-picked"))
+    expect(waiting).to_have_count(1)
+    expect(page.locator(f'{TODAY} [data-goal-id="{ids["loose"]}"]')).to_have_count(0)
+
+
 def test_a_carry_that_ends_elsewhere_swallows_no_later_click(ui_f2: UiSession) -> None:
     """"A press that became a carry is not a click" holds for that click only: the first click on another task, later,
     opens it."""
