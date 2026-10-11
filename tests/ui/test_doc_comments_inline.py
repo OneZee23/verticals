@@ -26,6 +26,8 @@ from tests.ui.views import open_page, show_tags, switch_view, tick
 OWNER = "t1"
 DOC = '.vt-window[data-window="doc"]'
 BODY = f"{DOC} [data-role='doc-body']"
+FRONT_BODY = '.vt-window--front [data-role="doc-body"]'
+PANE_BODY = '[data-cap="docs"] [data-role="doc-body"]'
 CARD = '[data-role="comment-card"]'
 MARK = "mark.comment-highlight"
 PILLS = '[data-role="doc-check"]'
@@ -73,12 +75,12 @@ def _open(page: Page, doc_id: str) -> None:
     page.wait_for_timeout(300)
 
 
-def _select(page: Page, phrase: str) -> None:
+def _select(page: Page, phrase: str, where: str = FRONT_BODY) -> None:
     """Selects `phrase` in the open document's text and lets the app read it as it reads a drag's end (`mouseup`), as
-    `test_comments_panel.py::_select_phrase` does."""
+    `test_comments_panel.py::_select_phrase` does. `where` is the text's own selector: the front window's, or Documents'."""
     page.evaluate(
-        """(phrase) => {
-             const container = document.querySelector('.vt-window--front [data-role="doc-body"]')
+        """([phrase, where]) => {
+             const container = document.querySelector(where)
              const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
              let node
              while ((node = walker.nextNode())) {
@@ -91,7 +93,7 @@ def _select(page: Page, phrase: str) -> None:
              }
              throw new Error('phrase not found: ' + phrase)
            }""",
-        phrase,
+        [phrase, where],
     )
 
 
@@ -103,9 +105,9 @@ def _card(page: Page):
     return card
 
 
-def _comment_on(page: Page, phrase: str, words: str) -> None:
+def _comment_on(page: Page, phrase: str, words: str, where: str = FRONT_BODY) -> None:
     """The owner's way: select the words, press Comment, write, Enter."""
-    _select(page, phrase)
+    _select(page, phrase, where)
     page.locator('[data-cap="comment-selection"]').click()
     card = _card(page)
     card.locator('[data-role="comment-field"]').fill(words)
@@ -571,6 +573,35 @@ def test_check_again_takes_the_place_of_ready_and_lights_what_the_agent_rewrote(
     saved = _until(page, lambda: (lambda got: got.json() if got.status_code == 200 and "Really." in got.json()["body"] else None)(_api(session, f"/api/docs/{doc}")))
     assert new in saved["body"], saved
     assert not session.bad_responses, session.bad_responses  # no 409: the window had taken the agent's revision
+
+
+def test_check_again_in_documents_lights_the_rewrite_there_too(ui_agent: UiSession) -> None:
+    """The document in Documents itself, not in a window: the same pair above the field, the same hand-over, and what the
+    agent rewrote is lit in the page there."""
+    session = ui_agent
+    page = session.page
+    old, new = "ship on Wednesday", "ship on Thursday"
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc = _doc(conn, "syn-inline/pane.md", "SYN Inline Pane", "The plan is short.\n\nWe will ship on Wednesday, and then we rest.")
+    page.goto("about:blank")
+    page.goto(f"{session.base_url}/#doc/{doc}")
+    expect(page.locator('[data-cap="docs"] [data-role="doc-path"]')).to_be_visible(timeout=10000)
+    _comment_on(page, old, "Can this move to Thursday?", PANE_BODY)
+    expect(page.locator(f"{PILLS} {COUNT}")).to_have_text("1 comment", timeout=10000)
+    again = page.locator(f"{PILLS} {AGAIN}")
+    expect(again).to_have_text("Check again", timeout=10000)
+    with page.expect_request(lambda request: request.url.endswith("/__chat/send") and request.method == "POST") as sent:
+        again.click()
+    assert f"(#doc/{doc})" in json.loads(sent.value.post_data or "{}")["text"]
+    expect(page.locator(".circle-field")).to_have_attribute("data-state", "working", timeout=10000)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        current = core_docs.get(conn, owner=OWNER, id=doc)
+        core_docs.save(conn, owner=OWNER, id=doc, expected_revision=current.revision, body=current.body.replace(old, new))
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Changed the words you commented on.", timeout=15000)
+    lit = page.locator(f"{PANE_BODY} mark.doc-rewritten")
+    expect(lit).to_have_count(1, timeout=10000)
+    expect(lit).to_have_text("Thursday")
+    assert page.locator(PANE_BODY).inner_text().count("Wednesday") == 0
 
 
 def test_an_edit_in_the_text_asks_for_a_check_too(ui_agent: UiSession) -> None:
