@@ -24,7 +24,7 @@ from tests.ui.conftest import ARTIFACTS_ROOT, REPO_ROOT, UiSession
 # from `verticals/core/board.py::COLUMN_ORDER` with the `maybe` entry dropped, matching
 # `Board.vue`'s own `dated` computed.
 EXPECTED_VERTICALS = ("day", "week", "month", "quarter", "year", "decade", "life")
-EXPECTED_NAMES = ("Today", "3–9 Aug", "August", "Q3", "2026", "2026–2028", "All time")
+EXPECTED_NAMES = ("Today", "3–9 Aug", "August", "Q3", "’26", "’26–’28", "All time")
 EXPECTED_KINDS = ("Day", "Week", "Month", "Quarter", "Year", "Three years", "Life")
 
 
