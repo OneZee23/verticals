@@ -243,7 +243,7 @@ onMounted(() => {
    asked for it once a day. The agent is there only after the gateway answered, so the first look waits for it. */
 let morningTimer: ReturnType<typeof setInterval> | null = null
 async function morningCheck(): Promise<void> {
-  ensureMorning(todayIso())
+  await ensureMorning(todayIso())
 }
 onUnmounted(() => {
   if (morningTimer) clearInterval(morningTimer)

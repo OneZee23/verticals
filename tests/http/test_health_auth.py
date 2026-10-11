@@ -63,6 +63,8 @@ EXPECTED_OPERATIONS = {
     # The Inbox and Documents redesign: every goal with no date, and the Documents desk.
     ("GET", "/api/undated"),
     ("GET", "/api/docs/desk"),
+    # The agent's fixes (docs/design/agent-fixes.md, fixes 2 and 3): the morning's one ask a day.
+    ("POST", "/api/morning"),
 }
 
 # J7's negative space: none of these ever appear in a path string, in either direction of the

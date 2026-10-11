@@ -387,10 +387,12 @@ _READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "do
 # to name). A second entry here without a spec section like §6 backing it should be treated as
 # suspicious — this set exists for capabilities that are agent tooling, not user capabilities.
 _AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report"}
-# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. None now: the daily
-# carry-over task and the morning report it once wrote are the agent's, made when the owner asks or the morning comes
-# (Inbox and Documents redesign, final page). A new one goes here with its reason.
-_APP_ONLY_ROUTES: set[tuple[str, str]] = set()
+# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. The morning's one ask a
+# day (docs/design/agent-fixes.md): the app asks once its morning hour has come and the server answers whether this
+# morning's report is still to be asked for; the report itself is the agent's, made when that ask reaches it. The daily
+# carry-over task is the agent's too, made when the owner asks (Inbox and Documents redesign, final page). A new one
+# goes here with its reason.
+_APP_ONLY_ROUTES: set[tuple[str, str]] = {("POST", "/api/morning")}
 
 # capabilities.json's `mcp_args` values are placeholders (`"<title>"`, `"<id>"`, ...), not literal
 # values a real caller would send — most placeholders are plain strings and validate as-is against

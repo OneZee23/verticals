@@ -10,6 +10,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 import psycopg
@@ -17,9 +18,11 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from verticals.core import docs as core_docs
+from verticals.core import morning as core_morning
 
 from tests.ui.conftest import (
-    F2_OWNER, REPO_ROOT, TEST_TOKEN, Server, UiSession, _backend, _free_port, _make_ui_session, _shutdown, _wait_http_ok,
+    F2_OWNER, PINNED_CLOCK_ISO, PINNED_DAY, REPO_ROOT, TEST_TOKEN, VIEWPORT, Server, UiSession, _backend, _free_port,
+    _make_ui_session, _shutdown, _wait_http_ok,
 )
 from tests.ui.views import FIELD
 
@@ -48,7 +51,10 @@ def ui_agent(
     browser: Browser, f2_dsn: str, tmp_path: Path, request: pytest.FixtureRequest, web_dist: None,
     ui_reduced_motion: str,
 ) -> Iterator[UiSession]:
-    """F2 served by the desktop gateway, with the conversation's server and a fake agent (docs/design-handoff S2)."""
+    """F2 served by the desktop gateway, with the conversation's server and a fake agent (docs/design-handoff S2). The
+    pinned day's morning report is taken already, as if asked for: a scenario about something else gets no extra turn."""
+    with psycopg.connect(f2_dsn, autocommit=True) as conn:
+        core_morning.begin(conn, owner=F2_OWNER, day=date.fromisoformat(PINNED_DAY))
     with _backend(f2_dsn, F2_OWNER, tmp_path) as backend:
         with _agent_gateway(backend, tmp_path) as base_url:
             yield from _make_ui_session(
@@ -140,23 +146,39 @@ def test_an_answer_that_links_a_document_stands_in_the_field_as_its_page(ui_agen
     expect(chip).to_contain_text("SYN report — 8 August 2026")
 
 
-def test_the_morning_report_is_asked_once_its_hour_has_come(ui_agent: UiSession) -> None:
-    """Inbox and Documents redesign, final page: past the morning hour (the pinned clock says 09:00) the app asks the agent
-    for the day's report by itself, once a day. The ask is not your balloon; the answer lands in the field."""
+def test_the_morning_report_is_asked_once_a_day_by_the_server(ui_agent: UiSession) -> None:
+    """Inbox and Documents redesign, final page; the agent's fixes, fix 3: past the morning hour (the pinned clock says
+    09:00) the app asks the agent for the day's report by itself, once a day, and the server decides which ask is the
+    day's: a cleared cache or another browser is told the day is taken. The ask is not your balloon; the answer lands in
+    the field."""
     page = ui_agent.page
     page.wait_for_selector(".goal-card__row")
-    page.evaluate("() => { sessionStorage.setItem('vt-morning-test', 'on'); localStorage.clear() }")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        conn.execute("DELETE FROM idempotency WHERE owner = %s AND client_token LIKE 'morning:%%'", (F2_OWNER,))  # the day is open again
     page.reload()
     expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report for 2026-08-08", timeout=15000)
-    assert page.evaluate("() => !!localStorage.getItem('vt-morning:2026-08-08')")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        taken = [row[0] for row in conn.execute("SELECT client_token FROM idempotency WHERE owner = %s", (F2_OWNER,))]
+        assert taken == [f"morning:{PINNED_DAY}"]
     page.locator(".circle-field__shape").click()
     expect(page.locator(f'{BALLOON}[data-who="agent"]')).to_have_count(1)
     expect(page.locator(f'{BALLOON}[data-who="you"]')).to_have_count(0)
     page.keyboard.press("Escape")
-    page.reload()
-    page.wait_for_selector(".goal-card__row")
-    page.wait_for_timeout(1500)
-    expect(page.locator('[data-role="circle-answer"]')).to_have_count(0)
+    # The same browser with nothing in its storage, and another browser altogether: the day is taken, they ask nothing.
+    page.evaluate("() => { localStorage.clear(); sessionStorage.clear() }")
+    other = ui_agent.context.browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
+    try:
+        second = other.new_page()
+        second.clock.set_fixed_time(PINNED_CLOCK_ISO)
+        second.goto(ui_agent.base_url)
+        page.reload()
+        for window in (page, second):
+            window.wait_for_selector(".goal-card__row")
+        page.wait_for_timeout(1500)
+        for window in (page, second):
+            expect(window.locator('[data-role="circle-answer"]')).to_have_count(0)
+    finally:
+        other.close()
 
 
 def test_an_ask_is_the_agents_balloon_with_its_choices(ui_agent: UiSession) -> None:

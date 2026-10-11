@@ -77,6 +77,10 @@ VIEWPORT = {"width": 1458, "height": 779}
 UI_REDUCED_MOTION = "reduce"
 # The pinned date, verbatim from E2E.md §1 instrumentation entry 3 and repeated in §6's own line.
 PINNED_CLOCK_ISO = "2026-08-08T09:00:00+03:00"
+# The day that clock says. The morning report (web `lib/morning.ts`) is asked for once the morning hour has come and the
+# server takes the day on the first ask (`POST /api/morning`); the pinned clock is past the hour, so a session with an
+# agent starts with its day already taken (`test_agent_conversation.py`'s `ui_agent`) unless the scenario is about the ask.
+PINNED_DAY = PINNED_CLOCK_ISO[:10]
 
 ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "ui"
 
@@ -544,27 +548,6 @@ class UiSession:
         return self.page.evaluate("window.__dialogRecords || []")
 
 
-# The morning report (web `lib/morning.ts`): once the morning hour has come the app asks the agent for the day's report on
-# its own, and the pinned clock (09:00) is past it. A scenario about something else must not get that extra turn, so every
-# page starts with the day's report marked as asked, at the clock the app itself reads (set again once the document is
-# there, after the clock is installed). The one scenario about the report turns this off with
-# `sessionStorage['vt-morning-test'] = 'on'`.
-_MORNING_ASKED_SCRIPT = """
-(() => {
-  const mark = () => {
-    try {
-      if (sessionStorage.getItem('vt-morning-test') === 'on') return;
-      const d = new Date();
-      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      localStorage.setItem(`vt-morning:${day}`, 'test');
-    } catch (e) { /* storage off: nothing to mark */ }
-  };
-  mark();
-  document.addEventListener('DOMContentLoaded', mark);
-})();
-"""
-
-
 def _make_ui_session(
     *, browser: Browser, backend: Server, static_base_url: str, request: pytest.FixtureRequest,
     reduced_motion: str,
@@ -574,7 +557,6 @@ def _make_ui_session(
         reduced_motion=reduced_motion,
     )
     context.add_init_script(script=_DIALOG_RECORDER_SCRIPT)
-    context.add_init_script(script=_MORNING_ASKED_SCRIPT)
     page = context.new_page()
 
     console_errors: list[str] = []

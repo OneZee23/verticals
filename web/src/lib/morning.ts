@@ -1,9 +1,11 @@
 // The morning report (Inbox and Documents redesign, round 8; KK 7 Oct 2026: "Morning report should be agent based since it
 // additionally should check integrations that user has"). At 07:00 by your clock, or when the app opens if it was closed
-// then, the app asks the agent for the day's report once, in a conversation of its own. In the desktop app that one turn
+// then, the app asks the agent for the day's report once, in a conversation of its own; the server decides which ask is
+// the day's one (POST /api/morning), so no second window or cleared cache asks again. In the desktop app that one turn
 // also reaches your own connected tools, read-only (desktop/chat/prompt-morning.md). The agent writes the report as one
 // document and the blue "Morning report" task in Day, then answers in two lines with the document linked; the answer
 // stands in the field with the report's page (SearchBar.vue). No rule writes a report: without an agent there is none.
+import { beginMorning } from './api'
 import { agentChat, newThread, send } from './agentChat'
 import { commandFilter } from './commandFilter'
 
@@ -25,19 +27,40 @@ export function morningAsk(today: string): string {
     + `for today linked to it, then answer in two short lines and link the document.`
 }
 
-const asked = (day: string) => `vt-morning:${day}`
+/** Why the app may ask now: an agent is there and you are not busy with it. */
+const free = () => agentChat.available && !agentChat.running && !agentChat.open && !commandFilter.text
 
-/** Asked on start and every few minutes: once the hour has come and an agent is there, the day's report is asked for
- *  once. Not while you talk with the agent or type: then it waits for the next look. */
-export function ensureMorning(today: string, now: Date = new Date()): boolean {
-  if (now.getHours() < MORNING_HOUR || !agentChat.available || agentChat.running || agentChat.open || commandFilter.text) return false
-  try {
-    if (localStorage.getItem(asked(today))) return false
-    localStorage.setItem(asked(today), String(Date.now()))
-  } catch {
-    return false
-  }
+function ask(today: string): void {
   newThread()
   void send(morningAsk(today), { morning: true }, { sources: 'connected' })
-  return true
+}
+
+let looking = false
+/** A day the server gave us that was not asked at once because you were busy by the time it answered. */
+let owed: string | null = null
+
+/** Asked on start and every few minutes: once the hour has come and an agent is there, the day's report is asked for
+ *  once. The server decides which ask is the day's one (POST /api/morning), not a flag in this browser, so a second
+ *  window, a restart or a cleared cache never asks again (docs/design/agent-fixes.md, fix 3). Not while you talk with
+ *  the agent or type: then it waits for the next look. */
+export async function ensureMorning(today: string, now: Date = new Date()): Promise<boolean> {
+  if (now.getHours() < MORNING_HOUR || !free() || looking) return false
+  if (owed !== null && owed !== today) owed = null
+  if (owed === today) {
+    owed = null
+    ask(today)
+    return true
+  }
+  looking = true
+  try {
+    if (!(await beginMorning(today)).asked) return false
+    // The day is ours now; if you began to talk while the server answered, it waits for the next look.
+    if (!free()) { owed = today; return false }
+    ask(today)
+    return true
+  } catch {
+    return false
+  } finally {
+    looking = false
+  }
 }
