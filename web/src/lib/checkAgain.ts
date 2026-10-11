@@ -56,25 +56,35 @@ export function checkAsk(link: string): string {
 /** The longest an agent's turn is waited for before the document is let be. */
 const TURN_LIMIT_MS = 15 * 60_000
 
+/** A press is being handed over: the pill stays on the page while what you wrote is saved, and a second press in that
+ *  moment is the same press. */
+let handing = false
+
 export async function checkAgain(): Promise<void> {
   const id = frontDocId.value
-  if (!id || !check.docs.includes(id)) return
-  // What you wrote is saved first, so the agent reads it and the copy compared afterwards is the one it started from.
-  await flushPending()
-  check.docs = check.docs.filter((other) => other !== id)
-  const doc = await getDoc(id).catch(() => null)
-  if (!doc) return
-  delete rewritten[id]
-  const name = (doc.title || doc.path).replace(/[[\]]/g, '')
-  newThread()
-  agentChat.engaged = false
-  void send(checkAsk(`[${name}](#doc/${doc.id})`))
-  followTurn(id, doc.revision)
-  // A morning report gone through has nothing left to wait for: its open task is done.
-  if (!doc.path.startsWith(`${MORNING_FOLDER}/`)) return
-  for (const link of doc.linked_goals) {
-    const goal = store.state.board?.columns.flatMap((c) => c.goals).find((g) => g.id === link.goal_id)
-    if (goal && goal.title === MORNING_TITLE && goal.done_at === null) void store.completeGoal(goal.id, true)
+  if (handing || !id || !check.docs.includes(id)) return
+  handing = true
+  try {
+    // What you wrote is saved first, so the agent reads it and the copy compared afterwards is the one it started from.
+    await flushPending()
+    const doc = await getDoc(id).catch(() => null)
+    // The document could not be read: nothing was sent, and the pill stays for another press.
+    if (!doc) return
+    check.docs = check.docs.filter((other) => other !== id)
+    delete rewritten[id]
+    const name = (doc.title || doc.path).replace(/[[\]]/g, '')
+    newThread()
+    agentChat.engaged = false
+    void send(checkAsk(`[${name}](#doc/${doc.id})`))
+    followTurn(id, doc.revision)
+    // A morning report gone through has nothing left to wait for: its open task is done.
+    if (!doc.path.startsWith(`${MORNING_FOLDER}/`)) return
+    for (const link of doc.linked_goals) {
+      const goal = store.state.board?.columns.flatMap((c) => c.goals).find((g) => g.id === link.goal_id)
+      if (goal && goal.title === MORNING_TITLE && goal.done_at === null) void store.completeGoal(goal.id, true)
+    }
+  } finally {
+    handing = false
   }
 }
 
@@ -83,9 +93,10 @@ export async function checkAgain(): Promise<void> {
 function followTurn(id: string, base: number): void {
   let began = false
   let touched = false
+  // A save of the text is the owner's hand in it (a comment or a reply is not: it leaves the words as they are).
   const own = (event: Event): void => {
-    const detail = (event as CustomEvent<{ id?: string; by?: string }>).detail
-    if (detail?.id === id && detail.by !== 'agent') touched = true
+    const detail = (event as CustomEvent<{ id?: string; by?: string; doc?: unknown }>).detail
+    if (detail?.id === id && detail.by !== 'agent' && detail.doc) touched = true
   }
   window.addEventListener('verticals:doc-edited', own)
   const done = (): void => {

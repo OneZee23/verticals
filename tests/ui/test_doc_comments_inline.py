@@ -604,6 +604,60 @@ def test_check_again_in_documents_lights_the_rewrite_there_too(ui_agent: UiSessi
     assert page.locator(PANE_BODY).inner_text().count("Wednesday") == 0
 
 
+def test_a_double_press_on_check_again_hands_over_once(ui_agent: UiSession) -> None:
+    """Words typed a moment ago are saved first, and for that moment the pill is still on the page: a second press in it
+    must not send the message twice."""
+    session = ui_agent
+    page = session.page
+    sent: list[str] = []
+    page.on("request", lambda request: sent.append(request.url) if request.url.endswith("/__chat/send") and request.method == "POST" else None)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc = _doc(conn, "syn-inline/twice.md", "SYN Inline Twice", "The plan is short.\n\nWe will ship on Wednesday, and then we rest.")
+    page.reload()
+    page.wait_for_selector(".goal-card__row")
+    _open(page, doc)
+    _comment_on(page, "ship on Wednesday", "Can this move to Thursday?")
+    again = page.locator(f"{PILLS} {AGAIN}")
+    expect(again).to_have_text("Check again", timeout=10000)
+    page.locator(f"{BODY} p").first.click(position={"x": 4, "y": 4})
+    expect(page.locator(BODY)).to_have_attribute("contenteditable", "true")
+    page.keyboard.type(" More words, not saved yet.")
+    again.dblclick()
+    expect(page.locator(".circle-field")).to_have_attribute("data-state", "working", timeout=10000)
+    page.wait_for_timeout(500)
+    assert len(sent) == 1, sent
+    saved = _until(page, lambda: (lambda got: got.json() if got.status_code == 200 and "More words" in got.json()["body"] else None)(_api(session, f"/api/docs/{doc}")))
+    assert "More words, not saved yet." in saved["body"], "the words typed just before the press were not handed over saved"
+
+
+def test_a_comment_made_while_the_agent_works_does_not_hide_its_rewrite(ui_agent: UiSession) -> None:
+    """A comment is not a hand in the text: written during the agent's turn, it leaves the rewrite lit, and it is a new thing
+    to hand over (Check again is back once the turn is over)."""
+    session = ui_agent
+    page = session.page
+    old, new = "ship on Wednesday", "ship on Thursday"
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc = _doc(conn, "syn-inline/during.md", "SYN Inline During", "The plan is short.\n\nWe will ship on Wednesday, and then we rest.")
+        _thread(conn, doc, old, "Can this move to Thursday?")
+    page.reload()
+    page.wait_for_selector(".goal-card__row")
+    _open(page, doc)
+    _comment_on(page, "The plan is short", "Say how short.")
+    again = page.locator(f"{PILLS} {AGAIN}")
+    expect(again).to_have_text("Check again", timeout=10000)
+    again.click()
+    expect(page.locator(".circle-field")).to_have_attribute("data-state", "working", timeout=10000)
+    _comment_on(page, "and then we rest", "Rest is not a plan.")
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        current = core_docs.get(conn, owner=OWNER, id=doc)
+        core_docs.save(conn, owner=OWNER, id=doc, expected_revision=current.revision, body=current.body.replace(old, new))
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Changed the words you commented on.", timeout=15000)
+    lit = page.locator(f"{BODY} mark.doc-rewritten")
+    expect(lit).to_have_count(1, timeout=10000)
+    expect(lit).to_have_text("Thursday")
+    expect(page.locator(f"{PILLS} {AGAIN}")).to_have_text("Check again", timeout=10000)
+
+
 def test_an_edit_in_the_text_asks_for_a_check_too(ui_agent: UiSession) -> None:
     """Words written in the document, with no comment, are an edit to hand over: Check again shows without a count."""
     session = ui_agent
