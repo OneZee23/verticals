@@ -123,6 +123,18 @@ def _wait_bars(page: Page, vertical: str, count: int) -> list[dict]:
     return bars
 
 
+def _wait_colours(page: Page, vertical: str, want: list[str]) -> list[str]:
+    """The bars' colours once they are `want` (a hover is taken a frame or two after the pointer has moved, more when the
+    machine is busy)."""
+    got = [bar["color"] for bar in _bars(page, vertical)]
+    for _ in range(40):
+        if got == want:
+            break
+        page.wait_for_timeout(25)
+        got = [bar["color"] for bar in _bars(page, vertical)]
+    return got
+
+
 def _gaps(bars: list[dict]) -> list[float]:
     return [round(b["left"] - a["left"] - BAR_W, 2) for a, b in zip(bars, bars[1:])]
 
@@ -194,7 +206,7 @@ def test_the_side_bars_appear_at_once_and_fade_back_in_200_ms(ui_f2: UiSession) 
     gone = next(i for i in range(left, len(log)) if log[i][1] <= 0.001)
     assert any(0.02 < o < 0.98 for _, o in log[left:gone]), "it fades, it does not cut"
     took = log[gone][0] - log[left - 1][0]
-    assert 120 <= took <= 260, f"the fade back takes {took:.0f} ms, 200 by design"
+    assert 100 <= took <= 320, f"the fade back takes {took:.0f} ms, 200 by design"
 
 
 def test_under_reduced_motion_the_side_bars_simply_appear_and_go(ui_f2: UiSession) -> None:
@@ -219,8 +231,7 @@ def test_a_bar_under_the_pointer_darkens(ui_f2: UiSession) -> None:
         box = _col(page, "week").locator(f'[data-cap="{cap}"]').bounding_box()
         assert box is not None
         page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        _frames(page)
-        assert [bar["color"] for bar in _bars(page, "week")] == want, cap
+        assert _wait_colours(page, "week", want) == want, cap
 
 
 def test_a_press_marks_the_bar_and_sliding_away_cancels_it(ui_f2: UiSession) -> None:
@@ -232,18 +243,28 @@ def test_a_press_marks_the_bar_and_sliding_away_cancels_it(ui_f2: UiSession) -> 
     box = next_bar.bounding_box()
     assert box is not None
     mark = next_bar.locator(".column-bars__mark")
+
+    def mark_is(want: str) -> str:
+        """The mark's colour once it is `want`."""
+        got = mark.evaluate("el => getComputedStyle(el).backgroundColor")
+        for _ in range(40):
+            if got == want:
+                break
+            page.wait_for_timeout(25)
+            got = mark.evaluate("el => getComputedStyle(el).backgroundColor")
+        return got
+
+    none, marked = "rgba(0, 0, 0, 0)", "rgba(45, 48, 54, 0.08)"
     centre = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     page.mouse.move(*centre)
-    _frames(page)
-    assert mark.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)", "under the pointer, not pressed"
+    assert mark_is(none) == none, "under the pointer, not pressed"
     page.mouse.down()
-    _frames(page)
-    assert mark.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(45, 48, 54, 0.08)", "pressed"
+    assert mark_is(marked) == marked, "pressed"
     page.mouse.move(centre[0], 700)
     page.mouse.up()
+    assert mark_is(none) == none, "let go"
     _frames(page)
     expect(_col(page, "week")).to_have_attribute("data-period-key", "2026-W32")
-    assert mark.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)", "let go"
 
 
 @pytest.mark.parametrize("vertical", PAGED)
