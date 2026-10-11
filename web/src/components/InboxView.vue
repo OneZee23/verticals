@@ -6,7 +6,9 @@
    as Finder's Recents; "Show all" opens a row in place onto shelves in the board's own order. A task and a document are
    one size, a quarter of the desk, and stay ghosts until the pointer brings one to life. The title and × stay at the top
    while the desk scrolls. You write in the field, which rests open here saying "Write to inbox" (`lib/circle.ts`); ↵ puts
-   your words first in Today (`lib/inbox.ts`). While you write, the desk goes quiet behind the field, as the board does. */
+   your words first in Today (`lib/inbox.ts`). While you write, the desk goes quiet behind the field, as the board does.
+   Under Documents, Sources (docs/design/sources.md): the documents the morning report reads from, as the same chips, each
+   with its state, red ones first; a source is not in Documents twice (`lib/sources.ts`). */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import DeskHead from './DeskHead.vue'
 import DocChip from './DocChip.vue'
@@ -17,6 +19,7 @@ import { commandFilter } from '../lib/commandFilter'
 import { inboxWriting } from '../lib/circle'
 import { docShelves, earlier, inbox, inboxView, loadInbox, recentDocs, shelves, today, TODAY_SHOWN } from '../lib/inbox'
 import { desk, loadDesk } from '../lib/docsDesk'
+import { cardOf, loadSources, noteOf, sources } from '../lib/sources'
 import { carry } from '../lib/inboxCarry'
 import { moving } from '../lib/moving'
 
@@ -26,15 +29,17 @@ const ROW = 24
 const todayShown = computed(() => (inboxView.allToday ? today.value : today.value.slice(0, TODAY_SHOWN)))
 const hiddenToday = computed(() => today.value.length - TODAY_SHOWN)
 
-const onDocEdited = () => void loadDesk()
+const onDocEdited = () => { void loadDesk(); void loadSources() }
 onMounted(() => {
   void loadInbox()
   void loadDesk()
+  void loadSources()
   window.addEventListener('verticals:doc-edited', onDocEdited)
 })
 onBeforeUnmount(() => window.removeEventListener('verticals:doc-edited', onDocEdited))
-// Every board load follows a write somewhere (yours, the agent's, a live event): the Inbox reads again with it.
-watch(() => store.state.board, () => void loadInbox())
+// Every board load follows a write somewhere (yours, the agent's, a live event, an answer to a source's check): the Inbox
+// reads again with it.
+watch(() => store.state.board, () => { void loadInbox(); void loadSources() })
 // The task beside the field goes when the move ends: placed, sent with your words, or taken off (lib/moving.ts).
 watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.beside = null })
 </script>
@@ -84,7 +89,22 @@ watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.b
       <div v-else class="inbox-desk__row"><DocChip v-for="doc in recentDocs.slice(0, ROW)" :id="doc.id" :key="doc.id" :doc="doc" /></div>
     </section>
 
-    <p v-if="inbox.loaded && desk.loaded && !inbox.goals.length && !recentDocs.length" class="inbox-desk__empty">
+    <section v-if="sources.list.length" class="inbox-desk__section" data-role="inbox-sources">
+      <h2 class="inbox-desk__head">
+        Sources<span class="inbox-desk__count">{{ sources.list.length }}</span>
+        <button v-if="sources.list.length > 4" type="button" class="inbox-desk__all" data-role="inbox-sources-all" @click="inboxView.sources = !inboxView.sources">
+          {{ inboxView.sources ? 'Show less' : 'Show all' }}
+        </button>
+      </h2>
+      <div :class="inboxView.sources ? 'inbox-desk__grid' : 'inbox-desk__row'">
+        <DocChip
+          v-for="source in (inboxView.sources ? sources.list : sources.list.slice(0, ROW))" :id="source.id" :key="source.id"
+          :doc="cardOf(source)" :note="noteOf(source).text" :tone="noteOf(source).tone"
+        />
+      </div>
+    </section>
+
+    <p v-if="inbox.loaded && desk.loaded && !inbox.goals.length && !recentDocs.length && !sources.list.length" class="inbox-desk__empty">
       Nothing waits here. What you write in the field lands at the top.
     </p>
 

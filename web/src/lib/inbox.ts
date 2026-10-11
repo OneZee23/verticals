@@ -12,6 +12,7 @@ import { isoDate } from './schedule'
 import { todayIso } from '../store'
 import { moving } from './moving'
 import { desk } from './docsDesk'
+import { isSourcePath } from './sources'
 import type { DeskDoc } from './api'
 
 export const SHELVES: ReadonlyArray<readonly [string, string]> = [
@@ -51,8 +52,8 @@ export const today = computed(() => {
 
 /** Today shows its last three; “N more” unfolds the rest where they are (round 11). */
 export const TODAY_SHOWN = 3
-/** What is open in place: all of today, Earlier's shelves, Documents' shelves. */
-export const inboxView = reactive({ allToday: false, earlier: false, docs: false })
+/** What is open in place: all of today, Earlier's shelves, Documents' shelves, all the sources. */
+export const inboxView = reactive({ allToday: false, earlier: false, docs: false, sources: false })
 
 /** The column a task left (`parked_from_vertical`, which the schema keeps whenever a goal has no date); none, Life. */
 export const columnOf = (g: InboxGoal): string => g.parked_from_vertical ?? 'life'
@@ -69,8 +70,10 @@ export const shelves = computed(() => SHELVES
   .map(([vertical, name]) => ({ vertical, name, goals: earlier.value.filter((g) => columnOf(g) === vertical) }))
   .filter((shelf) => shelf.goals.length))
 
-/** Documents: every document, newest edit first, as Finder's Recents (round 8). Read with the Documents desk. */
+/** Documents: every document, newest edit first, as Finder's Recents (round 8). Read with the Documents desk. The sources
+ *  are documents too, and have a row of their own under this one (lib/sources.ts), so they are not in this row twice. */
 export const recentDocs = computed<DeskDoc[]>(() => Object.values(desk.data?.docs ?? {})
+  .filter((doc) => !isSourcePath(doc.path))
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at)))
 
 /** A document has no column, so “Show all” puts it on the shelf of its age, by its last edit: today on Day, up to a week

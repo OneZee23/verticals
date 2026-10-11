@@ -65,6 +65,9 @@ EXPECTED_OPERATIONS = {
     ("GET", "/api/docs/desk"),
     # The agent's fixes (docs/design/agent-fixes.md, fixes 2 and 3): the morning's one ask a day.
     ("POST", "/api/morning"),
+    # Sources (docs/design/sources.md): the list the Inbox draws and the owner's Approve of a check.
+    ("GET", "/api/sources"),
+    ("POST", "/api/sources/{id}/approve"),
 }
 
 # J7's negative space: none of these ever appear in a path string, in either direction of the

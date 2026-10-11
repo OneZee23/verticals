@@ -31,6 +31,7 @@ _DEFAULT_MCP_BIND = "127.0.0.1:8081"
 _DEFAULT_POOL_MIN = 2
 _DEFAULT_POOL_MAX = 10
 _DEFAULT_LOG_LEVEL = "info"
+_DEFAULT_SOURCES_TICK = 60.0
 
 
 class ConfigError(RuntimeError):
@@ -49,6 +50,10 @@ class Config:
     pool_min: int
     pool_max: int
     log_level: str
+    # Sources (docs/design/sources.md): seconds between the timer's looks at what is due (0 turns it off), and the agent
+    # CLIs whose MCP servers it asks which answer (today only "claude"; none by default, so a test never reaches one).
+    sources_tick: float = _DEFAULT_SOURCES_TICK
+    connections: tuple[str, ...] = ()
 
 
 def _require(name: str) -> str:
@@ -71,6 +76,16 @@ def _optional_int(name: str, default: int) -> int:
         return int(value)
     except ValueError:
         raise ConfigError(f"{name} must be an integer, got {value!r}") from None
+
+
+def _optional_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        raise ConfigError(f"{name} must be a number, got {value!r}") from None
 
 
 def load() -> Config:
@@ -102,6 +117,13 @@ def load() -> Config:
             f"VERTICALS_POOL_MAX ({pool_max}) must be >= VERTICALS_POOL_MIN ({pool_min})"
         )
 
+    sources_tick = _optional_float("VERTICALS_SOURCES_TICK", _DEFAULT_SOURCES_TICK)
+    if sources_tick < 0:
+        raise ConfigError(f"VERTICALS_SOURCES_TICK must be 0 (off) or a number of seconds, got {sources_tick}")
+    connections = tuple(
+        name.strip().lower() for name in _optional("VERTICALS_CONNECTIONS", "").split(",") if name.strip()
+    )
+
     return Config(
         database_url=database_url,
         token=token,
@@ -111,4 +133,6 @@ def load() -> Config:
         pool_min=pool_min,
         pool_max=pool_max,
         log_level=_optional("VERTICALS_LOG_LEVEL", _DEFAULT_LOG_LEVEL),
+        sources_tick=sources_tick,
+        connections=connections,
     )

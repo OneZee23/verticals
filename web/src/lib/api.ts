@@ -682,3 +682,51 @@ export function resolveComment(threadId: string, resolved: boolean): Promise<Com
     body: JSON.stringify({ resolved }),
   })
 }
+
+// --- sources (verticals/api/routes_sources.py, core/sources.py; docs/design/sources.md) ---------
+
+/** A source: a document under `sources/` with the state its check last left. `status` is what the Inbox colours: ok,
+ *  red (two failures at least five minutes apart) or grey, which `why` explains and which is never red. */
+export interface SourceView {
+  id: string
+  path: string
+  title: string | null
+  /** http, mcp, cmd, file, dns, or `connections` (the app's own check of the agent's servers); null with no check. */
+  kind: string | null
+  where: 'here' | 'anywhere' | null
+  status: 'ok' | 'red' | 'grey'
+  why: 'waiting' | 'new' | 'stale' | 'no_check' | 'unreadable' | null
+  /** The check's one line about its last answer ("last exit code 127"); kept for the answer to the check as it is now. */
+  detail: string
+  value: number | null
+  ms: number | null
+  checked_at: string | null
+  /** When a red source's failures began. */
+  since: string | null
+  needs_approval: boolean
+  approved: boolean
+  /** The hash of the check as shown: Approve sends it back, so a check edited meanwhile is refused (409). */
+  check_hash: string | null
+  /** The check in words: what it runs or asks, how often, and what it wants. */
+  summary: string | null
+  /** Why a check nobody can read cannot be read. */
+  error: string | null
+  updated_at: string
+  failures: number
+  next_check_at: string | null
+  /** The top of the document, for its page on the desk. */
+  excerpt?: string
+}
+
+export function fetchSources(): Promise<{ sources: SourceView[] }> {
+  return request('/api/sources')
+}
+
+/** `POST /api/sources/{id}/approve`: the owner approves the exact check they were shown (an address, a tool, a command, a file
+ *  or a name lookup: every check the agent writes asks once). */
+export function approveSource(id: string, checkHash: string): Promise<SourceView> {
+  return request<SourceView>(`/api/sources/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ check_hash: checkHash }),
+  })
+}
