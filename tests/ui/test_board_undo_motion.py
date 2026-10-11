@@ -59,6 +59,36 @@ PILL = r"""() => {
 }"""
 
 
+# Which of the two, the copy that flies and the card it becomes, is drawn in each frame; read after the frame is painted.
+SHOWN = r"""(id) => {
+  const s = window.__shown = { frames: [], on: false, t0: 0 };
+  const drawn = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && parseFloat(getComputedStyle(el).opacity) > 0.01;
+  function sample(now) {
+    const real = document.querySelector(`.goal-card[data-goal-id="${id}"]:not([data-ghost])`);
+    const copy = document.querySelector(`[data-flight-for="${id}"]`);
+    s.frames.push({ t: now - s.t0, copy: drawn(copy), real: drawn(real) });
+  }
+  function frame(now) {
+    if (!s.on) return;
+    requestAnimationFrame(frame);
+    setTimeout(() => { if (s.on) sample(now); }, 0);
+  }
+  s.start = () => { s.frames = []; s.on = true; s.t0 = performance.now(); requestAnimationFrame(frame); };
+  s.stop = () => { s.on = false; return s.frames; };
+}"""
+
+# The flight stopped at a chosen moment: every animation on the page set to that time, then the copy and the card read.
+AT = r"""(t) => {
+  for (const a of document.getAnimations()) a.currentTime = Math.min(t, a.effect.getComputedTiming().endTime);
+  const box = (el, selector) => { const r = (selector ? el.querySelector(selector) : el).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; };
+  const drawn = (el) => getComputedStyle(el).visibility !== 'hidden' && parseFloat(getComputedStyle(el).opacity) > 0.01;
+  const look = (el) => ({ card: box(el), title: box(el, '.goal-card__title-text'), check: box(el, '.checkbox__box'), drawn: drawn(el) });
+  const real = document.querySelector('.goal-card[data-goal-id="SYNORD01"]:not([data-ghost])');
+  const copy = document.querySelector('[data-flight-for="SYNORD01"]');
+  return { t, copy: copy ? look(copy) : null, real: look(real) };
+}"""
+
+
 @pytest.fixture
 def ui_reduced_motion(request: pytest.FixtureRequest) -> str:
     return getattr(request, "param", "no-preference")
@@ -208,3 +238,82 @@ def test_undo_in_the_notice_is_reached_with_the_keyboard_too(ui_f2: UiSession) -
         wait_for(page, lambda: goal(conn, "SYNCOL01")[2], "2026-08-08", "Enter on Undo takes the move back")
         expect_no_notice(page)
         expect(page.locator(CIRCLE_FIELD)).to_be_visible()
+
+
+def start_the_flight(session: UiSession) -> tuple[Page, dict, float]:
+    """SYNORD01 dropped in Month and undone, the flight stopped before its first frame has moved on. Returns the page, the
+    card as it stood in Month, and the flight's length."""
+    page, undo, was, _ = after_the_drop(session)
+    page.keyboard.press(undo)
+    page.wait_for_function("document.querySelector('[data-flight-for]') !== null", timeout=3000)
+    page.evaluate("document.getAnimations().forEach((a) => a.pause())")
+    total = page.evaluate("document.getAnimations().find((a) => a.id === 'undo-glide').effect.getComputedTiming().endTime")
+    return page, was, total
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_no_frame_of_the_flight_draws_the_goal_twice(ui_f2: UiSession) -> None:
+    page, undo, _, _ = after_the_drop(ui_f2)
+    page.evaluate(SHOWN, "SYNORD01")
+    page.evaluate("window.__shown.start()")
+    page.keyboard.press(undo)
+    page.wait_for_timeout(900)
+    frames = page.evaluate("window.__shown.stop()")
+    flight = [i for i, f in enumerate(frames) if f["copy"]]
+    assert flight, "the goal flew as a copy"
+    assert not [f for f in frames if f["copy"] and f["real"]], "the copy and the card are never drawn together"
+    first, last = flight[0], flight[-1]
+    assert all(f["copy"] != f["real"] for f in frames[first:]), "from the first frame of the flight on, the goal is drawn once, never none"
+    assert frames[last + 1]["real"] and not frames[last + 1]["copy"], "the card is drawn in the frame after the copy's last"
+    assert 150 <= frames[last]["t"] - frames[first]["t"] <= 450, "about the board's 300 ms"
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_the_flying_goal_grows_into_the_card_it_becomes_and_sits_exactly_on_it(ui_f2: UiSession) -> None:
+    """Week is the open column here: its cards are bigger than Month's, in their text, their checkbox and their gaps. The
+    copy is stopped at chosen moments of the flight, the last of them 40, 16 and 1 ms from the end."""
+    page, was, total = start_the_flight(ui_f2)
+    assert 250 <= total <= 350
+    seen = [page.evaluate(AT, t) for t in (0, total * 0.33, total * 0.66, total - 40, total - 16, total - 1, total)]
+
+    first = seen[0]
+    for key in ("card", "title", "check"):
+        assert first["real"][key]["w"] > first["copy"][key]["w"] * 1.4, f"the {key} is bigger in Week than in Month, or this proves nothing"
+    assert abs(first["copy"]["card"]["x"] - was["x"]) < 1 and abs(first["copy"]["card"]["w"] - was["w"]) < 1, "it starts as the card it was"
+
+    for look in seen[:-1]:
+        assert look["copy"]["drawn"] and not look["real"]["drawn"], f"at {look['t']:.0f} ms the copy is drawn and the card is not"
+    for left, right in zip(seen, seen[1:-1]):
+        for key in ("title", "check"):
+            assert right["copy"][key]["w"] >= left["copy"][key]["w"] - 0.3, f"the {key} only grows toward the card it becomes"
+
+    # 1 ms before the end the copy is on the card: its box, its checkbox and its words.
+    near, end = seen[-2], seen[-1]
+    for key in ("card", "check"):
+        got, want = near["copy"][key], near["real"][key]
+        assert all(abs(got[axis] - want[axis]) < 1 for axis in "xywh"), f"the {key} sits on the real one: {got} against {want}"
+    got, want = near["copy"]["title"], near["real"]["title"]
+    assert abs(got["x"] - want["x"]) < 1 and abs(got["w"] - want["w"]) < 1, f"the words stand where the real ones do: {got} against {want}"
+    assert abs((got["y"] + got["h"] / 2) - (want["y"] + want["h"] / 2)) < 1.5, "and on the same line"
+
+    # In the instant the flight ends the copy is gone and the card is there: one frame, nothing between.
+    assert not end["copy"]["drawn"] and end["real"]["drawn"]
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_a_card_that_is_not_the_same_card_only_travels(ui_f2: UiSession) -> None:
+    """When the copy's parts are not the card's parts (one of them has been changed under the page's hands), nothing can be
+    matched: the copy keeps its size, still ends where the card is, and still gives way in one frame."""
+    page, undo, was, _ = after_the_drop(ui_f2)
+    page.evaluate("document.querySelector('[data-vertical=\"month\"] [data-goal-id=\"SYNORD01\"] .goal-card__row').append(document.createElement('i'))")
+    page.keyboard.press(undo)
+    page.wait_for_function("document.querySelector('[data-flight-for]') !== null", timeout=3000)
+    page.evaluate("document.getAnimations().forEach((a) => a.pause())")
+    total = page.evaluate("document.getAnimations().find((a) => a.id === 'undo-glide').effect.getComputedTiming().endTime")
+    seen = [page.evaluate(AT, t) for t in (0, total / 2, total - 1, total)]
+    for look in seen[:-1]:
+        assert look["copy"]["drawn"] and not look["real"]["drawn"]
+        assert abs(look["copy"]["card"]["w"] - was["w"]) < 1, "the copy keeps the size it had"
+    near = seen[-2]
+    assert abs(near["copy"]["card"]["x"] - near["real"]["card"]["x"]) < 1 and abs(near["copy"]["card"]["y"] - near["real"]["card"]["y"]) < 1
+    assert not seen[-1]["copy"]["drawn"] and seen[-1]["real"]["drawn"]

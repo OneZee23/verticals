@@ -7,13 +7,15 @@
 // What moves is the card (`.goal-card`), as in `completionMotion.ts`: each carries its own background, which a row moved
 // inside it would slide under. The goal the step is about, when it changes column, flies as a dropped goal does: a column
 // clips what lies outside it, so a card sliding in from another column would come out of the column's edge. A copy of the
-// card as it was stands where it stood and travels over the board, and at the end gives way to the card as it has become
-// (a card in a wide column is bigger than one in a narrow one) in a short crossfade. A goal that leaves fades out where it
-// stood.
+// card as it was stands where it stood and travels over the board, taking the look of the card it becomes as it goes (a card
+// in the open column is bigger than one in a closed column: `lib/flightMorph.ts`), so it sits exactly on the real card, which
+// has been hidden, and gives way to it in the one frame the flight ends: never two cards, never two titles. A goal that
+// leaves fades out where it stood.
 //
 // A move the system starts lands exactly (kk-motion): the pace and the curve are the board's own tokens (`lib/motion.ts`),
 // the ones a card moved by a tick uses.
 import { nextTick } from 'vue'
+import { legsOf } from './flightMorph'
 import { reducedMotion, timing } from './motion'
 
 const CARD = '.goal-card[data-goal-id]:not([data-ghost])'
@@ -81,28 +83,41 @@ function stand(from: Departure, id: string): HTMLElement {
   copy.setAttribute('aria-hidden', 'true')
   Object.assign(copy.style, {
     position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`,
-    margin: '0', boxSizing: 'border-box', zIndex: '2147483647', transform: 'none', translate: 'none',
+    margin: '0', boxSizing: 'border-box', zIndex: '2147483647', transform: 'none', translate: 'none', scale: 'none',
   })
   document.body.appendChild(copy)
   return copy
 }
 
-/** The goal flies to its new column: the copy travels, and over the last of the flight it gives way to the card itself. */
+/** The goal flies to its new column: the copy travels and grows into the card it becomes, and in the frame the flight ends it
+ *  gives way to the card itself. Both are driven by the same clock, so the copy goes and the card comes in the same frame,
+ *  with no help from a script that could be late; the card is out of sight until then. */
 function fly(card: HTMLElement, id: string, from: Departure): void {
   const to = card.getBoundingClientRect()
   const copy = stand(from, id)
   const { duration = 300, easing } = timing('shape', 'play')
   const total = Number(duration)
-  const swap = Math.min(80, total / 4)
-  const flight = copy.animate(
-    [{ translate: '0 0' }, { translate: `${to.left - from.rect.left}px ${to.top - from.rect.top}px` }],
-    { duration: total, easing, id: GLIDE, fill: 'forwards' },
-  )
-  copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: swap, delay: total - swap, easing: 'linear', fill: 'forwards' })
-  card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: swap, delay: total - swap, easing: 'linear', fill: 'backwards' })
+  const legs = legsOf(copy, from.rect, card, to)
+  const flights: Animation[] = []
+  if (legs) {
+    for (const [at, leg] of legs.entries()) {
+      ;(leg.el as HTMLElement).style.transformOrigin = leg.origin
+      const end = leg.radius ? { transform: leg.end, borderRadius: leg.radius } : { transform: leg.end }
+      flights.push(leg.el.animate([{ transform: 'none' }, end], { duration: total, easing, fill: 'forwards', id: at === 0 ? GLIDE : `${GLIDE}-part` }))
+    }
+  } else {
+    // Not the same card (one is being edited): the copy only travels, and the card is as it is when it arrives.
+    flights.push(copy.animate(
+      [{ translate: '0 0' }, { translate: `${to.left - from.rect.left}px ${to.top - from.rect.top}px` }],
+      { duration: total, easing, id: GLIDE, fill: 'forwards' },
+    ))
+  }
+  // Out of sight at the end, and the card in sight: one clock for both. `steps` holds the first value to the last instant.
+  copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: total, easing: 'steps(1, end)', fill: 'forwards' })
+  card.animate([{ visibility: 'hidden' }, { visibility: 'hidden' }], { duration: total })
   const land = (): void => copy.remove()
-  flight.addEventListener('finish', land)
-  flight.addEventListener('cancel', land)
+  flights[0]!.addEventListener('finish', land)
+  flights[0]!.addEventListener('cancel', land)
 }
 
 /** A goal that leaves fades out where it stood while the cards close up. */

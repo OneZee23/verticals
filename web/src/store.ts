@@ -27,6 +27,7 @@ import { createDetailSurface } from './lib/detailSurface'
 import { createFamilyView } from './lib/familyView'
 import { bindBoardHistory, track } from './lib/boardHistory'
 import { createGoalDelete, SAMPLE_TAG } from './lib/goalDelete'
+import { noteOccurrence } from './lib/repeatSteps'
 import { trackedWrites } from './lib/trackedWrites'
 import { createDocsView, createInitialDocsState, type DocsState } from './lib/docsView'
 import { createCommentsPanel, createInitialCommentsState, type CommentsState } from './lib/comments'
@@ -305,6 +306,7 @@ async function completeGoal(id: string, done: boolean): Promise<void> {
   bumpAncestorProgress(id, delta)
   try {
     const updated = await patchGoal(id, { done })
+    noteOccurrence(id, updated.next_occurrence)
     if (completionVersions.get(id) !== version) return
     goal.done_at = updated.done_at
     // Reconcile: if the server landed somewhere other than the optimistic guess, correct the

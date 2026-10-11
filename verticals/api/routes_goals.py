@@ -336,6 +336,9 @@ def patch_goal(request: Request, response: Response, id: str, patch: UpdatePatch
         response.headers["X-Query-Count"] = str(conn.query_count)
     body = goal_to_card(updated.goal)
     body["open_descendants"] = updated.open_descendants
+    if updated.spawned is not None:
+        # The occurrence this tick made, so the page can take it back with the tick (docs/design/board-undo.md).
+        body["next_occurrence"] = goal_to_card(updated.spawned)
     return body
 
 

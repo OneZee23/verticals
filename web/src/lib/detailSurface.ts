@@ -12,6 +12,7 @@
 
 import { createGoal, getGoal, patchGoal, type BoardResponse, type GoalDetail } from './api'
 import { ancestorIds, boardGoalHost, findGoal } from './boardIndex'
+import { noteOccurrence } from './repeatSteps'
 import { asOneHistoryStep } from './urlState'
 import type { DragState } from './drag'
 
@@ -167,7 +168,7 @@ export function createDetailSurface(
     const openId = state.openGoalId
     if (!openId) return
     try {
-      await patchGoal(childId, { done })
+      noteOccurrence(childId, (await patchGoal(childId, { done })).next_occurrence)
       state.goalDetail = await fetchGoalDetail(openId)
       await deps.reloadBoard()
     } catch (err) {

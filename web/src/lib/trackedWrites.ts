@@ -2,11 +2,12 @@
 // over its own verbs; what comes back does the same and records what it changed (`track` in `lib/boardHistory.ts`). The
 // components call these through `store`, so every tick, rename, move and reparent counts without a line in any component.
 // Lifted out of `store.ts`, which has no lines to spare (S-90a's 750).
-import type { UpdatePatch } from './api'
+import type { GoalCard, UpdatePatch } from './api'
 import { PATCH_FIELDS } from './boardShots'
 import { makeStep, track } from './boardHistory'
 import { createdStep } from './goalSteps'
 import type { VerticalScale } from './periods'
+import { takeOccurrence, withOccurrence } from './repeatSteps'
 
 export interface Writes {
   completeGoal(id: string, done: boolean): Promise<void>
@@ -43,12 +44,21 @@ function made(title: string, make: () => Promise<string | null>): Promise<void> 
   })
 }
 
+/** A tick, which makes the next occurrence of a goal that repeats: the step takes it back with the tick. */
+function ticked(id: string, tick: () => Promise<void>): Promise<void> {
+  let occurrence: GoalCard | null = null
+  return track(id, async () => {
+    await tick()
+    occurrence = takeOccurrence(id)
+  }, false, (step) => withOccurrence(step, occurrence))
+}
+
 export function trackedWrites(raw: Writes & Makes): TrackedWrites {
   return {
     createGoalOn: (verticalBucket, title) => made(title, () => raw.createGoalOn(verticalBucket, title)),
     addDetailChild: (title) => made(title, () => raw.addDetailChild(title)),
     /** `record: false` for a tick the app makes on its own account (the morning task, once its report is read). */
-    completeGoal: (id, done, record = true) => (record ? track(id, () => raw.completeGoal(id, done)) : raw.completeGoal(id, done)),
+    completeGoal: (id, done, record = true) => (record ? ticked(id, () => raw.completeGoal(id, done)) : raw.completeGoal(id, done)),
     updateGoal: (id, patch, keepalive) => (undoable(patch) ? track(id, () => raw.updateGoal(id, patch, keepalive)) : raw.updateGoal(id, patch, keepalive)),
     // A move takes the goal's steps with it, so the family is read as well.
     scheduleGoalTo: (id, scale, periodKey, optimisticDrag, insertBeforeId) =>
@@ -58,6 +68,6 @@ export function trackedWrites(raw: Writes & Makes): TrackedWrites {
     reparent: (id, parentId, optimisticDrag) => track(id, () => raw.reparent(id, parentId, optimisticDrag), true),
     reparentQuick: (id, parentId) => track(id, () => raw.reparentQuick(id, parentId), true),
     combineInto: (id, targetId) => track(id, () => raw.combineInto(id, targetId), true),
-    toggleDetailChild: (childId, done) => track(childId, () => raw.toggleDetailChild(childId, done)),
+    toggleDetailChild: (childId, done) => ticked(childId, () => raw.toggleDetailChild(childId, done)),
   }
 }

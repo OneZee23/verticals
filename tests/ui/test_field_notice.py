@@ -169,39 +169,78 @@ def test_the_notice_is_a_black_pill_where_the_field_stands(ui_f2: UiSession) -> 
     assert look["attribute"] and look["field"]["visibility"] == "hidden", "the field is out of the way while the notice stands"
 
 
-def test_a_long_title_is_cut_with_an_ellipsis_and_the_words_around_it_are_not(ui_f2: UiSession) -> None:
-    session = ui_f2
+LOOK = """() => {
+  const pill = document.querySelector('[data-role="field-notice"]');
+  const line = pill.querySelector('[data-role="field-notice-line"]');
+  const title = pill.querySelector('.field-notice__title');
+  const marks = [...pill.querySelectorAll('.field-notice__quote > i')].map((el) => el.getBoundingClientRect());
+  const parts = [...line.children].map((el) => el.getBoundingClientRect());
+  const action = pill.querySelector('[data-role="field-notice-action"]').getBoundingClientRect();
+  const box = pill.getBoundingClientRect();
+  const t = title.getBoundingClientRect();
+  return {
+    title: title.textContent, text: line.textContent, width: box.width, viewport: innerWidth,
+    lineEnd: Math.max(...parts.map((r) => r.right)), actionLeft: action.left, high: line.getBoundingClientRect().height,
+    gapBefore: t.left - marks[0].right, gapAfter: marks[1].left - t.right, overflow: line.scrollWidth - line.clientWidth,
+  };
+}"""
+
+
+def long_title_notice(session: UiSession) -> tuple[Page, str]:
+    """SYNCOL01 with a title far too long for the field, moved to Tomorrow, and the notice that says so."""
     page = board(session)
-    long = "A goal with a title long enough to fill the whole field and then some more of the same kind of words " * 2
+    long = ("A goal with a title long enough to fill the whole field and then some more of the same kind of words " * 2).strip()
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        conn.execute("UPDATE goals SET title = %s WHERE id = 'SYNCOL01'", (long.strip(),))
+        conn.execute("UPDATE goals SET title = %s WHERE id = 'SYNCOL01'", (long,))
     page.reload()
     page.wait_for_selector('[data-goal-id="SYNCOL01"]', timeout=10000)
     move(page, "SYNCOL01", "tomorrow")
     expect(page.locator(NOTICE)).to_be_visible(timeout=5000)
     page.wait_for_timeout(300)
-    look = page.evaluate(
-        """() => {
-          const pill = document.querySelector('[data-role="field-notice"]');
-          const title = pill.querySelector('.field-notice__title');
-          const parts = [...pill.querySelectorAll('.field-notice__line > *')].map((el) => el.getBoundingClientRect());
-          const action = pill.querySelector('[data-role="field-notice-action"]').getBoundingClientRect();
-          const box = pill.getBoundingClientRect();
-          return {
-            cut: title.scrollWidth > title.clientWidth, overflow: getComputedStyle(title).textOverflow,
-            width: box.width, viewport: innerWidth, lineEnd: Math.max(...parts.map((r) => r.right)), actionLeft: action.left,
-            high: pill.querySelector('[data-role="field-notice-line"]').getBoundingClientRect().height,
-            text: pill.querySelector('[data-role="field-notice-line"]').textContent,
-          };
-        }"""
+    return page, long
+
+
+def assert_cut_cleanly(look: dict, long: str, width_limit: float) -> None:
+    title = look["title"]
+    assert title.endswith("…") and not title[:-1][-1:].isspace(), f"the dots stand right after the last letter, got {title!r}"
+    assert long.startswith(title[:-1]) and len(title) < len(long), "the title is cut from its end, and only cut"
+    assert look["gapBefore"] == 0 and look["gapAfter"] == 0, (
+        f"the quotes touch the title: {look['gapBefore']} px before it, {look['gapAfter']} px after"
     )
-    assert look["cut"] and look["overflow"] == "ellipsis", "the title is cut with an ellipsis"
-    assert look["width"] <= 560 and look["width"] <= look["viewport"] - 32, f"the pill stays within its width, got {look['width']}"
-    assert look["lineEnd"] <= look["actionLeft"], "the line ends before Undo begins"
+    assert look["width"] <= width_limit and look["width"] <= look["viewport"] - 32, f"the pill stays within its width, got {look['width']}"
+    assert look["lineEnd"] <= look["actionLeft"] and look["overflow"] <= 0, "the line ends before Undo begins and nothing is clipped"
     assert look["high"] == 22, "still one line"
-    assert look["text"].startswith("Moved “A goal with a title") and look["text"].endswith("” to tomorrow"), (
-        "the words around the title are whole"
+    assert look["text"].startswith("Moved “A goal with a title") and look["text"].endswith("…” to tomorrow"), (
+        f"the words around the title are whole, got {look['text']!r}"
     )
+    assert look["width"] >= width_limit - 20, f"the pill is full, so no more of the title would fit than is shown, got {look['width']}"
+
+
+def test_a_long_title_is_cut_in_its_text_with_the_dots_right_after_the_last_letter(ui_f2: UiSession) -> None:
+    page, long = long_title_notice(ui_f2)
+    assert_cut_cleanly(page.evaluate(LOOK), long, 560)
+
+
+def test_a_narrower_window_cuts_the_title_shorter_and_a_wider_one_gives_it_back(ui_f2: UiSession) -> None:
+    page, long = long_title_notice(ui_f2)
+    wide = page.evaluate(LOOK)
+    page.set_viewport_size({"width": 560, "height": page.viewport_size["height"]})
+    page.wait_for_timeout(300)
+    narrow = page.evaluate(LOOK)
+    assert_cut_cleanly(narrow, long, 560 - 32)
+    assert len(narrow["title"]) < len(wide["title"]), "less room, less of the title"
+    page.set_viewport_size({"width": 1280, "height": page.viewport_size["height"]})
+    page.wait_for_timeout(300)
+    assert page.evaluate(LOOK)["title"] == wide["title"], "the room comes back with the window"
+
+
+def test_a_short_title_is_not_cut(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    move(page, "SYNCOL01", "tomorrow")
+    expect_notice(page, "Moved “Color check yellow” to tomorrow")
+    look = page.evaluate(LOOK)
+    assert look["title"] == "Color check yellow" and look["gapBefore"] == 0 and look["gapAfter"] == 0
 
 
 def test_the_notice_stays_six_seconds_and_the_field_comes_back(ui_f2: UiSession) -> None:

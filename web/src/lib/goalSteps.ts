@@ -21,7 +21,7 @@ function failed(err: unknown, gone: string): Outcome {
 }
 
 /** Sends the goal and what is under it to the trash: the rows close up at once, and come back if the server refuses. */
-async function sendAway(id: string, title: string): Promise<Outcome> {
+export async function sendAway(id: string, title: string): Promise<Outcome> {
   const placement = removePlacement(historyPorts().board(), id, true)
   try {
     await deleteGoal(id, true)
