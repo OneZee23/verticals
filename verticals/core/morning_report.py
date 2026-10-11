@@ -341,7 +341,8 @@ _CHECK_HEAD = ("Check", "Result", "What it found")
 
 
 def render_unchecked(reason: str = "") -> str:
-    return "Not checked: the second agent did not finish." + (f" {one_line(reason)}" if reason else "")
+    """The report without a verdict because the check did not happen: it says why, in the place the verdict would be."""
+    return "Not checked: " + (one_line(reason) if reason else "the second agent did not finish.")
 
 
 def render_verdict(outcomes: Mapping[str, Outcome], fixed: Mapping[str, str] | Collection[str] = ()) -> str:

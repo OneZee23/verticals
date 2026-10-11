@@ -135,7 +135,8 @@ def test_a_check_that_failed_first_and_passes_now_is_shown_as_fixed_with_what_it
 
 def test_a_report_without_a_verdict_says_why_in_the_same_place() -> None:
     assert report.PENDING.startswith("Not checked yet")
-    assert report.render_unchecked("The second agent stopped.") == "Not checked: the second agent did not finish. The second agent stopped."
+    assert report.render_unchecked("The second agent gave no verdict.") == "Not checked: The second agent gave no verdict."
+    assert report.render_unchecked() == "Not checked: the second agent did not finish."
     assert report.check_state(report.PENDING) == "pending"
     assert report.check_state(report.render_unchecked()) == "unchecked"
     assert report.check_state(report.render_verdict(_all())) == "checked"

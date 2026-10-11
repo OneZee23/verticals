@@ -117,7 +117,7 @@ def test_the_check_route_writes_the_verdict_into_the_report_and_names_what_faile
     answered = client.post("/api/morning/check", json={"path": PATH, "checks": PASSES})
     assert answered.status_code == 200, answered.text
     assert answered.json()["failed"] == ["inputs"] and answered.json()["state"] == "checked"
-    assert answered.json()["checks"]["inputs"] == {"result": "fail", "note": "Team chat: 44 read, 42 placed."}
+    assert answered.json()["checks"]["inputs"] == {"result": "fail", "note": "Team chat: 44 read, 42 placed.", "label": "Every message placed"}
     body = client.get(f"/api/docs/{answered.json()['doc_id']}").json()["body"]
     assert body.startswith("Checked against the sources by a second agent: 9 of 10 passed, 1 failed.")
     assert "| Every message placed | Failed | Team chat: 44 read, 42 placed. |" in body
@@ -139,7 +139,7 @@ def test_a_report_the_second_agent_did_not_finish_says_so(client: httpx.Client, 
     unchecked = client.post("/api/morning/check", json={"path": PATH, "state": "unchecked", "reason": "It stopped."})
     assert unchecked.json()["state"] == "unchecked"
     body = client.get(f"/api/docs/{unchecked.json()['doc_id']}").json()["body"]
-    assert body.startswith("Not checked: the second agent did not finish. It stopped.")
+    assert body.startswith("Not checked: It stopped.")
 
 
 def test_the_check_route_refuses_what_it_cannot_write_and_asks_for_the_token(client: httpx.Client, server: Server) -> None:

@@ -61,7 +61,7 @@ class Applied:
         return {
             "doc_id": self.doc_id, "revision": self.revision, "state": self.state, "failed": list(self.failed),
             "gaps": list(self.gaps),
-            "checks": {key: {"result": o.result, "note": o.note} for key, o in self.outcomes.items()},
+            "checks": {key: {"result": o.result, "note": o.note, "label": report.LABEL[key]} for key, o in self.outcomes.items()},
         }
 
 

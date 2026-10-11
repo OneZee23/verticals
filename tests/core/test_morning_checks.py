@@ -251,7 +251,7 @@ def test_a_report_is_pending_or_unchecked_until_a_verdict_and_is_never_left_sayi
     day.apply()
     marked = morning_checks.mark(db, owner=OWNER, path=PATH, state="unchecked", reason="The second agent stopped.")
     assert marked.state == "unchecked"
-    assert day.body().splitlines()[0] == "Not checked: the second agent did not finish. The second agent stopped."
+    assert day.body().splitlines()[0] == "Not checked: The second agent stopped."
     assert morning_checks.mark(db, owner=OWNER, path=PATH, state="pending").state == "pending"
     assert day.body().splitlines()[0] == report.PENDING
     day.apply()  # and a verdict after that replaces it
