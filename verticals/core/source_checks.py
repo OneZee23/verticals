@@ -9,10 +9,9 @@ a fenced block marked `check` written as JSON:
     {"kind": "cmd", "where": "here", "argv": ["df", "-k", "/"], "parse": "(\\d+)%", "max": 90}
     ```
 
-JSON because the app's editor has no code blocks: it reads a line that starts with `#`, `-` or `|` as a heading, a list
-or a table and writes it back in its own form, which would bend a TOML or YAML block. A JSON line starts with a brace or
-a quote and comes back as typed. The block is the only copy of the check; the table beside it keeps answers, never a
-second check.
+JSON because it is the plainest block to read, write and check. The app's editor sets a fenced block quietly, never edits
+it and writes it back exactly as it was (`web/src/lib/bodyMarkdown.ts`), so a save of the words around it never changes
+the check or its hash. The block is the only copy of the check; the table beside it keeps answers, never a second check.
 
 Five kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns`. A sixth, `connections`, is written only by the app.
 Unknown fields are refused, so a typo cannot quietly drop a limit. `http`, `mcp`, `cmd` and `file` are gated: each reaches

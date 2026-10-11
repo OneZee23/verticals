@@ -283,17 +283,18 @@ def test_a_pass_that_read_a_number_shows_it_and_a_plain_pass_says_nothing_more(u
 
 
 def test_editing_a_sources_text_in_its_window_leaves_its_check_and_its_approval_as_they_were(ui_f2: UiSession) -> None:
-    """The editor writes the whole document back when you change a word of it, and it has no code blocks: the check's block
-    goes through it as plain lines. What the check says must come back the same, or the source would ask for approval again
-    (and an agent's careful check would be silently different)."""
+    """The editor writes the whole document back when you change a word of it. The check's block is a fenced block there: set
+    quietly, never edited, written back exactly as it was. So the check comes back the same, with the lines the editor used
+    to bend (`_word_` became `*word*`), and an approval of it still holds."""
     session = ui_f2
     page = session.page
-    check = {"kind": "cmd", "argv": ["/bin/df", "-k", "/"], "parse": r"\s(\d+)%\s", "max": 90, "say": "{v}% of the disk is used"}
+    check = {"kind": "cmd", "argv": ["/bin/df", "-k", "/"], "parse": r"\s(\d+)%\s", "max": 90, "say": "_{v}_% of the *disk* is `used`"}
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         disk = _source(conn, "disk", check)
 
     _open_inbox(session)
     _open_window(page, disk.id)
+    expect(page.locator('[data-role="doc-window"] [data-role="doc-body"] pre[data-md-fence="check"]')).to_have_count(1)
     text = page.locator('[data-role="doc-window"] [data-role="doc-body"] p').first
     tick(page)
     text.click()
