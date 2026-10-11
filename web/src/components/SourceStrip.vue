@@ -4,6 +4,7 @@
 // file that waits for you, Fix a source that stopped answering. Nothing else here; the document under it is the
 // source's own page.
 import { computed, onMounted, ref, watch } from 'vue'
+import { KButton } from '@konstantinopolskii/vue'
 import { agentChat } from '../lib/agentChat'
 import { approve, detailOf, fixSource, loadSources, noteOf, sourceOf } from '../lib/sources'
 import { store } from '../store'
@@ -40,8 +41,8 @@ watch(() => store.state.board, () => void loadSources())
       <p v-if="source.summary" class="source-strip__check" data-role="source-strip-check">{{ source.summary }}</p>
       <p v-if="problem" class="source-strip__problem" data-role="source-strip-problem" role="status">{{ problem }}</p>
     </div>
-    <button v-if="source.needs_approval" type="button" class="source-strip__action" data-role="source-approve" :disabled="busy" @click="onApprove">Approve</button>
-    <button v-else-if="canFix" type="button" class="source-strip__action" data-role="source-fix" @click="fixSource(source)">Fix</button>
+    <KButton v-if="source.needs_approval" primary data-role="source-approve" :disabled="busy" @click="onApprove">Approve</KButton>
+    <KButton v-else-if="canFix" primary data-role="source-fix" @click="fixSource(source)">Fix</KButton>
   </div>
 </template>
 
@@ -55,12 +56,6 @@ watch(() => store.state.board, () => void loadSources())
 .source-strip__detail { font: 400 15px/22px var(--font-body, Commissioner, system-ui, sans-serif); color: #000; }
 .source-strip__check, .source-strip__problem { margin-top: 2px; font: 400 13px/20px var(--font-body, Commissioner, system-ui, sans-serif); color: rgb(45 48 54 / 60%); }
 .source-strip__problem.source-strip__problem { color: #c93a5b; }
-/* The one thing to do: black, as the Inbox's own actions are; pressed it settles, disabled while the answer is awaited. */
-.source-strip__action { flex: none; height: 32px; padding: 0 16px; border: 0; border-radius: 16px; background: #000; color: #fff; cursor: pointer;
-  font: 500 14px/20px var(--font-body, Commissioner, system-ui, sans-serif); transition: opacity 120ms ease, transform 120ms ease; }
-.source-strip__action:hover { opacity: .82; }
-.source-strip__action:active { transform: scale(.97); }
-.source-strip__action:disabled { opacity: .4; cursor: default; }
-.source-strip__action:focus-visible { outline: 2px solid #007aff; outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .source-strip__action { transition: none; } .source-strip__action:active { transform: none; } }
+/* The one thing to do is the kit's primary button (black, white label), by its text's width: the kit's is full width. */
+.source-strip .button.button { flex: none; width: auto; padding: var(--space-2) var(--space-4); }
 </style>
