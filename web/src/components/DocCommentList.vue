@@ -99,6 +99,6 @@ const rows = computed<Row[]>(() => {
 .doc-list__words { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .doc-list__said { overflow: hidden; color: rgb(0 0 0 / 55%); font: 400 13px/18px var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
 .doc-list__said b { color: rgb(0 0 0 / 80%); font-weight: 500; }
-.doc-list__head { margin: 8px 10px 2px; color: rgb(0 0 0 / 45%); font: 500 11px/16px var(--font-body); }
+.doc-list__head { margin: 8px 10px 2px; color: rgb(0 0 0 / 60%); font: 500 11px/16px var(--font-body); }
 .doc-list__row--resolved .doc-list__words { color: rgb(0 0 0 / 55%); font-weight: 400; }
 </style>

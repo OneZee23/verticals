@@ -278,10 +278,10 @@ watch(thread, (now, was) => { if (was && !now && !composing.value) store.closeCa
 @keyframes doc-card-fade { from { opacity: 0; } }
 .doc-card__thread { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .doc-card__quote { margin: 0; padding-right: 76px; font-weight: 500; overflow-wrap: anywhere; }
-.doc-card__note { display: block; color: rgb(0 0 0 / 50%); font: 400 12px/16px var(--font-body); }
+.doc-card__note { display: block; color: rgb(0 0 0 / 60%); font: 400 12px/16px var(--font-body); }
 /* The first thing said leaves room at the top right for Resolve. */
 .doc-card__msg--first { padding-right: 76px; }
-.doc-card__who { display: block; color: rgb(0 0 0 / 45%); font: 500 11px/16px var(--font-body); }
+.doc-card__who { display: block; color: rgb(0 0 0 / 60%); font: 500 11px/16px var(--font-body); }
 .doc-card__said { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .doc-card__resolve {
   position: absolute;
@@ -292,7 +292,7 @@ watch(thread, (now, was) => { if (was && !now && !composing.value) store.closeCa
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: rgb(0 0 0 / 50%);
+  color: rgb(0 0 0 / 60%);
   font: 500 12px/16px var(--font-body);
   cursor: pointer;
 }
@@ -317,7 +317,7 @@ watch(thread, (now, was) => { if (was && !now && !composing.value) store.closeCa
   transition: background var(--vt-dur-fade) ease-out;
 }
 .doc-card__input::placeholder { color: rgb(0 0 0 / 40%); }
-.doc-card__input:focus { background: rgb(0 0 0 / 6%); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 30%); }
+.doc-card__input:focus { background: rgb(0 0 0 / 6%); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 55%); }
 /* The field's own send arrow, small: it comes in once there are words to send. */
 .doc-card__send {
   position: absolute;
