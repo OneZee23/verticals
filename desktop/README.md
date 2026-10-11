@@ -22,6 +22,18 @@ launcher has its own ports, database, state directory and UI build.
 
 The agent picker follows Enjoy's (strings, model artwork).
 
+## Reduce Motion
+
+View → Reduce Motion is a checkmark between Reload and Enter Full Screen. It starts as macOS's own Reduce motion
+(System Settings → Accessibility → Display); after a click it keeps the person's choice (`ReduceMotion` in the app's
+defaults: `defaults delete app.verticals.desktop ReduceMotion` hands it back to macOS). A web view can't be told to
+change what it reads from macOS, so the app puts its answer on `<html>` as `data-reduce-motion="on"` or `"off"` — a
+user script at document start, like the title bar's height (`syncTitlebar` in `macos/Verticals.swift`) — and puts
+nothing there while no choice is made, so the page asks macOS as a browser does. Everything in the page that obeys
+`prefers-reduced-motion` obeys the answer: styles through `web/vite.config.ts`, which copies every such block under
+the switch, and scripts through `reducedMotion()` in `web/src/lib/motion.ts`. A column bounces at its ends
+(`overscroll-behavior: contain`) unless motion is reduced.
+
 ## Menu bar
 
 Closing the window keeps Verticals running: PostgreSQL, the API and MCP stay up for agents, the Dock
