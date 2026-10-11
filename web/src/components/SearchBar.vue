@@ -27,6 +27,7 @@ import { docCard } from '../lib/docCard'
 import MovingStack from './MovingStack.vue'
 import { backspace as pickBackspace, escape as movingEscape, tab as pickTab } from '../lib/moving'
 import { dots } from '../lib/spansDrag'
+import { brush, type Brush } from '../lib/brush'
 import './circleField.css'
 
 defineKnobs('The field', [
@@ -254,6 +255,11 @@ watch(() => state.value === 'working', (working, was) => {
   if (from && from !== 'none') el.animate([{ transform: from }, { transform: 'none' }], { duration: 165, easing: curve('large') })
 })
 
+/* The answer goes back into the circle and the conversation keeps it: Esc does it, and so does brushing it away with a
+   sideways swipe or a drag down (lib/brush.ts; docs/design/agent-fixes.md, fix 8). */
+function sendBack(): void {
+  agentChat.answer = null
+}
 /* The answer goes up into the conversation as its last balloon, and the field takes the caret (S2.P4.003). */
 function reply(): void {
   const words = shape.value?.querySelector('.circle-field__answer-words')?.getBoundingClientRect()
@@ -373,7 +379,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
     return
   }
   if (event.key === 'Escape' && circleWords.value?.kind === 'answer') {
-    agentChat.answer = null
+    sendBack()
     return
   }
   if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1 || event.key === ' ') return
@@ -386,6 +392,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   focusField()
 }
 function onShapeClick(): void {
+  if (brushing?.swallowed()) return  // the end of a drag is no click on the answer
   if (state.value === 'go') void sayGo()
   else if (circleWords.value?.kind === 'answer') reply()
   else if (!circleWords.value) focusField()
@@ -396,7 +403,9 @@ defineExpose({ focusField })
 
 let stopNews: (() => void) | null = null
 let stopFinding: (() => void) | null = null
+let brushing: Brush | null = null
 onMounted(() => {
+  if (shape.value) brushing = brush(shape.value, () => state.value === 'answer' && circleWords.value?.kind === 'answer', sendBack)
   const match = /^\/search\/(.*)/.exec(location.pathname)
   if (match?.[1]) { try { commandFilter.text = decodeURIComponent(match[1]) } catch { commandFilter.text = match[1] } }
   window.addEventListener('keydown', onWindowKeyDown, true)
@@ -407,6 +416,7 @@ onMounted(() => {
   void document.fonts?.ready.then(() => void nextTick(measure))
 })
 onBeforeUnmount(() => {
+  brushing?.stop()
   window.removeEventListener('keydown', onWindowKeyDown, true)
   window.removeEventListener('resize', onResize)
   document.fonts?.removeEventListener('loadingdone', onFontsLoaded)
