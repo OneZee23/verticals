@@ -36,9 +36,8 @@ BAD = Result(ok=False, detail="HTTP 503", ms=9)
 
 
 def _source(conn: psycopg.Connection, name: str, raw: dict, *, approved: bool = True) -> core.Source:
-    """A source document. A check that reaches something (an address, a tool, a command, a file) has the owner's approval
-    unless `approved` is False: the scenarios about a state show it as it is once approved, and the ones about waiting show
-    it before."""
+    """A source document. Every check the agent writes has the owner's approval unless `approved` is False: the scenarios
+    about a state show it as it is once approved, and the ones about waiting show it before."""
     body = sc.build_body(gives="What the report reads.", how="Ask it.", since="the last report", check=sc.Check.from_dict(raw),
                          fixes=["Restart the worker."])
     doc = core_docs.create(conn, owner=OWNER, path=f"sources/{name}.md", title=name.title(), body=body).doc

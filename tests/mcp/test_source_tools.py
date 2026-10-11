@@ -2,11 +2,11 @@
 Postgres, no mocks.
 
 What is pinned: a source is a document under sources/ whose plain sections and one check the tool writes; the tool runs
-the check once and returns the answer beside what the check saw; every check that reaches something (an address, a tool,
-a command, a file) waits for the owner, and only a name lookup runs at once (the only approval is the app's, so there is
-no tool that approves, and the test approves the way the Approve button does, through `core`); a changed check waits
-again; one failure is not red; a taken name is refused instead of numbered; a bad check is refused with the field and
-writes nothing. Checks run against a tiny local web server, `/bin/echo` and `localhost`, never a real service.
+the check once and returns the answer beside what the check saw; every check the agent writes (an address, a tool, a
+command, a file, a name lookup) waits for the owner (the only approval is the app's, so there is no tool that approves, and
+the test approves the way the Approve button does, through `core`); a changed check waits again; one failure is not red; a
+taken name is refused instead of numbered; a bad check is refused with the field and writes nothing. Checks run against a
+tiny local web server, `/bin/echo` and `localhost`, never a real service.
 """
 
 from __future__ import annotations
@@ -230,17 +230,26 @@ def test_one_failure_is_shown_beside_what_it_saw_and_is_not_red(f2_dsn: str, tmp
     anyio.run(_one_failure, f2_dsn, tmp_path, web)
 
 
-async def _lookup_runs_at_once(f2_dsn: str, tmp_path: Path) -> None:
+async def _lookup_and_tool_wait(f2_dsn: str, tmp_path: Path) -> None:
     async with open_mcp_stdio(f2_dsn, tmp_path, label="source-dns") as (session, streams):
         made = await session.call_tool("source", {**QUEUE, "title": "Name", "check": {"kind": "dns", "host": "localhost"}})
         assert made.is_error is False, made.content
         out = made.structured_content
-        assert (out["ran"], out["why_not"], out["result"]["ok"]) == (True, None, True), "a name lookup asks nothing first"
-        assert out["result"]["detail"].startswith("resolves to ") and out["result"]["raw"].strip()
-        assert (out["source"]["status"], out["source"]["kind"], out["source"]["where"], out["source"]["needs_approval"]) == (
-            "ok", "dns", "anywhere", False)
+        assert (out["ran"], out["result"]) == (False, None), "a name lookup waits for the owner like every check"
+        assert "waiting for the owner" in out["why_not"] and "Looks up localhost" in out["why_not"]
+        source = out["source"]
+        assert (source["status"], source["why"], source["kind"], source["where"], source["needs_approval"]) == (
+            "grey", "waiting", "dns", "anywhere", True)
 
-        # A tool of an MCP server waits like an address, and the words say what it will be sent.
+        _approve(f2_dsn, source["id"], source["check_hash"])
+        ran = await session.call_tool("source", {"id": source["id"]})
+        assert ran.is_error is False, ran.content
+        out = ran.structured_content
+        assert (out["ran"], out["why_not"], out["result"]["ok"]) == (True, None, True)
+        assert out["result"]["detail"].startswith("resolves to ") and out["result"]["raw"].strip()
+        assert (out["source"]["status"], out["source"]["approved"]) == ("ok", True)
+
+        # A tool of an MCP server waits too, and the words say what it will be sent.
         tool = await session.call_tool("source", {**QUEUE, "title": "Tool", "check": {
             "kind": "mcp", "url": "http://127.0.0.1:9/mcp", "tool": "get_status", "args": {"scope": "all"}}})
         assert tool.is_error is False, tool.content
@@ -250,8 +259,8 @@ async def _lookup_runs_at_once(f2_dsn: str, tmp_path: Path) -> None:
         streams.assert_hygiene(token=TEST_TOKEN)
 
 
-def test_a_name_lookup_runs_at_once_and_a_tool_of_an_mcp_server_waits(f2_dsn: str, tmp_path: Path) -> None:
-    anyio.run(_lookup_runs_at_once, f2_dsn, tmp_path)
+def test_a_name_lookup_and_a_tool_of_an_mcp_server_wait_for_the_owner_like_every_check(f2_dsn: str, tmp_path: Path) -> None:
+    anyio.run(_lookup_and_tool_wait, f2_dsn, tmp_path)
 
 
 async def _refusals(f2_dsn: str, tmp_path: Path) -> None:

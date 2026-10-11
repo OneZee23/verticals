@@ -83,12 +83,17 @@ def test_the_list_is_behind_the_token(api: httpx.Client) -> None:
     assert api.get("/api/sources").json() == {"sources": []}
 
 
-def test_a_source_the_timer_can_check_alone_turns_green_within_seconds(api: httpx.Client) -> None:
+def test_a_name_lookup_waits_for_approval_like_every_check_and_turns_green_within_seconds_of_it(api: httpx.Client) -> None:
     made = _source(api, "host", {"kind": "dns", "host": "localhost"})
     first = _listed(api, made["id"])
     assert first["path"] == "sources/host.md" and first["kind"] == "dns" and first["where"] == "anywhere"
     assert first["summary"] == "Looks up localhost every hour and wants it to resolve."
     assert "excerpt" in first and first["excerpt"].startswith("## What it gives the report")
+    assert (first["status"], first["why"], first["needs_approval"]) == ("grey", "waiting", True)
+    time.sleep(2.5)  # the timer looks twice
+    assert _listed(api, made["id"])["checked_at"] is None, "a name lookup nobody approved is never made"
+    approved = api.post(f"/api/sources/{made['id']}/approve", json={"check_hash": first["check_hash"]})
+    assert approved.status_code == 200 and approved.json()["approved"] is True
     green = _until(api, made["id"], lambda s: s["status"] == "ok")
     assert green["detail"].startswith("resolves to ") and green["checked_at"] and green["ms"] is not None
 
@@ -165,20 +170,21 @@ def test_an_address_waits_for_approval_through_the_route_and_is_asked_only_after
         server.server_close()
 
 
-def test_a_document_with_no_check_is_listed_grey_and_only_a_name_lookup_needs_no_approval(api: httpx.Client) -> None:
+def test_a_document_with_no_check_is_listed_grey_and_every_check_waits_for_approval(api: httpx.Client) -> None:
     plain = api.post("/api/docs", json={"path": "sources/notes.md", "title": "Notes", "body": "Nothing to check yet."}).json()
     listed = _listed(api, plain["id"])
     assert (listed["status"], listed["why"], listed["kind"]) == ("grey", "no_check", None)
     assert api.post(f"/api/sources/{plain['id']}/approve", json={"check_hash": "0" * 64}).status_code == 422
     web = _source(api, "web", {"kind": "http", "url": "http://127.0.0.1:9/never"})
     tool = _source(api, "tool", {"kind": "mcp", "url": "http://127.0.0.1:9/mcp", "tool": "get_status"})
-    for source in (web, tool):
-        seen = _listed(api, source["id"])
-        assert (seen["status"], seen["why"], seen["needs_approval"]) == ("grey", "waiting", True)
     name = _source(api, "name", {"kind": "dns", "host": "localhost"})
-    assert api.post(f"/api/sources/{name['id']}/approve", json={"check_hash": _listed(api, name["id"])["check_hash"]}).status_code == 422
-    # The row puts what needs a look first: what waits for the owner, then a document with no check, then what answers.
+    for source in (web, tool, name):
+        seen = _listed(api, source["id"])
+        assert (seen["status"], seen["why"], seen["needs_approval"]) == ("grey", "waiting", True), source["path"]
+    # Approved, a name lookup answers; the rest are never asked.
+    assert api.post(f"/api/sources/{name['id']}/approve", json={"check_hash": _listed(api, name["id"])["check_hash"]}).status_code == 200
     _until(api, name["id"], lambda s: s["status"] == "ok")
+    # The row puts what needs a look first: what waits for the owner, then a document with no check, then what answers.
     order = [s["path"] for s in api.get("/api/sources").json()["sources"]]
     assert order.index("sources/web.md") < order.index("sources/notes.md") < order.index("sources/name.md")
     assert order.index("sources/tool.md") < order.index("sources/notes.md")
@@ -189,6 +195,8 @@ def test_with_the_timer_off_nothing_is_ever_checked(f2_dsn: str, tmp_path: Path)
     with _api(f2_dsn, tmp_path, tick="0") as (server, _):
         with httpx.Client(base_url=server.base_url, headers={"Authorization": f"Bearer {TEST_TOKEN}"}, timeout=30.0) as client:
             made = _source(client, "host", {"kind": "dns", "host": "localhost"})
+            approved = client.post(f"/api/sources/{made['id']}/approve", json={"check_hash": _listed(client, made["id"])["check_hash"]})
+            assert approved.status_code == 200
             time.sleep(2.5)
             assert (_listed(client, made["id"])["why"], _listed(client, made["id"])["checked_at"]) == ("new", None)
 

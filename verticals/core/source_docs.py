@@ -47,7 +47,7 @@ class Draft:
 
     @property
     def runnable(self) -> bool:
-        """The check may run now: it is one the agent can write, and one that reaches something has the owner's approval."""
+        """The check may run now: it is one the agent can write, and the owner has approved it."""
         check = self.check
         return check is not None and check.kind in sc.KINDS and (not check.gated or self.approved_hash == check.hash)
 

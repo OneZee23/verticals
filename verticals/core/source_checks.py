@@ -14,10 +14,10 @@ it and writes it back exactly as it was (`web/src/lib/bodyMarkdown.ts`), so a sa
 the check or its hash. The block is the only copy of the check; the table beside it keeps answers, never a second check.
 
 Five kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns`. A sixth, `connections`, is written only by the app.
-Unknown fields are refused, so a typo cannot quietly drop a limit. `http`, `mcp`, `cmd` and `file` are gated: each reaches
-something (an address, a server, a program, a file) and can carry something out or bring something in, so each runs only
-when the owner approved the exact check, which is the hash below (`Check.hash`). Only `dns` and the app's own
-`connections` run without it.
+Unknown fields are refused, so a typo cannot quietly drop a limit. Every kind the agent writes is gated: each reaches
+something (an address, a server, a program, a file, a name resolver) and can carry something out or bring something in, so
+each runs only once the owner has approved the exact check, which is the hash below (`Check.hash`). Only the app's own
+`connections` check runs without it.
 """
 
 from __future__ import annotations
@@ -38,9 +38,9 @@ from verticals.core.errors import ValidationError
 PREFIX = "sources/"
 KINDS = ("http", "mcp", "cmd", "file", "dns")
 APP_KINDS = ("connections",)
-# The kinds that reach something, and so run only after the owner approved the exact check (its hash). Only a host-name
-# lookup (`dns`) and the app's own `connections` check run without approval.
-GATED = frozenset({"http", "mcp", "cmd", "file"})
+# Every check the agent writes reaches something, even a name lookup (the name it is given goes to a resolver), so each runs
+# only once the owner has approved the exact check (its hash). Only the app's own `connections` check runs without approval.
+GATED = frozenset(KINDS)
 # The kinds that read this Mac itself, so they always run here.
 ON_THIS_MAC = frozenset({"cmd", "file"})
 WHERES = ("here", "anywhere")

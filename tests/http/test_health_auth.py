@@ -63,7 +63,7 @@ EXPECTED_OPERATIONS = {
     # The Inbox and Documents redesign: every goal with no date, and the Documents desk.
     ("GET", "/api/undated"),
     ("GET", "/api/docs/desk"),
-    # Sources (docs/design/sources.md): the list the Inbox draws and the owner's Approve of a command or a file.
+    # Sources (docs/design/sources.md): the list the Inbox draws and the owner's Approve of a check.
     ("GET", "/api/sources"),
     ("POST", "/api/sources/{id}/approve"),
 }

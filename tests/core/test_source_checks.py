@@ -123,9 +123,9 @@ def test_the_hash_is_the_check_and_only_the_check() -> None:
     assert _check({**CMD, "parse": r"(\d+)\s*%"}).hash != base.hash
     assert _check({**CMD, "timeout": 5}).hash != base.hash
     assert _check({**HTTP}).hash != _check({**HTTP, "status": 204}).hash
-    # Whatever reaches something is gated: an address, a tool, a command, a file. Only a name lookup is not.
-    assert all(_check(k).gated for k in (HTTP, MCP, CMD, FILE)) and not _check(DNS).gated
-    assert sc.GATED == {"http", "mcp", "cmd", "file"} and not _check(DNS).gated
+    # Every check the agent writes is gated, a name lookup too (the name goes to a resolver); only the app's own is not.
+    assert all(_check(k).gated for k in (HTTP, MCP, CMD, FILE, DNS))
+    assert sc.GATED == set(sc.KINDS) and not sc.Check.from_dict({"kind": "connections"}, app=True).gated
 
 
 def test_the_block_goes_into_a_document_and_comes_back() -> None:

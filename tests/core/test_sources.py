@@ -23,26 +23,37 @@ MIN = timedelta(minutes=1)
 HTTP = {"kind": "http", "url": "https://example.test/health"}
 MCP = {"kind": "mcp", "url": "http://127.0.0.1:9100/mcp", "tool": "get_status", "args": {"scope": "all"}}
 FILE = {"kind": "file", "path": "~/logs/run.log", "max_age_hours": 26}
-# A name lookup is the one kind that needs no approval, so the state machine below (the two-failures rule, grey, ordering)
-# is shown on it: nothing in those rules depends on what a check reaches.
+# The state machine below (the two-failures rule, grey, ordering) is shown on a name lookup, approved first: nothing in those
+# rules depends on what a check reaches. The tests of approval itself use every kind.
 NAME = {"kind": "dns", "host": "example.test"}
 CMD = {"kind": "cmd", "argv": ["/bin/echo", "disk 71% used"], "parse": r"(\d+)%", "max": 90}
 GOOD = Result(ok=True, detail="HTTP 200", ms=12)
 BAD = Result(ok=False, detail="HTTP 503", ms=9)
 
 
-def _source(db: psycopg.Connection, name: str, raw: dict | None, *, owner: str = OWNER) -> core.Source:
+def _source(db: psycopg.Connection, name: str, raw: dict | None, *, owner: str = OWNER, approved: bool = True) -> core.Source:
+    """A source document. Every check the agent writes waits for the owner, so unless `approved` is False the owner has
+    pressed Approve on it, and the state machine can be looked at."""
     body = "No check here." if raw is None else sc.build_body(
         gives="Something.", how="Read it.", since="Every hour.", check=sc.Check.from_dict(raw), fixes=[])
     doc = core_docs.create(db, owner=owner, path=f"sources/{name}.md", title=name.title(), body=body).doc
-    return core.find(db, owner=owner, ref=doc.id)
+    source = core.find(db, owner=owner, ref=doc.id)
+    if approved and source.check is not None:
+        core.approve(db, owner=owner, doc_id=source.id, check_hash=source.check.hash, now=T0)
+        source = core.find(db, owner=owner, ref=doc.id)
+    return source
 
 
-def _edit(db: psycopg.Connection, source: core.Source, raw: dict) -> core.Source:
+def _edit(db: psycopg.Connection, source: core.Source, raw: dict, *, approve: bool = True) -> core.Source:
+    """The check in the document changes; by default the owner approves the new text, as the state tests need."""
     current = core.find(db, owner=OWNER, ref=source.id)
     body = sc.set_section(current.body, "check", sc.render_block(sc.Check.from_dict(raw)))
     core_docs.save(db, owner=OWNER, id=source.id, expected_revision=current.revision, body=body)
-    return core.find(db, owner=OWNER, ref=source.id)
+    changed = core.find(db, owner=OWNER, ref=source.id)
+    if approve:
+        core.approve(db, owner=OWNER, doc_id=source.id, check_hash=changed.check.hash, now=T0)
+        changed = core.find(db, owner=OWNER, ref=source.id)
+    return changed
 
 
 def _look(db: psycopg.Connection, source: core.Source, now: datetime) -> core.View:
@@ -161,7 +172,7 @@ def test_a_source_with_no_check_or_an_unreadable_one_or_no_answer_yet_is_grey(db
 
 
 def test_a_command_waits_for_the_owner_and_only_for_that_exact_check(db: psycopg.Connection) -> None:
-    source = _source(db, "disk", CMD)
+    source = _source(db, "disk", CMD, approved=False)
     waiting = core.view(source, T0)
     assert (waiting.status, waiting.why, waiting.needs_approval, waiting.approved) == (GREY, core.WAITING, True, False)
     assert waiting.summary.startswith("Runs /bin/echo 'disk 71% used' on this Mac")
@@ -176,19 +187,19 @@ def test_a_command_waits_for_the_owner_and_only_for_that_exact_check(db: psycopg
     assert core.due(core.find(db, owner=OWNER, ref=source.id), T0), "approving makes it due now"
 
     # The agent changes one word of the command: paused again until the owner approves that.
-    changed = _edit(db, source, {**CMD, "argv": ["/bin/echo", "disk 95% used"]})
+    changed = _edit(db, source, {**CMD, "argv": ["/bin/echo", "disk 95% used"]}, approve=False)
     assert core.view(changed, T0).why == core.WAITING and not core.due(changed, T0)
     # The old approval does not fit the new text.
     with pytest.raises(RevisionMismatch):
         core.approve(db, owner=OWNER, doc_id=source.id, check_hash=source.check.hash, now=T0)
     # Changing the text back to what was approved needs no new approval.
-    restored = _edit(db, source, CMD)
+    restored = _edit(db, source, CMD, approve=False)
     assert core.view(restored, T0).why == core.NEW and core.due(restored, T0)
 
 
-def test_whatever_reaches_something_waits_for_the_owner_and_only_a_name_lookup_does_not(db: psycopg.Connection) -> None:
-    for name, raw in (("web", HTTP), ("tool", MCP), ("disk", CMD), ("log", FILE)):
-        source = _source(db, name, raw)
+def test_every_check_waits_for_the_owner_once_and_only_the_apps_own_does_not(db: psycopg.Connection) -> None:
+    for name, raw in (("web", HTTP), ("tool", MCP), ("disk", CMD), ("log", FILE), ("host", NAME)):
+        source = _source(db, name, raw, approved=False)
         seen = core.view(source, T0)
         assert (seen.status, seen.why, seen.needs_approval, seen.approved) == (GREY, core.WAITING, True, False), name
         assert not core.due(source, T0), f"an unapproved {raw['kind']} check is never run"
@@ -196,11 +207,12 @@ def test_whatever_reaches_something_waits_for_the_owner_and_only_a_name_lookup_d
         assert (approved.approved, approved.needs_approval, approved.why) == (True, False, core.NEW), name
         assert core.due(core.find(db, owner=OWNER, ref=source.id), T0), f"approved, a {raw['kind']} check is due now"
 
-    lookup = _source(db, "host", NAME)
-    assert (core.view(lookup, T0).needs_approval, core.view(lookup, T0).why) == (False, core.NEW)
-    assert core.due(lookup, T0), "a name lookup runs without asking"
+    # The app's own check of the agent's servers is written by the app and runs without asking; there is nothing to approve.
+    own = core.find(db, owner=OWNER, ref=core.ensure_connections(db, owner=OWNER))
+    assert (core.view(own, T0).needs_approval, core.view(own, T0).why) == (False, core.NEW)
+    assert core.due(own, T0), "the app asks about its own connections without asking anyone"
     with pytest.raises(ValidationError, match="needs no approval"):
-        core.approve(db, owner=OWNER, doc_id=lookup.id, check_hash=lookup.check.hash, now=T0)
+        core.approve(db, owner=OWNER, doc_id=own.id, check_hash=own.check.hash, now=T0)
     plain = _source(db, "notes", None)
     with pytest.raises(ValidationError, match="no check to approve"):
         core.approve(db, owner=OWNER, doc_id=plain.id, check_hash="x", now=T0)
@@ -209,21 +221,21 @@ def test_whatever_reaches_something_waits_for_the_owner_and_only_a_name_lookup_d
 
 
 def test_an_address_waits_again_when_any_part_of_it_changes_and_the_summary_shows_what_is_sent(db: psycopg.Connection) -> None:
-    web = _source(db, "web", HTTP)
+    web = _source(db, "web", HTTP, approved=False)
     core.approve(db, owner=OWNER, doc_id=web.id, check_hash=web.check.hash, now=T0)
     assert core.view(core.find(db, owner=OWNER, ref=web.id), T0).why == core.NEW
     # The address, the field it reads, the limit: each is a different check, and none rides on the old approval.
     for change in ({"url": "https://example.test/other"}, {"url": "https://example.test/health?a=1"}, {"status": 204},
                    {"value": "queue.depth"}, {"expect": {"status": "ok"}}):
-        edited = _edit(db, web, {**HTTP, **change})
+        edited = _edit(db, web, {**HTTP, **change}, approve=False)
         seen = core.view(edited, T0)
         assert (seen.why, seen.approved, seen.needs_approval) == (core.WAITING, False, True), change
-        _edit(db, web, HTTP)  # back to what was approved: no new approval needed
-    tool = _source(db, "tool", MCP)
+        _edit(db, web, HTTP, approve=False)  # back to what was approved: no new approval needed
+    tool = _source(db, "tool", MCP, approved=False)
     assert core.view(tool, T0).summary == (
         'Calls the tool get_status of http://127.0.0.1:9100/mcp with {"scope": "all"} every hour.'), "what is sent is shown"
     core.approve(db, owner=OWNER, doc_id=tool.id, check_hash=tool.check.hash, now=T0)
-    changed = _edit(db, tool, {**MCP, "args": {"scope": "everything"}})
+    changed = _edit(db, tool, {**MCP, "args": {"scope": "everything"}}, approve=False)
     assert core.view(changed, T0).why == core.WAITING, "other arguments are another check"
 
 
@@ -265,7 +277,7 @@ def test_a_check_is_due_when_its_time_comes_and_one_pass_takes_it(db: psycopg.Co
 
 def test_the_row_of_tiles_puts_what_needs_a_look_first(db: psycopg.Connection) -> None:
     red = _source(db, "zeta", NAME)
-    _source(db, "yankee", CMD)
+    _source(db, "yankee", CMD, approved=False)
     _source(db, "xray", None)
     stale = _source(db, "whisky", NAME)
     _source(db, "victor", NAME)

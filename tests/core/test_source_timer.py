@@ -109,7 +109,9 @@ def test_a_pass_runs_what_is_due_and_keeps_the_answers(db: psycopg.Connection, p
     clock = Clock()
     web = _add(db, "web", {"kind": "http", "url": url, "expect": {"status": "ok"}})
     host = _add(db, "host", {"kind": "dns", "host": "localhost"})
+    assert _pass(pool, clock, home) == [], "nothing runs before the owner has approved it, a name lookup too"
     _approve(db, web, clock)
+    _approve(db, host, clock)
     ran = _pass(pool, clock, home)
     assert sorted(r.path for r in ran) == ["sources/host.md", "sources/web.md"]
     assert all(r.result.ok for r in ran)
@@ -202,23 +204,28 @@ def test_a_command_is_not_run_until_the_owner_approves_it_and_not_again_after_a_
     assert _view(db, disk, clock).why == core.WAITING
 
 
-def test_a_check_edited_since_its_last_answer_is_run_at_once(db: psycopg.Connection, pool, home: Path) -> None:
+def test_an_edited_check_waits_for_approval_and_is_then_run_at_once(db: psycopg.Connection, pool, home: Path) -> None:
     clock = Clock()
     doc = _add(db, "web", {"kind": "dns", "host": "localhost"})
+    _approve(db, doc, clock)
     _pass(pool, clock, home)
     source = core.find(db, owner=OWNER, ref=doc)
     other = sc.Check.from_dict({"kind": "dns", "host": "127.0.0.1"})
     changed = sc.set_section(source.body, "check", sc.render_block(other))
     core_docs.save(db, owner=OWNER, id=doc, expected_revision=source.revision, body=changed)
     clock.move(minutes=1)
+    assert _pass(pool, clock, home) == [], "the new text waits for its own approval, and is not run on the old one"
+    _approve(db, doc, clock)
+    clock.move(minutes=1)
     ran = _pass(pool, clock, home)
-    assert [(r.path, r.result.ok) for r in ran] == [("sources/web.md", True)], "a minute later, not an hour"
+    assert [(r.path, r.result.ok) for r in ran] == [("sources/web.md", True)], "two minutes later, not an hour"
     assert core.find(db, owner=OWNER, ref=doc).row.ran_hash == other.hash
 
 
 def test_a_check_another_pass_has_taken_is_left_to_it(db: psycopg.Connection, pool, home: Path) -> None:
     clock = Clock()
     doc = _add(db, "web", {"kind": "dns", "host": "localhost"})
+    _approve(db, doc, clock)
     assert core.claim(db, owner=OWNER, source=core.find(db, owner=OWNER, ref=doc), now=clock.now)
     assert _pass(pool, clock, home) == []
     clock.move(minutes=11)
@@ -228,10 +235,11 @@ def test_a_check_another_pass_has_taken_is_left_to_it(db: psycopg.Connection, po
 def test_a_pass_that_is_told_to_stop_runs_nothing_and_records_nothing(db: psycopg.Connection, pool, home: Path) -> None:
     clock = Clock()
     doc = _add(db, "web", {"kind": "dns", "host": "localhost"})
+    _approve(db, doc, clock)
     stop = threading.Event()
     stop.set()
     assert _pass(pool, clock, home, stop=stop) == []
-    assert core.find(db, owner=OWNER, ref=doc).row is None
+    assert core.find(db, owner=OWNER, ref=doc).row.checked_at is None
 
 
 def _fake_claude(directory: Path, output: str) -> str:

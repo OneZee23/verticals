@@ -37,12 +37,12 @@ def test_a_new_source_needs_every_part_and_is_made_under_sources(db: psycopg.Con
     assert (saved.path, saved.title, saved.revision) == ("sources/health-page.md", "Health page", 1)
     assert saved.check is not None and saved.check.as_dict() == sc.Check.from_dict(HTTP).as_dict()
     assert sc.section_text(saved.body, "fixes") == "- Restart it."
-    # Writing it wakes it: a row exists (its change rings the bell the open app listens to). An address waits for approval,
-    # so it is not due; a name lookup, which does not, is due at the next pass.
+    # Writing it wakes it: a row exists (its change rings the bell the open app listens to). A check waits for approval, so
+    # it is not due until the owner has approved it, a name lookup like the rest.
     assert saved.row is not None and saved.row.next_check_at == NOW and saved.row.checked_at is None
     assert core.due(saved, NOW) is False and saved.waiting is True
     lookup = _make(db, {"kind": "dns", "host": "example.test"}, title="Name lookup")
-    assert core.due(lookup, NOW) is True and lookup.row is not None
+    assert core.due(lookup, NOW) is False and lookup.waiting is True and lookup.row is not None, "a name lookup waits too"
 
     for missing in ("title", "gives", "how", "since", "check"):
         parts = {**WHOLE, "check": HTTP}
@@ -88,10 +88,12 @@ def test_a_change_replaces_only_the_parts_it_names(db: psycopg.Connection) -> No
 
 def test_a_check_may_run_only_with_the_owners_approval_of_exactly_that_check(db: psycopg.Connection) -> None:
     mcp = {"kind": "mcp", "url": "http://127.0.0.1:9100/mcp", "tool": "get_status"}
+    lookup = {"kind": "dns", "host": "example.test"}
     for title, raw, other in (
         ("Disk", CMD, {**CMD, "argv": ["/bin/echo", "disk 72% used"]}),
         ("Health page", HTTP, {**HTTP, "url": "https://example.test/health?x=1"}),
         ("Status tool", mcp, {**mcp, "args": {"scope": "all"}}),
+        ("Name", lookup, {**lookup, "host": "other.example.test"}),
     ):
         source = _make(db, raw, title=title)
         waiting = source_docs.prepare(db, owner=OWNER, ref=source.id)
@@ -105,8 +107,8 @@ def test_a_check_may_run_only_with_the_owners_approval_of_exactly_that_check(db:
         assert changed.check.hash != source.check.hash
         assert changed.runnable is False, f"the approval of the {raw['kind']} check was of the other one"
 
-    # A name lookup is the one check that asks nothing, whatever the document says.
-    assert source_docs.prepare(db, owner=OWNER, check={"kind": "dns", "host": "example.test"}, **{**WHOLE, "title": "Name"}).runnable
+    # A check written fresh is not runnable, whatever kind it is.
+    assert not source_docs.prepare(db, owner=OWNER, check=lookup, **{**WHOLE, "title": "Another name"}).runnable
 
 
 def test_the_apps_own_connections_check_cannot_be_written_or_run_by_the_agent(db: psycopg.Connection) -> None:
