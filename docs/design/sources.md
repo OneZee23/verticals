@@ -1,0 +1,17 @@
+# Sources: a document each, checked every hour without a model
+
+A source is anything the morning report reads: a chat service, a calendar, mail, a repository, a folder. Each one is simply a document, and the app checks it on a timer for free.
+
+## Behaviour
+
+- **A document per source,** in a Sources group, written by the agent from one sentence ("read my calendar for the coming week"). It says what the source gives the report, how to read it, since when, how it is checked, and the fixes the agent may make alone.
+- **One check per source,** read-only, of one of five kinds, written once by the agent into the document: an address answers (http); an MCP tool answers with the right field (mcp); a command exits well and a number in its output stays within limits (cmd); a file is fresh and its last line says the right thing (file); a host name resolves (dns). The app runs every check every hour, with no model and no tokens.
+- **Every connection too:** the app asks each MCP server the agent uses whether it answers, with no model (`claude mcp list` and the Codex equivalent).
+- **Stable:** a source turns red only after two failures in a row, five minutes apart; a single failure is checked again quietly. A check says why in one line ("last exit code 127").
+- **The agent comes only when needed.** When a source stays red, it reads the failure once, says what it means, and makes a fix the source's document allows; anything else stays red. When a source is added or changed, it writes the check, runs it once and sets the value beside the raw output, since a check can be stable and still wrong.
+- **In the Inbox,** a third row, Sources, under Documents: a tile per source with its state, "checked 07:00" or, in red, "not answering since 06:00". A red source also opens the next morning report.
+- **Later, in the cloud:** each check says where it must run, here (it needs this Mac: a job, a file, a local service) or anywhere (an address, a name, a remote server). A cloud server runs the anywhere checks; the Mac runs its own and sends their results; a Mac that is asleep leaves its checks grey, "not checked since 23:10", never red.
+
+## Done when
+
+Core tests for each kind of check and the two-failures rule; a UI test for the Sources row and a red tile; the agent's tool to add a source writes its check and its first result. Before and after pictures.
