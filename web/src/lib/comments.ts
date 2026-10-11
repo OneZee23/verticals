@@ -183,7 +183,7 @@ export function createCommentsPanel(state: { comments: CommentsState }, deps: De
       })
       state.comments.pendingAnchor = null
       await loadCommentsFor(targetType, targetId)
-      // A comment on a document is an edit the field offers Go for (lib/go.ts).
+      // A comment on a document is an edit Check again offers to hand over (lib/checkAgain.ts).
       if (targetType === 'doc') window.dispatchEvent(new CustomEvent('verticals:doc-edited', { detail: { id: targetId } }))
       return true
     } catch (err) {
@@ -200,7 +200,7 @@ export function createCommentsPanel(state: { comments: CommentsState }, deps: De
     try {
       await addCommentMessage(threadId, trimmed)
       await loadCommentsFor(targetType, targetId)
-      // A comment on a document is an edit the field offers Go for (lib/go.ts).
+      // A comment on a document is an edit Check again offers to hand over (lib/checkAgain.ts).
       if (targetType === 'doc') window.dispatchEvent(new CustomEvent('verticals:doc-edited', { detail: { id: targetId } }))
       return true
     } catch (err) {

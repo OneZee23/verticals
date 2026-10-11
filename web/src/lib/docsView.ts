@@ -240,7 +240,7 @@ export function createDocsView(state: { docs: DocsState }, deps: Deps) {
       const linksFresh = patch.body !== undefined || state.docs.currentId === id
       if (state.docs.currentId === id) state.docs.current = fresh
       patchListEntry(fresh)
-      // The field offers Go after an edit (lib/go.ts); a window showing this document takes the fresh copy
+      // Check again is offered after an edit (lib/checkAgain.ts); a window showing this document takes the fresh copy
       // (DocWindowBody.vue), its links too when they are known.
       window.dispatchEvent(new CustomEvent('verticals:doc-edited', {
         detail: { id, title: fresh.title, path: fresh.path, doc: fresh, linksFresh },
