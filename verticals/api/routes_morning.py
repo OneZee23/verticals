@@ -1,8 +1,9 @@
-"""`POST /api/morning` — the morning's one ask a day (docs/design/agent-fixes.md, fix 3).
+"""`POST /api/morning` — the morning's one ask a day (docs/design/agent-fixes.md, fixes 3 and 2).
 
 The app calls it once its morning hour has come and an agent is there. The first call of the owner's day answers
-`asked: true` and the app asks the agent for the report; every later call, from this window or any other, answers
-`asked: false`. `owner` is read from `request.app.state.config.owner`, never from the request, like every route here."""
+`asked: true` with `task_id`, the one open "Morning report" task, made or moved to that day, and the app asks the agent for
+the report; every later call, from this window or any other, answers `asked: false` and changes nothing. `owner` is read
+from `request.app.state.config.owner`, never from the request, like every route here."""
 
 from __future__ import annotations
 
@@ -22,4 +23,4 @@ def post_morning(request: Request, date: _date) -> dict:
     owner = request.app.state.config.owner
     with get_conn(request) as conn:
         begun = core_morning.begin(conn, owner=owner, day=date)
-    return {"asked": begun.asked}
+    return {"asked": begun.asked, "task_id": begun.task_id}

@@ -184,7 +184,8 @@ def test_the_morning_turn_reads_elsewhere_and_writes_in_verticals_only_what_the_
     allowed = _flag(agent, "--allowedTools").split(",")
     for tool in ("doc_create", "doc_save", "doc_link", "board", "doc_get"):
         assert f"mcp__verticals__{tool}" in allowed, tool
-    for tool in ("delete", "update", "reparent", "doc_delete"):
+    # The report's task is the server's (core/morning.py): the agent neither makes it nor moves it without asking.
+    for tool in ("create", "schedule", "delete", "update", "reparent", "doc_delete"):
         assert f"mcp__verticals__{tool}" not in allowed, tool
     _tool(agent, "mcp__google-calendar__list-events")
     assert _decision(agent) == "allow"

@@ -438,10 +438,11 @@ export function parkGoal(id: string): Promise<GoalCard> {
   return request<GoalCard>(`/api/goals/${encodeURIComponent(id)}/park`, { method: 'POST' })
 }
 
-/** `POST /api/morning?date=` (docs/design/agent-fixes.md, fix 3): the server's answer to "may I ask for this morning's
- *  report?". `asked` is true for the one call of the owner's day that takes it, whichever window or browser makes it. */
-export function beginMorning(date: string): Promise<{ asked: boolean }> {
-  return request<{ asked: boolean }>(`/api/morning${qs({ date })}`, { method: 'POST' })
+/** `POST /api/morning?date=` (docs/design/agent-fixes.md, fixes 3 and 2): the server's answer to "may I ask for this
+ *  morning's report?". `asked` is true for the one call of the owner's day that takes it, whichever window or browser
+ *  makes it, and then `task_id` is the one open "Morning report" task, made or moved to that day. */
+export function beginMorning(date: string): Promise<{ asked: boolean; task_id: string | null }> {
+  return request<{ asked: boolean; task_id: string | null }>(`/api/morning${qs({ date })}`, { method: 'POST' })
 }
 
 /** `DELETE /api/goals/{id}?cascade=`. Without `cascade`, a non-empty subtree is `core.goals.

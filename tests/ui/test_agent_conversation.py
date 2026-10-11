@@ -18,6 +18,7 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from verticals.core import docs as core_docs
+from verticals.core import goals
 from verticals.core import morning as core_morning
 
 from tests.ui.conftest import (
@@ -54,7 +55,7 @@ def ui_agent(
     """F2 served by the desktop gateway, with the conversation's server and a fake agent (docs/design-handoff S2). The
     pinned day's morning report is taken already, as if asked for: a scenario about something else gets no extra turn."""
     with psycopg.connect(f2_dsn, autocommit=True) as conn:
-        core_morning.begin(conn, owner=F2_OWNER, day=date.fromisoformat(PINNED_DAY))
+        core_morning.take(conn, owner=F2_OWNER, day=date.fromisoformat(PINNED_DAY))
     with _backend(f2_dsn, F2_OWNER, tmp_path) as backend:
         with _agent_gateway(backend, tmp_path) as base_url:
             yield from _make_ui_session(
@@ -160,6 +161,10 @@ def test_the_morning_report_is_asked_once_a_day_by_the_server(ui_agent: UiSessio
     with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
         taken = [row[0] for row in conn.execute("SELECT client_token FROM idempotency WHERE owner = %s", (F2_OWNER,))]
         assert taken == [f"morning:{PINNED_DAY}"]
+        # Fix 2: the ask names the one open task, made in the day before the agent was asked.
+        task = _morning_tasks(conn)
+        assert [(row[1], str(row[2]), row[3]) for row in task] == [("day", PINNED_DAY, "app")]
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text(f"(id {task[0][0]})")
     page.locator(".circle-field__shape").click()
     expect(page.locator(f'{BALLOON}[data-who="agent"]')).to_have_count(1)
     expect(page.locator(f'{BALLOON}[data-who="you"]')).to_have_count(0)
@@ -179,6 +184,67 @@ def test_the_morning_report_is_asked_once_a_day_by_the_server(ui_agent: UiSessio
             expect(window.locator('[data-role="circle-answer"]')).to_have_count(0)
     finally:
         other.close()
+
+
+def _morning_tasks(conn: psycopg.Connection) -> list[tuple]:
+    """The open "Morning report" tasks of the owner: id, scale, day, author."""
+    return conn.execute(
+        "SELECT id, vertical::text, anchor_date, origin::text FROM goals"
+        " WHERE owner = %s AND title = 'Morning report' AND done_at IS NULL ORDER BY created_at", (F2_OWNER,),
+    ).fetchall()
+
+
+def test_the_next_morning_moves_the_one_task_to_its_day_instead_of_making_another(ui_agent: UiSession) -> None:
+    """Fix 2: two mornings in a row ask the agent twice and leave one open "Morning report" task, the same one, in the
+    second day."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        conn.execute("DELETE FROM idempotency WHERE owner = %s AND client_token LIKE 'morning:%%'", (F2_OWNER,))
+    page.reload()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report for 2026-08-08", timeout=15000)
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        (first,) = _morning_tasks(conn)
+    page.clock.set_fixed_time("2026-08-09T09:00:00+03:00")
+    page.reload()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report for 2026-08-09", timeout=15000)
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        (second,) = _morning_tasks(conn)
+    assert (second[0], str(second[2])) == (first[0], "2026-08-09")
+
+
+@pytest.mark.parametrize("report_day, finishes", [("2026-08-07", False), ("2026-08-08", True)])
+def test_ready_on_a_morning_report_finishes_the_task_only_for_the_day_it_stands_in(
+    ui_agent: UiSession, report_day: str, finishes: bool,
+) -> None:
+    """Fix 2: the one task is linked to every morning's report, so "Ready?" on an earlier report leaves it open and on the
+    report of the day the task stands in (the pinned 2026-08-08) it is done."""
+    path = f"reports/morning/{report_day}.md"
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        task = goals.create(conn, owner=F2_OWNER, title="Morning report", vertical="day",
+                            anchor_date=date.fromisoformat(PINNED_DAY), origin="app").goal.id
+        doc = core_docs.create(conn, owner=F2_OWNER, path=path, title=f"Morning report — {report_day}").doc.id
+        goals.update(conn, owner=F2_OWNER, id=task, body=f"[Morning report — {report_day}](doc:{path})")
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{task}"]')
+    _send(page, f"[say] Your report: [the report](#doc/{doc}).")
+    page.locator(f'{BALLOON}[data-who="agent"] a', has_text="the report").click()
+    expect(page.locator('.vt-window[data-window="doc"]')).to_have_count(1)
+    page.evaluate("id => window.dispatchEvent(new CustomEvent('verticals:doc-edited', { detail: { id } }))", doc)
+    expect(page.locator(CIRCLE)).to_have_attribute("data-state", "go")
+    page.locator(".circle-field__shape").click()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Done: Ready.", timeout=15000)
+
+    def done() -> bool:
+        with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+            return conn.execute("SELECT done_at FROM goals WHERE id = %s", (task,)).fetchone()[0] is not None
+
+    for attempt in range(25):  # it finishes within a moment, or stays open: wait the longer for the first
+        if done() or (not finishes and attempt > 8):
+            break
+        page.wait_for_timeout(200)
+    assert done() is finishes
 
 
 def test_an_ask_is_the_agents_balloon_with_its_choices(ui_agent: UiSession) -> None:

@@ -75,8 +75,10 @@ MORNING_PROMPT = load_morning_prompt()
 # The one value a message's `sources` may take: the morning report's turn (web lib/morning.ts), which gets the morning
 # guide and its own rules. `clean_settings` passes exactly this value on and nothing else (docs/design/agent-fixes.md, fix 1).
 CONNECTED = "connected"
-# The Verticals writes the morning report makes on its own, unattended: its document, its task in Day and their link.
-MORNING_WRITES = ["create", "schedule", "doc_create", "doc_save", "doc_link"]
+# The Verticals writes the morning report makes on its own, unattended: its document and the document's link to its task.
+# The task is the server's, made or moved to today before the ask (core/morning.py, docs/design/agent-fixes.md, fix 2), so
+# `create` and `schedule` are not among them: a second task or a move would ask the owner first.
+MORNING_WRITES = ["doc_create", "doc_save", "doc_link"]
 # Outside Verticals, the morning report only reads: a tool of another connected server runs when its name starts with a
 # reading verb (google-calendar list-events, telethon fetch_history, coin search_base); any other is declined, so an
 # unattended turn never sends, marks, reacts, books or deletes anything.
