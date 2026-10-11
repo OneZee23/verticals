@@ -24,8 +24,8 @@ OVERSCROLL = f"() => getComputedStyle(document.querySelector('{SLIDE}')).overscr
 # The longest transition a goal has: the card's own colour and lift (goalCard.css), from the motion tokens in `:root`.
 LONGEST_TRANSITION = """(sel) => Math.max(...getComputedStyle(document.querySelector(sel)).transitionDuration
   .split(',').map(parseFloat))"""  # computed durations are in seconds
-# Every transition the field starts, as it starts. The tags' and the words' fades stay under reduced motion; what resizes
-# or moves does not.
+# Every transition the field starts, as it starts, while the pointer comes and goes. The tags' and the words' fades stay
+# under reduced motion; what resizes or moves does not.
 WATCH_FIELD = """() => {
   window.__fieldRuns = [];
   document.addEventListener('transitionrun', (e) => {
@@ -78,9 +78,10 @@ def test_motion_is_still_exactly_when_the_switch_or_the_system_setting_says_so(
     ui_f2: UiSession, switch: str | None, still: bool,
 ) -> None:
     """Four things that move or may move, each by another route: the column's edge (a rule inside a media block, copied
-    for the switch), the field opening (transitions that block switches off), a goal's lift (the motion tokens, set on
-    `:root`) and the carried box's slide (a script asking `reducedMotion()`). All four are still when the app says on, or
-    says nothing and the system setting is on; all four move when the app says off, whatever the system setting says."""
+    for the switch), the field answering the pointer (transitions that block switches off), a goal's lift (the motion
+    tokens, set on `:root`) and the carried box's slide (a script asking `reducedMotion()`). All four are still when the
+    app says on, or says nothing and the system setting is on; all four move when the app says off, whatever the system
+    setting says."""
     session = ui_f2
     _answer(session, switch)
     value, plan = _board(session)
@@ -92,8 +93,10 @@ def test_motion_is_still_exactly_when_the_switch_or_the_system_setting_says_so(
     page.evaluate(WATCH_FIELD)
     page.locator(CIRCLE).hover()
     page.wait_for_timeout(400)
+    page.mouse.move(20, 20)
+    page.wait_for_timeout(500)
     moves = page.evaluate(FIELD_MOVES)
-    assert bool(moves) is not still, f"the field opens {'at once' if still else 'with a movement'}: {moves}"
+    assert bool(moves) is not still, f"the field answers the pointer {'at once' if still else 'with a movement'}: {moves}"
 
     page.evaluate(SAMPLER, plan)
     frames = _trace(page, lambda: page.locator(f'[data-goal-id="{value}"] > .goal-card__row').hover(), 700)
