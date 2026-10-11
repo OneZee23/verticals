@@ -19,15 +19,17 @@ const props = withDefaults(defineProps<{
   end?: string
 }>(), { subLabel: '', shorter: () => [], end: '' })
 
-/* The title's layout width, which a column that opens, closes or is resized changes in the frame its layout does: the
-   observer reports it before that frame is drawn, and the form that fits is chosen there, never while the column moves. */
+/* The name's room is the width of its row, which a column that opens, closes or is resized changes in the frame its
+   layout does: the observer reports it before that frame is drawn, and the form that fits is chosen there, never while
+   the column moves. (The row, not the title: the title is a few px wider than its room, see `--column-spill` below.) */
+const rowEl = ref<HTMLElement | null>(null)
 const titleEl = ref<HTMLElement | null>(null)
 const room = ref(0)
 let watcher: ResizeObserver | null = null
 onMounted(() => {
-  if (!titleEl.value || typeof ResizeObserver === 'undefined') return
+  if (!rowEl.value || typeof ResizeObserver === 'undefined') return
   watcher = new ResizeObserver((entries) => { room.value = entries[entries.length - 1].contentRect.width })
-  watcher.observe(titleEl.value)
+  watcher.observe(rowEl.value)
 })
 onBeforeUnmount(() => watcher?.disconnect())
 
@@ -45,7 +47,7 @@ const shown = computed<NameForm>(() => {
     <div v-if="shown.kind" class="column-header__period-row">
       <p class="t-caption column-header__sub-label">{{ shown.kind }}</p>
     </div>
-    <div class="column-header__title-row">
+    <div ref="rowEl" class="column-header__title-row">
       <!-- A shorter form on screen still has the full name for a screen reader. -->
       <h3 ref="titleEl" class="t-title" :aria-label="shown === forms[0] ? undefined : title">{{ shown.name }}<span v-if="end" class="column-header__end" data-role="span-end">{{ end }}</span></h3>
     </div>
@@ -54,8 +56,13 @@ const shown = computed<NameForm>(() => {
 
 <style>
 /* The kind sits above the column's name, the period (docs/design/column-names.md). Keep both rows inside the compact
-   header; the name remains single-line and ellipsized so narrow columns do not push the board out of alignment. */
+   header; the name remains single-line and ellipsized so narrow columns do not push the board out of alignment.
+
+   The form that fits is chosen against the room of the row (`lib/fitName.ts`). A name whose shortest form is still a
+   little wider than that, "Apr–May" at 134.8 px in a room of 134, or a kind line like "Week · May ’27", may take up to
+   `--column-spill` of the 12 px of padding to its right (and of the kind row's 36) before it is cut with "…". */
 .column-header.column-header {
+  --column-spill: 8px;
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -77,7 +84,7 @@ const shown = computed<NameForm>(() => {
   overflow: hidden;
 }
 .column-header__sub-label {
-  margin: 0;
+  margin: 0 calc(-1 * var(--column-spill)) 0 0;
   overflow: hidden;
   color: rgb(45 48 54 / 52%);
   text-overflow: ellipsis;
@@ -92,7 +99,7 @@ const shown = computed<NameForm>(() => {
 }
 .column-header__title-row > .t-title {
   display: block;
-  width: 100%;
+  width: calc(100% + var(--column-spill));
   min-width: 0;
   line-height: 40px;
   white-space: nowrap;
