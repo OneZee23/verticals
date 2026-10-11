@@ -234,3 +234,38 @@ def test_a_click_after_the_let_go_keeps_the_goal_and_a_tap_picks_it(ui_f2: UiSes
     expect(waiting).not_to_have_class(re.compile("is-picked"))
     expect(waiting).to_have_count(1)
     expect(page.locator(SPANS)).to_have_count(1)
+
+
+def test_the_field_has_the_keys_the_moment_the_goal_is_let_go(ui_f2: UiSession) -> None:
+    """Nothing before the key: no click on the field, no letter, no ⌘K. One Backspace lifts the goal, a second puts it back
+    and lifts "Weeks", a third takes "Weeks" off and the board is as it was (S5.P4.020, .021)."""
+    page = ui_f2.page
+    _park(page)
+    waiting = page.locator('[data-role="moving-goal"]')
+    expect(page.locator(FIELD)).to_be_focused()
+    page.keyboard.press("Backspace")
+    expect(waiting).to_have_class(re.compile("is-picked"))
+    page.keyboard.press("Backspace")
+    expect(waiting).to_have_count(0)
+    expect(page.locator('[data-role="moving-view"]')).to_have_class(re.compile("is-picked"))
+    page.keyboard.press("Backspace")
+    expect(page.locator(SPANS)).to_have_count(0)
+    expect(page.locator('[data-role="moving-stack"]')).to_have_count(0)
+
+
+def test_tab_escape_and_typing_work_the_moment_the_goal_is_let_go(ui_f2: UiSession) -> None:
+    """Tab picks the goal, Esc lets go of the pick, a second Esc ends the move (S5.P4.003, .013); typing starts the words."""
+    page = ui_f2.page
+    _park(page)
+    waiting = page.locator('[data-role="moving-goal"]')
+    page.keyboard.press("Tab")
+    expect(waiting).to_have_class(re.compile("is-picked"))
+    page.keyboard.press("Escape")
+    expect(waiting).not_to_have_class(re.compile("is-picked"))
+    expect(waiting).to_have_count(1)
+    page.keyboard.type("Order")
+    expect(page.locator(FIELD)).to_have_value("Order")
+    page.locator(FIELD).fill("")
+    page.keyboard.press("Escape")
+    expect(page.locator(SPANS)).to_have_count(0)
+    expect(page.locator('[data-role="moving-stack"]')).to_have_count(0)

@@ -129,13 +129,15 @@ def test_a_task_let_go_over_the_field_waits_in_it_through_the_moving_stack(ui_f2
     expect(page.locator(f'{TODAY} [data-goal-id="{ids["under"]}"]')).to_have_count(0)
     expect(page.locator(OLD_TILE)).to_have_count(0)
     expect(page.locator(HAND)).to_have_count(0)
-    # The card stands above the field's left end, 4 px in, as the board's does (MovingStack.vue's CSS): the hand away from
-    # the field, so it is its 300 px and no buttons stand over it.
+    # The card stands above the field's left end, 4 px in, as the board's does (MovingStack.vue's CSS), right of the buttons
+    # that stand there while the field holds the keys, even with the hand away from it.
     page.mouse.move(40, 300)
-    expect(page.locator(".circle-tags.is-shown")).to_have_count(0)
-    card, field = waiting.bounding_box(), page.locator(SHAPE).bounding_box()
-    assert card is not None and field is not None
-    assert card["y"] + card["height"] <= field["y"] and abs(card["x"] - (field["x"] + 4)) <= 1, (card, field)
+    buttons = page.locator(".circle-tags")
+    expect(buttons).to_have_class(re.compile("is-shown"))
+    card, field, row = waiting.bounding_box(), page.locator(SHAPE).bounding_box(), buttons.bounding_box()
+    assert card is not None and field is not None and row is not None
+    assert card["y"] + card["height"] <= field["y"], (card, field)
+    assert abs(card["x"] - (field["x"] + 4 + row["width"] + 8)) <= 1, (card, field, row)
 
 
 def test_an_older_task_from_earlier_waits_the_same_way(ui_f2: UiSession) -> None:
@@ -215,32 +217,70 @@ def test_typing_while_a_task_waits_works_as_on_the_board(ui_f2: UiSession) -> No
     expect(page.locator(WAITING)).to_have_count(1)
 
 
-def test_a_letter_with_no_focus_opens_the_field_and_cmd_k_gives_the_keys_back(ui_f2: UiSession) -> None:
-    """The let-go leaves no focus in the field (as in Move): a first letter is its first letter, with the card waiting; ⌘K
-    focuses it, and then Backspace picks the card."""
+def test_backspace_works_the_moment_the_card_is_let_go(ui_f2: UiSession) -> None:
+    """Nothing before the key: no click on the field, no letter, no ⌘K. The field takes the keys when the card is let go."""
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    _carry_and_wait(page, ids["loose"])
+    expect(page.locator(FIELD)).to_be_focused()
+    waiting = page.locator(WAITING)
+    page.keyboard.press("Backspace")
+    expect(waiting).to_have_class(re.compile("is-picked"))
+    page.keyboard.press("Backspace")
+    expect(waiting).to_have_count(0)
+    _in_its_place(page, ids["loose"])
+
+
+def test_tab_and_escape_work_the_moment_the_card_is_let_go(ui_f2: UiSession) -> None:
     page = ui_f2.page
     ids = _seed(ui_f2)
     _open_inbox(ui_f2)
     _carry_and_wait(page, ids["under"])
-    page.keyboard.press("Backspace")  # no focus: nothing to take it
-    expect(page.locator(WAITING)).not_to_have_class(re.compile("is-picked"))
-    page.keyboard.press("w")
-    expect(page.locator(FIELD)).to_have_value("w")
+    waiting = page.locator(WAITING)
+    page.keyboard.press("Tab")
+    expect(waiting).to_have_class(re.compile("is-picked"))
+    page.keyboard.press("Escape")
+    expect(waiting).not_to_have_class(re.compile("is-picked"))
+    expect(waiting).to_have_count(1)
+    page.keyboard.press("Escape")
+    expect(waiting).to_have_count(0)
+    _in_its_place(page, ids["under"])
+
+
+def test_typing_works_the_moment_the_card_is_let_go(ui_f2: UiSession) -> None:
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    _carry_and_wait(page, ids["under"])
+    page.keyboard.type("Which goal?")
+    expect(page.locator(FIELD)).to_have_value("Which goal?")
     expect(page.locator(".circle-field")).to_have_attribute("data-state", "typing")
     expect(page.locator(WAITING)).to_have_count(1)
-    page.keyboard.press("Backspace")  # the letter goes
+    expect(page.locator(WAITING)).not_to_have_class(re.compile("is-picked"))
+
+
+def test_the_field_does_not_take_the_keys_from_a_text_field_that_has_them(ui_f2: UiSession) -> None:
+    """A card let go in the field takes the keys, but not from a text field the person is typing in."""
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    page.evaluate("""() => {
+      const probe = document.createElement('input');
+      probe.id = 'probe';
+      probe.style.cssText = 'position: fixed; left: 8px; top: 8px; width: 120px; z-index: 1000';
+      document.body.appendChild(probe);
+    }""")
+    held = _press(page, f'{TODAY} {CARD}[data-goal-id="{ids["loose"]}"]')
+    page.evaluate("document.getElementById('probe').focus()")  # a press moves the focus; the person is typing there
+    _glide(page, held, _centre(page, SHAPE))
+    page.mouse.up()
+    expect(page.locator(WAITING)).to_have_count(1)
+    expect(page.locator("#probe")).to_be_focused()
+    page.keyboard.type("abc")
+    expect(page.locator("#probe")).to_have_value("abc")
     expect(page.locator(FIELD)).to_have_value("")
-    page.keyboard.press("Backspace")  # now the empty field picks the card
-    expect(page.locator(WAITING)).to_have_class(re.compile("is-picked"))
-    page.keyboard.press("Escape")
-    page.keyboard.press("Escape")
-    expect(page.locator(STACK)).to_have_count(0)
-    # ⌘K from anywhere: the field has the keys again.
-    _carry_and_wait(page, ids["loose"])
-    page.keyboard.press("Control+k")
-    expect(page.locator(FIELD)).to_be_focused()
-    page.keyboard.press("Tab")
-    expect(page.locator(WAITING)).to_have_class(re.compile("is-picked"))
+    expect(page.locator(WAITING)).not_to_have_class(re.compile("is-picked"))
 
 
 def test_words_sent_while_a_task_waits_carry_it_to_the_agent(ui_agent: UiSession) -> None:  # noqa: F811
