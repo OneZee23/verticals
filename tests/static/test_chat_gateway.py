@@ -80,9 +80,22 @@ def _system_prompt(agent) -> str:
     return args[args.index("--append-system-prompt") + 1]
 
 
+def _tool(agent, name, tool_input=None):
+    agent.handle({"type": "control_request", "request_id": f"r-{name}",
+                  "request": {"subtype": "can_use_tool", "tool_name": name, "input": tool_input or {}}})
+
+
 def _bash(agent):
-    agent.handle({"type": "control_request", "request_id": "r1",
-                  "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "ls"}}})
+    _tool(agent, "Bash", {"command": "ls"})
+
+
+def _flag(agent, name):
+    args = agent.proc.args
+    return args[args.index(name) + 1]
+
+
+def _decision(agent):
+    return agent.proc.sent[-1]["response"]["response"]["behavior"]
 
 
 def test_verticals_only_is_the_default_and_keeps_claude_to_the_board() -> None:
@@ -150,3 +163,45 @@ def test_the_app_ships_every_skill_the_chat_reads() -> None:
     for skill in (chat.SKILL, chat.MORNING_SKILL):
         assert skill.name in bundle.SKILLS, skill.name
         assert (ROOT / ".agents" / "skills" / skill.name / "SKILL.md").is_file()
+
+
+def test_the_morning_turn_asks_first_whatever_mode_the_chat_is_in() -> None:
+    """Fix 4: a chat set to "Bypass permissions" or "Auto" made its own decisions for every tool, so the morning turn,
+    which nobody watches, could send or delete in the owner's other tools. In the morning turn the mode is always the
+    ask-first one, and each tool of another server comes to the gateway to be judged."""
+    for mode in ("manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions", "board"):
+        agent, _ = _claude({"permission": mode, "sources": "connected"})
+        assert _flag(agent, "--permission-mode") == "manual", mode
+        assert _flag(agent, "--tools") == "" and "--add-dir" not in agent.proc.args, mode
+    # Any other turn keeps the mode the owner chose.
+    assert _flag(_claude({"permission": "bypassPermissions"})[0], "--permission-mode") == "bypassPermissions"
+
+
+def test_the_morning_turn_reads_elsewhere_and_writes_in_verticals_only_what_the_report_needs() -> None:
+    """Fix 4: outside Verticals only a tool named for reading runs; in Verticals the report's writes run by themselves
+    and any other write is asked of the owner in the chat."""
+    agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"})
+    allowed = _flag(agent, "--allowedTools").split(",")
+    for tool in ("doc_create", "doc_save", "doc_link", "board", "doc_get"):
+        assert f"mcp__verticals__{tool}" in allowed, tool
+    for tool in ("delete", "update", "reparent", "doc_delete"):
+        assert f"mcp__verticals__{tool}" not in allowed, tool
+    _tool(agent, "mcp__google-calendar__list-events")
+    assert _decision(agent) == "allow"
+    for write in ("mcp__telethon__send_message", "mcp__telethon__mark_read", "mcp__google-calendar__delete-event"):
+        _tool(agent, write)
+        assert _decision(agent) == "deny", write
+    assert not session.asked
+    _tool(agent, "mcp__verticals__delete", {"id": "SYN00001"})
+    assert session.asked == ["Allow Claude to use delete?"]
+
+
+def test_the_morning_turn_of_codex_reads_whatever_mode_the_chat_is_in() -> None:
+    """Fix 4, Codex: its sandbox is read-only in the morning turn (it can reach only Verticals, and its files not at all)."""
+    chat = _chat()
+    for mode in ("full-access", "auto-review", "default", "read-only"):
+        settings = chat.clean_settings({"provider": "codex", "permission": mode, "sources": "connected"})
+        assert chat.codex_mode(settings) == "read-only", mode
+        assert chat.codex_policy(chat.codex_mode(settings), "/work")["sandboxPolicy"]["type"] == "readOnly", mode
+    assert chat.codex_mode(chat.clean_settings({"provider": "codex", "permission": "full-access"})) == "full-access"
+    assert chat.codex_mode(chat.clean_settings({"provider": "codex"})) == "auto-review"

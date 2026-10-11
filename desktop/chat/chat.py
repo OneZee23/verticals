@@ -44,6 +44,7 @@ PROMPT = load_prompt()
 # "Verticals only" keeps a Claude turn to the board; every other permission mode is Claude Code's own: its tools, the
 # owner's MCP servers and the home folder, each action outside Verticals asked in the chat unless the mode allows it.
 BOARD_ONLY = "board"
+ASK_FIRST = "manual"  # Claude Code's mode that asks for every tool it was not told to allow
 ACCESS_PROMPT = {
     False: "In this conversation Verticals is all you reach: you have no shell, files or web.",
     True: "In this conversation you also have Claude Code's own tools (shell, files, web) and the owner's other MCP "
@@ -283,14 +284,17 @@ class ClaudeAgent:
         effort = settings.get("effort")
         claude_settings = {"fastMode": bool(settings.get("fast")), "ultracode": effort == "ultracode"}
         # The morning report's turn (web lib/morning.ts) also reaches the owner's own connected tools, read-only, and
-        # makes its document and task in Verticals without asking, whatever the permission mode.
+        # saves its document in Verticals without asking. Nobody watches it, so it never runs in the chat's mode:
+        # "Bypass permissions" or "Auto" would let a tool of another server run before this gateway could judge it. It
+        # always asks first, and handle() answers: another server's tool only if its name reads, a Verticals write beyond
+        # the report goes to the owner (docs/design/agent-fixes.md, fix 4).
         self.connected = settings.get("sources") == CONNECTED
         self.full = full_access(settings) and not self.connected
         allowed = READ_TOOLS + (MORNING_WRITES if self.connected else [])
-        mode = settings.get("permission") or BOARD_ONLY
+        mode = ASK_FIRST if self.connected else settings.get("permission") or BOARD_ONLY
         args = [which("claude"), "--print", "--verbose", "--include-partial-messages",
                 "--input-format", "stream-json", "--output-format", "stream-json",
-                "--permission-mode", "manual" if mode == BOARD_ONLY else mode,
+                "--permission-mode", ASK_FIRST if mode == BOARD_ONLY else mode,
                 "--permission-prompts", "host", "--permission-prompt-tool", "stdio",
                 *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_mcp),
                 "--settings", json.dumps(claude_settings),
@@ -382,6 +386,11 @@ class ClaudeAgent:
         self.proc.close()
 
 
+def codex_mode(settings):
+    """The permission mode a Codex turn runs in: the chat's own, except the morning turn, which only reads."""
+    return "read-only" if settings.get("sources") == CONNECTED else settings.get("permission") or "auto-review"
+
+
 def codex_policy(mode, cwd=None):
     """Enjoy's sO(): permission mode -> Codex approval policy and sandbox."""
     out = {"approvalPolicy": "never" if mode == "full-access" else "on-request",
@@ -460,7 +469,7 @@ class CodexAgent:
         self.proc.request("initialize", {"clientInfo": {"name": "verticals-desktop", "title": "Verticals", "version": "0.1.0"},
                                          "capabilities": {"experimentalApi": True}})
         self.proc.notify("initialized", {})
-        params = {**codex_policy(settings.get("permission") or "auto-review"), "cwd": str(chat.workdir),
+        params = {**codex_policy(codex_mode(settings)), "cwd": str(chat.workdir),
                   "developerInstructions": codex_instructions(settings),
                   "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False},
                   "serviceTier": "fast" if settings.get("fast") else None}
@@ -485,7 +494,7 @@ class CodexAgent:
 
     def send(self, text):
         settings = self.settings = self.s.settings
-        params = {**codex_policy(settings.get("permission") or "auto-review", str(self.chat.workdir)),
+        params = {**codex_policy(codex_mode(settings), str(self.chat.workdir)),
                   "serviceTier": "fast" if settings.get("fast") else None, "threadId": self.thread_id,
                   "input": [{"type": "text", "text": text, "text_elements": []}]}
         if settings.get("model"):
