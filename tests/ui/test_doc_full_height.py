@@ -279,3 +279,27 @@ def test_the_field_stands_over_a_documents_foot_on_a_white_fade(ui_f2: UiSession
     page.wait_for_timeout(200)
     last = page.locator(f"{DOC} .doc-detail__body p").last.bounding_box()
     assert last is not None and last["y"] + last["height"] <= box["bottom"] - fade + 0.5, (last, fade)
+
+
+def test_a_documents_head_stands_under_the_desktop_apps_title_bar(ui_f2: UiSession) -> None:
+    """The desktop app's transparent title bar takes a press at the top of the window for the window itself
+    (Verticals.swift, `WebView.mouseDown`), and sets `--titlebar-height` for the page. The document window still reaches
+    the top edge, and its head, with the × and the head's actions, stands under the bar."""
+    session = ui_f2
+    page = session.page
+    page.set_viewport_size(OWNER_WINDOW)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc_id = _doc(conn, "syn-full/bar.md", "SYN Bar", LONG_BODY)
+        core_comments.create_thread(conn, owner="t1", goal_id=None, doc_id=doc_id, body="SYN bar note", author="human", anchor=None)
+    page.reload()
+    switch_view(page, "docs")
+    open_page(page, doc_id)
+    page.evaluate("() => document.documentElement.style.setProperty('--titlebar-height', '28px')")
+    page.wait_for_timeout(200)
+    box = _rect(page, DOC)
+    assert _near(box["y"], 0.5) and _near(box["bottom"], OWNER_WINDOW["height"] - 0.5), box
+    for selector in (
+        f"{DOC} .vt-window__head--doc .vt-window__button", f"{DOC} [data-role='doc-facts']", f"{DOC} [data-role='doc-comments']",
+    ):
+        part = _rect(page, selector)
+        assert part["y"] >= 28, f"{selector} reaches into the title bar: top {part['y']}"
