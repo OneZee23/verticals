@@ -4,9 +4,10 @@
 --
 --   ran_hash        the hash of the check that gave the last answer. A check edited since then is a new check: the old
 --                   answer says nothing about it and the failures start again.
---   approved_hash   the hash of the check the owner pressed Approve on. A command or a file is read only while it equals
---                   the hash of the check in the document right now, so any change pauses the source until the owner
---                   approves the new text. Only the HTTP route writes it, never an MCP tool.
+--   approved_hash   the hash of the check the owner pressed Approve on. An address, an MCP tool, a command or a file is
+--                   run only while it equals the hash of the check in the document right now, so any change pauses the
+--                   source until the owner approves the new text (a host-name lookup needs none). Only the HTTP route
+--                   writes it, never an MCP tool.
 --   checked_at, ok, detail, value, ms   the last answer: when, whether it passed, one printable line of why, the number
 --                   worth showing, how long it took.
 --   failures, failing_since, last_failure_at   the two-failures rule. A source turns red on its second failure in a row,

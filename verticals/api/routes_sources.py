@@ -1,8 +1,8 @@
 """The `/api/sources*` routes (docs/design/sources.md): every source with its colour for the Inbox, and the owner's
-Approve for a command or a file.
+Approve for a check that reaches something (an address, an MCP tool, a command, a file).
 
 Approve lives here and nowhere else. No MCP tool calls `core.sources.approve`, so the agent can write a check and never run
-a command of its own: the button sits beside the exact text it approves, and the hash it sends is the hash the owner was
+one of its own: the button sits beside the exact text it approves, and the hash it sends is the hash the owner was
 shown, so a check edited in between is refused (409) instead of approved unseen.
 """
 

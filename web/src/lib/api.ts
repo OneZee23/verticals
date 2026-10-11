@@ -715,7 +715,8 @@ export function fetchSources(): Promise<{ sources: SourceView[] }> {
   return request('/api/sources')
 }
 
-/** `POST /api/sources/{id}/approve`: the owner approves the exact check they were shown (a command or a file). */
+/** `POST /api/sources/{id}/approve`: the owner approves the exact check they were shown (an address, a tool, a command or a
+ *  file; a host-name lookup needs none). */
 export function approveSource(id: string, checkHash: string): Promise<SourceView> {
   return request<SourceView>(`/api/sources/${encodeURIComponent(id)}/approve`, {
     method: 'POST',

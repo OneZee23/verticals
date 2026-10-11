@@ -123,7 +123,9 @@ def test_the_hash_is_the_check_and_only_the_check() -> None:
     assert _check({**CMD, "parse": r"(\d+)\s*%"}).hash != base.hash
     assert _check({**CMD, "timeout": 5}).hash != base.hash
     assert _check({**HTTP}).hash != _check({**HTTP, "status": 204}).hash
-    assert base.gated and _check(FILE).gated and not any(_check(k).gated for k in (HTTP, MCP, DNS))
+    # Whatever reaches something is gated: an address, a tool, a command, a file. Only a name lookup is not.
+    assert all(_check(k).gated for k in (HTTP, MCP, CMD, FILE)) and not _check(DNS).gated
+    assert sc.GATED == {"http", "mcp", "cmd", "file"} and not _check(DNS).gated
 
 
 def test_the_block_goes_into_a_document_and_comes_back() -> None:
@@ -183,7 +185,10 @@ def test_the_owner_reads_what_will_run_before_approving_it() -> None:
         "Reads ~/logs/sync.log on this Mac every hour and wants it changed within the last 2 hours and a last line "
         "that matches ^OK.")
     assert _check(DNS).summary() == "Looks up example.test every hour and wants it to resolve."
-    assert "get_status" in _check(MCP).summary()
+    assert _check(MCP).summary() == "Calls the tool get_status of http://127.0.0.1:9100/mcp every hour."
+    # What the tool is sent is part of what is approved, so it is in the words.
+    sent = _check({**MCP, "args": {"scope": "all", "limit": 5}}).summary()
+    assert sent == 'Calls the tool get_status of http://127.0.0.1:9100/mcp with {"scope": "all", "limit": 5} every hour.', sent
 
 
 def test_a_file_name_comes_from_the_title() -> None:

@@ -43,8 +43,10 @@ class Clock:
 
 class _Health(BaseHTTPRequestHandler):
     up = True
+    hits = 0
 
     def do_GET(self) -> None:  # noqa: N802
+        type(self).hits += 1
         body = json.dumps({"status": "ok"}).encode()
         self.send_response(200 if type(self).up else 503)
         self.send_header("Content-Length", str(len(body)))
@@ -57,7 +59,7 @@ class _Health(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def health() -> Iterator[tuple[str, type[_Health]]]:
-    handler = type("Handler", (_Health,), {"up": True})
+    handler = type("Handler", (_Health,), {"up": True, "hits": 0})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -88,6 +90,12 @@ def _add(db: psycopg.Connection, name: str, raw: dict) -> str:
     return core_docs.create(db, owner=OWNER, path=f"sources/{name}.md", title=name.title(), body=body).doc.id
 
 
+def _approve(db: psycopg.Connection, doc_id: str, clock: Clock) -> None:
+    """The owner presses Approve on the check as it stands."""
+    source = core.find(db, owner=OWNER, ref=doc_id)
+    core.approve(db, owner=OWNER, doc_id=doc_id, check_hash=source.check.hash, now=clock.now)
+
+
 def _view(db: psycopg.Connection, doc_id: str, clock: Clock) -> core.View:
     return core.view(core.find(db, owner=OWNER, ref=doc_id), clock.now)
 
@@ -101,6 +109,7 @@ def test_a_pass_runs_what_is_due_and_keeps_the_answers(db: psycopg.Connection, p
     clock = Clock()
     web = _add(db, "web", {"kind": "http", "url": url, "expect": {"status": "ok"}})
     host = _add(db, "host", {"kind": "dns", "host": "localhost"})
+    _approve(db, web, clock)
     ran = _pass(pool, clock, home)
     assert sorted(r.path for r in ran) == ["sources/host.md", "sources/web.md"]
     assert all(r.result.ok for r in ran)
@@ -120,6 +129,7 @@ def test_a_source_that_stops_answering_turns_red_on_the_second_look_five_minutes
     url, server = health
     clock = Clock()
     web = _add(db, "web", {"kind": "http", "url": url})
+    _approve(db, web, clock)
     assert _pass(pool, clock, home)[0].result.ok
     server.up = False
     clock.move(hours=1)
@@ -138,6 +148,37 @@ def test_a_source_that_stops_answering_turns_red_on_the_second_look_five_minutes
     clock.move(hours=1)
     back = _pass(pool, clock, home)[0]
     assert (back.recorded.recovered, _view(db, web, clock).status) == (True, core.OK)
+
+
+def test_an_address_is_not_asked_until_the_owner_approves_it_and_not_again_after_a_change(db: psycopg.Connection, pool, home: Path, health) -> None:
+    url, server = health
+    clock = Clock()
+    web = _add(db, "web", {"kind": "http", "url": url})
+    for _ in range(3):
+        assert _pass(pool, clock, home) == [], "an address nobody approved is never asked"
+        clock.move(hours=1)
+    assert server.hits == 0, "not one request was sent"
+    assert _view(db, web, clock).why == core.WAITING
+
+    _approve(db, web, clock)
+    assert [(r.path, r.result.ok) for r in _pass(pool, clock, home)] == [("sources/web.md", True)]
+    assert server.hits == 1
+
+    # Another address, or the same one with something added to it, is another check: it waits again, and nothing is sent.
+    source = core.find(db, owner=OWNER, ref=web)
+    changed = sc.set_section(source.body, "check", sc.render_block(sc.Check.from_dict({"kind": "http", "url": url + "?token=x"})))
+    core_docs.save(db, owner=OWNER, id=web, expected_revision=source.revision, body=changed)
+    clock.move(hours=2)
+    assert _pass(pool, clock, home) == [] and server.hits == 1
+    assert _view(db, web, clock).why == core.WAITING
+
+
+def test_an_mcp_tool_is_not_called_until_the_owner_approves_it(db: psycopg.Connection, pool, home: Path) -> None:
+    clock = Clock()
+    tool = _add(db, "tool", {"kind": "mcp", "url": "http://127.0.0.1:9/mcp", "tool": "get_status"})
+    assert _pass(pool, clock, home) == []
+    assert core.find(db, owner=OWNER, ref=tool).row is None, "nothing was called, so there is nothing to record"
+    assert _view(db, tool, clock).why == core.WAITING
 
 
 def test_a_command_is_not_run_until_the_owner_approves_it_and_not_again_after_a_change(db: psycopg.Connection, pool, home: Path) -> None:
@@ -161,33 +202,32 @@ def test_a_command_is_not_run_until_the_owner_approves_it_and_not_again_after_a_
     assert _view(db, disk, clock).why == core.WAITING
 
 
-def test_a_check_edited_since_its_last_answer_is_run_at_once(db: psycopg.Connection, pool, home: Path, health) -> None:
-    url, _ = health
+def test_a_check_edited_since_its_last_answer_is_run_at_once(db: psycopg.Connection, pool, home: Path) -> None:
     clock = Clock()
-    doc = _add(db, "web", {"kind": "http", "url": url})
+    doc = _add(db, "web", {"kind": "dns", "host": "localhost"})
     _pass(pool, clock, home)
     source = core.find(db, owner=OWNER, ref=doc)
-    changed = sc.set_section(source.body, "check", sc.render_block(sc.Check.from_dict({"kind": "http", "url": url, "status": 503})))
+    other = sc.Check.from_dict({"kind": "dns", "host": "127.0.0.1"})
+    changed = sc.set_section(source.body, "check", sc.render_block(other))
     core_docs.save(db, owner=OWNER, id=doc, expected_revision=source.revision, body=changed)
     clock.move(minutes=1)
     ran = _pass(pool, clock, home)
-    assert [(r.path, r.result.ok) for r in ran] == [("sources/web.md", False)], "a minute later, not an hour"
+    assert [(r.path, r.result.ok) for r in ran] == [("sources/web.md", True)], "a minute later, not an hour"
+    assert core.find(db, owner=OWNER, ref=doc).row.ran_hash == other.hash
 
 
-def test_a_check_another_pass_has_taken_is_left_to_it(db: psycopg.Connection, pool, home: Path, health) -> None:
-    url, _ = health
+def test_a_check_another_pass_has_taken_is_left_to_it(db: psycopg.Connection, pool, home: Path) -> None:
     clock = Clock()
-    doc = _add(db, "web", {"kind": "http", "url": url})
+    doc = _add(db, "web", {"kind": "dns", "host": "localhost"})
     assert core.claim(db, owner=OWNER, source=core.find(db, owner=OWNER, ref=doc), now=clock.now)
     assert _pass(pool, clock, home) == []
     clock.move(minutes=11)
     assert len(_pass(pool, clock, home)) == 1, "a pass that died leaves a lease that runs out"
 
 
-def test_a_pass_that_is_told_to_stop_runs_nothing_and_records_nothing(db: psycopg.Connection, pool, home: Path, health) -> None:
-    url, _ = health
+def test_a_pass_that_is_told_to_stop_runs_nothing_and_records_nothing(db: psycopg.Connection, pool, home: Path) -> None:
     clock = Clock()
-    doc = _add(db, "web", {"kind": "http", "url": url})
+    doc = _add(db, "web", {"kind": "dns", "host": "localhost"})
     stop = threading.Event()
     stop.set()
     assert _pass(pool, clock, home, stop=stop) == []
@@ -232,10 +272,11 @@ def _wait(condition: Callable[[], bool], seconds: float = 10.0) -> bool:
 def test_the_timer_looks_on_its_own_when_poked_and_stops_when_told(db: psycopg.Connection, pool, health) -> None:
     url, _ = health
     doc = _add(db, "web", {"kind": "http", "url": url})
+    core.approve(db, owner=OWNER, doc_id=doc, check_hash=core.find(db, owner=OWNER, ref=doc).check.hash, now=datetime.now(timezone.utc))
     timer = scheduler.Timer(pool, owner=OWNER, tick=3600.0, first_look=0.05)
     timer.start()
     assert timer.running
-    assert _wait(lambda: core.find(db, owner=OWNER, ref=doc).row is not None), "the first look comes on its own"
+    assert _wait(lambda: core.find(db, owner=OWNER, ref=doc).row.checked_at is not None), "the first look comes on its own"
     first = core.find(db, owner=OWNER, ref=doc).row.checked_at
 
     # Nothing is due for an hour, but a poke looks now: the owner just approved a check.

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A source's state at the top of its window (docs/design/sources.md; lib/sources.ts): what its check last found, the check
-// in words (for a command or a file, the exact text you are approving), and the one thing to do: Approve a command or a
-// file that waits for you, Fix a source that stopped answering. Nothing else here; the document under it is the
+// in words (for a check that waits, the exact text you are approving), and the one thing to do: Approve a check that waits
+// for you, Fix a source that stopped answering. Nothing else here; the document under it is the
 // source's own page.
 import { computed, onMounted, ref, watch } from 'vue'
 import { KButton } from '@konstantinopolskii/vue'

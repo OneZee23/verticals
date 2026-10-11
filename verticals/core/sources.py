@@ -13,8 +13,9 @@ Three rules live here and nowhere else:
     comes sooner than five minutes after a failure (the agent's run-once) does not count as the second.
   * **Grey is never red.** A source waiting for approval, with no check, with a check nobody can read, not yet checked,
     or last checked over two hours ago ("not checked since", the Mac was asleep) is grey. Only a fresh answer is red.
-  * **A command or a file runs only on approval.** `cmd` and `file` need `approved_hash` to equal the hash of the check
-    in the document now. `approve` is the one writer of that hash, and no MCP tool calls it.
+  * **Whatever reaches something runs only on approval.** `http`, `mcp`, `cmd` and `file` need `approved_hash` to equal
+    the hash of the check in the document now; only a host-name lookup (`dns`) and the app's own `connections` check run
+    without it. `approve` is the one writer of that hash, and no MCP tool calls it.
 """
 
 from __future__ import annotations
@@ -248,8 +249,8 @@ def views(conn: psycopg.Connection, *, owner: str, now: datetime, excerpt: bool 
 
 
 def due(source: Source, now: datetime) -> bool:
-    """Whether the timer should run this source's check now: it has one, it may run (a command or a file only when
-    approved), and either its time has come or the check changed since the last answer."""
+    """Whether the timer should run this source's check now: it has one, it may run (an address, a tool, a command or a file
+    only when approved), and either its time has come or the check changed since the last answer."""
     check, row = source.check, source.row
     if check is None or source.waiting:
         return False
@@ -342,13 +343,13 @@ def wake(conn: psycopg.Connection, *, owner: str, doc_id: str, now: datetime) ->
 def approve(conn: psycopg.Connection, *, owner: str, doc_id: str, check_hash: str, now: datetime) -> View:
     """The owner pressed Approve on the check they were shown. It is refused if the check in the document has moved
     since (the owner approves what they read, nothing else), and the source is made due now. Only the HTTP route calls
-    this; no MCP tool does, so the agent can propose a command and never run its own."""
+    this; no MCP tool does, so the agent can propose a check and never approve its own."""
     owner = validate_owner(owner)
     source = find(conn, owner=owner, ref=require_str(doc_id, "id"))
     if source.check is None:
         raise ValidationError(f"this source has no check to approve: {source.error}", field="check")
     if not source.check.gated:
-        raise ValidationError(f"this {source.check.kind} check needs no approval: only cmd and file checks do", field="check")
+        raise ValidationError(f"this {source.check.kind} check needs no approval: only a name lookup (dns) does not ask", field="check")
     if source.check.hash != check_hash:
         raise RevisionMismatch("the check has changed since it was shown: read it again", id=source.id,
                                check_hash=source.check.hash)

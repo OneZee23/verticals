@@ -35,11 +35,18 @@ GOOD = Result(ok=True, detail="HTTP 200", ms=12)
 BAD = Result(ok=False, detail="HTTP 503", ms=9)
 
 
-def _source(conn: psycopg.Connection, name: str, raw: dict) -> core.Source:
+def _source(conn: psycopg.Connection, name: str, raw: dict, *, approved: bool = True) -> core.Source:
+    """A source document. A check that reaches something (an address, a tool, a command, a file) has the owner's approval
+    unless `approved` is False: the scenarios about a state show it as it is once approved, and the ones about waiting show
+    it before."""
     body = sc.build_body(gives="What the report reads.", how="Ask it.", since="the last report", check=sc.Check.from_dict(raw),
                          fixes=["Restart the worker."])
     doc = core_docs.create(conn, owner=OWNER, path=f"sources/{name}.md", title=name.title(), body=body).doc
-    return core.find(conn, owner=OWNER, ref=doc.id)
+    source = core.find(conn, owner=OWNER, ref=doc.id)
+    if approved and source.check.gated:
+        core.approve(conn, owner=OWNER, doc_id=source.id, check_hash=source.check.hash, now=datetime.now(timezone.utc))
+        source = core.find(conn, owner=OWNER, ref=doc.id)
+    return source
 
 
 def _record(conn: psycopg.Connection, source: core.Source, result: Result, when: datetime) -> None:
@@ -78,7 +85,7 @@ def test_the_sources_row_stands_under_documents_red_first_each_with_its_state(ui
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         mail = _source(conn, "mail", HTTP)
         chat = _source(conn, "chat", HTTP)
-        disk = _source(conn, "disk", CMD)
+        disk = _source(conn, "disk", CMD, approved=False)
         notes = core_docs.create(conn, owner=OWNER, path="syn-sources/notes.md", title="SYN Sources notes").doc.id
         _record(conn, mail, GOOD, now - timedelta(minutes=3))
         _record(conn, chat, BAD, now - timedelta(minutes=65))
@@ -123,6 +130,7 @@ def test_a_source_the_agent_writes_appears_in_the_open_inbox_and_a_stale_answer_
         # What the agent's tool does: the document, then the answer to its first run (here an old one, the Mac was asleep).
         draft = source_docs.prepare(conn, owner=OWNER, title="Calendar", gives="Events.", how="Ask it.", since="the last report", check=HTTP)
         saved = source_docs.save(conn, owner=OWNER, draft=draft, now=now)
+        core.approve(conn, owner=OWNER, doc_id=saved.id, check_hash=saved.check.hash, now=now - timedelta(minutes=131))
         _record(conn, saved, BAD, now - timedelta(minutes=130))
         _record(conn, saved, BAD, now - timedelta(minutes=125))
 
@@ -138,7 +146,7 @@ def test_a_command_waits_in_its_window_for_your_approval_of_exactly_that_text(ui
     session = ui_f2
     page = session.page
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        disk = _source(conn, "disk", CMD)
+        disk = _source(conn, "disk", CMD, approved=False)
 
     _open_inbox(session)
     strip = _open_window(page, disk.id)
@@ -159,11 +167,34 @@ def test_a_command_waits_in_its_window_for_your_approval_of_exactly_that_text(ui
     assert approved == (disk.check.hash,), "what was approved is the hash of the check that was shown"
 
 
+def test_an_address_waits_in_its_window_like_a_command_and_shows_what_will_be_asked(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = session.page
+    check = {**HTTP, "url": "https://example.test/health?full=1", "expect": {"status": "ok"}}
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        web = _source(conn, "web", check, approved=False)
+
+    _open_inbox(session)
+    expect(_chip(page, web.id).locator('[data-role="source-state"]')).to_have_text("waiting for your approval", timeout=10000)
+    strip = _open_window(page, web.id)
+    expect(strip).to_have_attribute("data-why", "waiting")
+    expect(strip.locator('[data-role="source-strip-state"]')).to_have_text("Waiting for your approval")
+    # The exact address, query and all, and what it wants back, in words.
+    expect(strip.locator('[data-role="source-strip-check"]')).to_contain_text(
+        'Asks https://example.test/health?full=1 every hour and wants HTTP 200 and status to be "ok"')
+    tick(page)
+    strip.locator('[data-role="source-approve"]').click()
+    expect(strip.locator('[data-role="source-approve"]')).to_have_count(0, timeout=10000)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        approved = conn.execute("SELECT approved_hash FROM source_state WHERE doc_id = %s", (web.id,)).fetchone()
+    assert approved == (web.check.hash,)
+
+
 def test_a_check_edited_while_you_read_it_is_not_approved_unseen(ui_f2: UiSession) -> None:
     session = ui_f2
     page = session.page
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        disk = _source(conn, "disk", CMD)
+        disk = _source(conn, "disk", CMD, approved=False)
 
     _open_inbox(session)
     strip = _open_window(page, disk.id)
@@ -238,7 +269,6 @@ def test_a_pass_that_read_a_number_shows_it_and_a_plain_pass_says_nothing_more(u
         plain = _source(conn, "plain", HTTP)
         disk = _source(conn, "disk", CMD)
         _record(conn, plain, GOOD, now - timedelta(minutes=2))
-        core.approve(conn, owner=OWNER, doc_id=disk.id, check_hash=disk.check.hash, now=now - timedelta(minutes=3))
         _record(conn, disk, Result(ok=True, detail="71 from '71% of'", value=71.0, ms=8), now - timedelta(minutes=2))
 
     _open_inbox(session)
@@ -261,7 +291,6 @@ def test_editing_a_sources_text_in_its_window_leaves_its_check_and_its_approval_
     check = {"kind": "cmd", "argv": ["/bin/df", "-k", "/"], "parse": r"\s(\d+)%\s", "max": 90, "say": "{v}% of the disk is used"}
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         disk = _source(conn, "disk", check)
-        core.approve(conn, owner=OWNER, doc_id=disk.id, check_hash=disk.check.hash, now=datetime.now(timezone.utc))
 
     _open_inbox(session)
     _open_window(page, disk.id)

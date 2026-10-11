@@ -4,13 +4,16 @@ mocks. The processes here run the timer fast (a tick of one second); the others 
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import httpx
@@ -126,16 +129,60 @@ def test_a_check_changed_after_approval_waits_for_the_owner_again(api: httpx.Cli
     assert stale.status_code == 200
 
 
-def test_a_document_with_no_check_is_listed_grey_and_a_http_one_needs_no_approval(api: httpx.Client) -> None:
+class _Counting(BaseHTTPRequestHandler):
+    hits = 0
+
+    def do_GET(self) -> None:  # noqa: N802
+        type(self).hits += 1
+        body = json.dumps({"status": "ok"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
+def test_an_address_waits_for_approval_through_the_route_and_is_asked_only_after_it(api: httpx.Client) -> None:
+    handler = type("Handler", (_Counting,), {"hits": 0})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        made = _source(api, "up", {"kind": "http", "url": f"http://127.0.0.1:{server.server_address[1]}/up", "expect": {"status": "ok"}})
+        waiting = _listed(api, made["id"])
+        assert (waiting["status"], waiting["why"], waiting["needs_approval"]) == ("grey", "waiting", True)
+        assert waiting["summary"].startswith("Asks http://127.0.0.1:")
+        time.sleep(2.5)  # the timer looks twice
+        assert handler.hits == 0 and _listed(api, made["id"])["why"] == "waiting", "an address nobody approved is never asked"
+
+        approved = api.post(f"/api/sources/{made['id']}/approve", json={"check_hash": waiting["check_hash"]})
+        assert approved.status_code == 200 and approved.json()["approved"] is True
+        green = _until(api, made["id"], lambda s: s["status"] == "ok", seconds=10)
+        assert green["detail"] == 'HTTP 200, status="ok"' and handler.hits >= 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_document_with_no_check_is_listed_grey_and_only_a_name_lookup_needs_no_approval(api: httpx.Client) -> None:
     plain = api.post("/api/docs", json={"path": "sources/notes.md", "title": "Notes", "body": "Nothing to check yet."}).json()
     listed = _listed(api, plain["id"])
     assert (listed["status"], listed["why"], listed["kind"]) == ("grey", "no_check", None)
     assert api.post(f"/api/sources/{plain['id']}/approve", json={"check_hash": "0" * 64}).status_code == 422
     web = _source(api, "web", {"kind": "http", "url": "http://127.0.0.1:9/never"})
-    assert api.post(f"/api/sources/{web['id']}/approve", json={"check_hash": _listed(api, web["id"])["check_hash"]}).status_code == 422
-    # The row puts what needs a look first: a document with no check before one that answers.
+    tool = _source(api, "tool", {"kind": "mcp", "url": "http://127.0.0.1:9/mcp", "tool": "get_status"})
+    for source in (web, tool):
+        seen = _listed(api, source["id"])
+        assert (seen["status"], seen["why"], seen["needs_approval"]) == ("grey", "waiting", True)
+    name = _source(api, "name", {"kind": "dns", "host": "localhost"})
+    assert api.post(f"/api/sources/{name['id']}/approve", json={"check_hash": _listed(api, name["id"])["check_hash"]}).status_code == 422
+    # The row puts what needs a look first: what waits for the owner, then a document with no check, then what answers.
+    _until(api, name["id"], lambda s: s["status"] == "ok")
     order = [s["path"] for s in api.get("/api/sources").json()["sources"]]
-    assert order.index("sources/notes.md") < order.index("sources/web.md")
+    assert order.index("sources/web.md") < order.index("sources/notes.md") < order.index("sources/name.md")
+    assert order.index("sources/tool.md") < order.index("sources/notes.md")
+    assert _listed(api, web["id"])["checked_at"] is None, "the address that waited was never asked"
 
 
 def test_with_the_timer_off_nothing_is_ever_checked(f2_dsn: str, tmp_path: Path) -> None:

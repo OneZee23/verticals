@@ -2,10 +2,11 @@
 Postgres, no mocks.
 
 What is pinned: a source is a document under sources/ whose plain sections and one check the tool writes; the tool runs
-the check once and returns the answer beside what the check saw; a command waits for the owner (the only approval is the
-app's, so there is no tool that approves and the test approves the way the Approve button does, through `core`); a
-changed check waits again; one failure is not red; a taken name is refused instead of numbered; a bad check is refused
-with the field and writes nothing. Checks run against a tiny local web server and `/bin/echo`, never a real service.
+the check once and returns the answer beside what the check saw; every check that reaches something (an address, a tool,
+a command, a file) waits for the owner, and only a name lookup runs at once (the only approval is the app's, so there is
+no tool that approves, and the test approves the way the Approve button does, through `core`); a changed check waits
+again; one failure is not red; a taken name is refused instead of numbered; a bad check is refused with the field and
+writes nothing. Checks run against a tiny local web server, `/bin/echo` and `localhost`, never a real service.
 """
 
 from __future__ import annotations
@@ -80,22 +81,37 @@ async def _made_checked_and_listed(f2_dsn: str, tmp_path: Path, web: str) -> Non
         made = await session.call_tool("source", {**QUEUE, "check": check})
         assert made.is_error is False, made.content
         out = made.structured_content
-        assert (out["created"], out["saved"], out["ran"], out["why_not"]) == (True, True, True, None)
-        assert out["result"]["ok"] is True and out["result"]["value"] == 7.0
-        assert out["result"]["detail"] == "7 jobs waiting"
-        assert '"depth"' in out["result"]["raw"], "the number stands beside what the check saw"
-        assert out["result"]["ms"] is not None
+        # An address reaches something, so it waits for the owner: written, shown in words, not asked.
+        assert (out["created"], out["saved"], out["ran"], out["result"]) == (True, True, False, None)
+        assert "waiting for the owner" in out["why_not"] and f"{web}/queue" in out["why_not"]
         source = out["source"]
-        assert (source["path"], source["title"], source["status"], source["kind"], source["where"]) == (
-            "sources/queue.md", "Queue", "ok", "http", "here")
-        assert source["checked_at"] is not None and source["failures"] == 0
-        assert "7 jobs waiting" in made.content[0].text and "Created source" in made.content[0].text
+        assert (source["path"], source["title"], source["status"], source["why"], source["kind"], source["where"]) == (
+            "sources/queue.md", "Queue", "grey", "waiting", "http", "here")
+        assert (source["needs_approval"], source["checked_at"], len(source["check_hash"])) == (True, None, 64)
+        assert "Created source" in made.content[0].text and "not run: waiting for the owner" in made.content[0].text
 
         # It is a document like any other: the plain sections, then the one check, as the owner will read it.
         doc = await session.call_tool("doc_get", {"path": "sources/queue.md"})
         body = doc.structured_content["doc"]["body"]
         assert "How many jobs wait for the worker." in body and "Restart the worker." in body
         assert "```check" in body and f"{web}/queue" in body
+
+        # Asking again changes nothing: the agent cannot approve, and a run that is not allowed is not made.
+        retry = await session.call_tool("source", {"id": source["id"]})
+        assert (retry.structured_content["ran"], retry.structured_content["saved"]) == (False, False)
+
+        _approve(f2_dsn, source["id"], source["check_hash"])
+        ran = await session.call_tool("source", {"id": source["id"]})
+        assert ran.is_error is False, ran.content
+        out = ran.structured_content
+        assert (out["created"], out["saved"], out["ran"], out["why_not"]) == (False, False, True, None)
+        assert out["result"]["ok"] is True and out["result"]["value"] == 7.0
+        assert out["result"]["detail"] == "7 jobs waiting"
+        assert '"depth"' in out["result"]["raw"], "the number stands beside what the check saw"
+        assert out["result"]["ms"] is not None
+        assert (out["source"]["status"], out["source"]["approved"], out["source"]["failures"]) == ("ok", True, 0)
+        assert out["source"]["checked_at"] is not None
+        assert "checked: ok, 7 jobs waiting" in ran.content[0].text
 
         listed = await session.call_tool("sources", {})
         rows = listed.structured_content["sources"]
@@ -104,7 +120,7 @@ async def _made_checked_and_listed(f2_dsn: str, tmp_path: Path, web: str) -> Non
         one = await session.call_tool("sources", {"id": "sources/queue.md"})
         assert one.structured_content["source"]["body"] == body
 
-        # Changing only the fixes leaves the rest of the document as the owner left it, and runs the check again.
+        # Changing only the fixes leaves the rest of the document as the owner left it, the approval stands, and the check runs.
         again = await session.call_tool("source", {"id": source["id"], "fixes": []})
         assert again.is_error is False, again.content
         assert (again.structured_content["created"], again.structured_content["saved"], again.structured_content["ran"]) == (
@@ -117,6 +133,11 @@ async def _made_checked_and_listed(f2_dsn: str, tmp_path: Path, web: str) -> Non
         # Nothing changed: nothing written.
         same = await session.call_tool("source", {"id": source["id"], "fixes": []})
         assert same.structured_content["saved"] is False and same.structured_content["ran"] is True
+
+        # Another address is another check: written, and waiting for the owner again.
+        moved = await session.call_tool("source", {"id": source["id"], "check": {**check, "url": f"{web}/queue?full=1"}})
+        assert (moved.structured_content["saved"], moved.structured_content["ran"]) == (True, False)
+        assert (moved.structured_content["source"]["status"], moved.structured_content["source"]["why"]) == ("grey", "waiting")
 
         # A second source under a name that is taken is refused, naming the one that has it.
         twin = await session.call_tool("source", {**QUEUE, "check": check})
@@ -179,11 +200,17 @@ async def _one_failure(f2_dsn: str, tmp_path: Path, web: str) -> None:
     async with open_mcp_stdio(f2_dsn, tmp_path, label="source-down") as (session, streams):
         made = await session.call_tool("source", {**QUEUE, "title": "Status page", "check": {"kind": "http", "url": f"{web}/down"}})
         assert made.is_error is False, made.content
-        out = made.structured_content
+        assert made.structured_content["ran"] is False, "an address waits for the owner first"
+        source = made.structured_content["source"]
+        _approve(f2_dsn, source["id"], source["check_hash"])
+
+        ran = await session.call_tool("source", {"id": source["id"]})
+        assert ran.is_error is False, ran.content
+        out = ran.structured_content
         assert out["ran"] is True and out["result"]["ok"] is False
         assert out["result"]["detail"] == "HTTP 503"
         assert "maintenance window" in out["result"]["raw"], "the failure stands beside what the check saw"
-        assert "NOT ok" in made.content[0].text
+        assert "NOT ok" in ran.content[0].text
         source = out["source"]
         # The first failure is looked at again quietly: not red, and when.
         assert (source["status"], source["failures"], source["detail"]) == ("ok", 1, "HTTP 503")
@@ -201,6 +228,30 @@ async def _one_failure(f2_dsn: str, tmp_path: Path, web: str) -> None:
 
 def test_one_failure_is_shown_beside_what_it_saw_and_is_not_red(f2_dsn: str, tmp_path: Path, web: str) -> None:
     anyio.run(_one_failure, f2_dsn, tmp_path, web)
+
+
+async def _lookup_runs_at_once(f2_dsn: str, tmp_path: Path) -> None:
+    async with open_mcp_stdio(f2_dsn, tmp_path, label="source-dns") as (session, streams):
+        made = await session.call_tool("source", {**QUEUE, "title": "Name", "check": {"kind": "dns", "host": "localhost"}})
+        assert made.is_error is False, made.content
+        out = made.structured_content
+        assert (out["ran"], out["why_not"], out["result"]["ok"]) == (True, None, True), "a name lookup asks nothing first"
+        assert out["result"]["detail"].startswith("resolves to ") and out["result"]["raw"].strip()
+        assert (out["source"]["status"], out["source"]["kind"], out["source"]["where"], out["source"]["needs_approval"]) == (
+            "ok", "dns", "anywhere", False)
+
+        # A tool of an MCP server waits like an address, and the words say what it will be sent.
+        tool = await session.call_tool("source", {**QUEUE, "title": "Tool", "check": {
+            "kind": "mcp", "url": "http://127.0.0.1:9/mcp", "tool": "get_status", "args": {"scope": "all"}}})
+        assert tool.is_error is False, tool.content
+        assert tool.structured_content["ran"] is False and tool.structured_content["result"] is None
+        assert 'with {"scope": "all"}' in tool.structured_content["why_not"]
+        assert tool.structured_content["source"]["why"] == "waiting"
+        streams.assert_hygiene(token=TEST_TOKEN)
+
+
+def test_a_name_lookup_runs_at_once_and_a_tool_of_an_mcp_server_waits(f2_dsn: str, tmp_path: Path) -> None:
+    anyio.run(_lookup_runs_at_once, f2_dsn, tmp_path)
 
 
 async def _refusals(f2_dsn: str, tmp_path: Path) -> None:

@@ -15,8 +15,10 @@ a quote and comes back as typed. The block is the only copy of the check; the ta
 second check.
 
 Five kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns`. A sixth, `connections`, is written only by the app.
-Unknown fields are refused, so a typo cannot quietly drop a limit. `cmd` and `file` are gated: they run only when the
-owner approved the exact check, which is the hash below (`Check.hash`).
+Unknown fields are refused, so a typo cannot quietly drop a limit. `http`, `mcp`, `cmd` and `file` are gated: each reaches
+something (an address, a server, a program, a file) and can carry something out or bring something in, so each runs only
+when the owner approved the exact check, which is the hash below (`Check.hash`). Only `dns` and the app's own
+`connections` run without it.
 """
 
 from __future__ import annotations
@@ -37,13 +39,16 @@ from verticals.core.errors import ValidationError
 PREFIX = "sources/"
 KINDS = ("http", "mcp", "cmd", "file", "dns")
 APP_KINDS = ("connections",)
-# The kinds that read this Mac itself. They run only after the owner approved the exact check.
-GATED = frozenset({"cmd", "file"})
+# The kinds that reach something, and so run only after the owner approved the exact check (its hash). Only a host-name
+# lookup (`dns`) and the app's own `connections` check run without approval.
+GATED = frozenset({"http", "mcp", "cmd", "file"})
+# The kinds that read this Mac itself, so they always run here.
+ON_THIS_MAC = frozenset({"cmd", "file"})
 WHERES = ("here", "anywhere")
 
 # The reading verbs a tool name may start with: the morning turn's own test for another server's tool
 # (`desktop/chat/chat.py::reads_only`, copied here as a list; `core/` does not import the gateway), plus the two words a
-# health tool uses. An `mcp` check calls one tool every hour with no approval, so it may only be a tool that reads.
+# health tool uses. An `mcp` check calls one tool every hour, so it may only be a tool that reads.
 READ_VERBS = frozenset({
     "get", "list", "search", "fetch", "read", "retrieve", "find", "query", "lookup", "show", "describe", "inspect",
     "whoami", "health", "status", "ping", "check",
@@ -261,7 +266,7 @@ def _normalise(kind: str, raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _default_where(kind: str, fields: Mapping[str, Any]) -> str:
-    if kind in GATED or kind in APP_KINDS:
+    if kind in ON_THIS_MAC or kind in APP_KINDS:
         return "here"
     if kind in ("http", "mcp"):
         return "here" if is_local_host(urlsplit(fields["url"]).hostname or "") else "anywhere"
@@ -333,7 +338,8 @@ class Check:
         if self.kind == "http":
             return f"Asks {f['url']} every hour and wants {wanted}."
         if self.kind == "mcp":
-            return f"Calls the tool {f['tool']} of {f['url']} every hour" + (f" and wants {wanted}" if wants else "") + "."
+            sent = f" with {json.dumps(f['args'], ensure_ascii=False)}" if f.get("args") else ""
+            return f"Calls the tool {f['tool']} of {f['url']}{sent} every hour" + (f" and wants {wanted}" if wants else "") + "."
         if self.kind == "cmd":
             return f"Runs {shlex.join(f['argv'])} on this Mac every hour and wants {wanted}."
         if self.kind == "file":

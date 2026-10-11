@@ -1,7 +1,7 @@
 // Sources (docs/design/sources.md; the app's side of core/sources.py): the documents the morning report reads from, each
 // with the state its check last left. The app checks every source every hour with no model; here the Inbox's third row
-// draws them as document chips, and a source's window carries its state, the exact check, Approve for a command or a file,
-// and Fix on a red one.
+// draws them as document chips, and a source's window carries its state, the exact check, Approve for a check that waits
+// (every kind but a host-name lookup reaches something, so each waits for you first), and Fix on a red one.
 //
 // What a state says (the words are the design's): "checked 07:00"; in red "not answering since 06:00", only after two
 // failures at least five minutes apart; and grey, which is never red, when the answer cannot be trusted now: "waiting for

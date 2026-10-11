@@ -32,14 +32,17 @@ def test_a_new_source_needs_every_part_and_is_made_under_sources(db: psycopg.Con
     draft = source_docs.prepare(db, owner=OWNER, check=HTTP, fixes=["Restart it."], **WHOLE)
     assert (draft.created, draft.id, draft.revision, draft.path) == (True, None, None, "sources/health-page.md")
     assert draft.check is not None and draft.check.hash == sc.Check.from_dict(HTTP).hash
-    assert draft.runnable is True, "an address needs no approval"
+    assert draft.runnable is False, "an address waits for the owner too: it can carry something out"
     saved = source_docs.save(db, owner=OWNER, draft=draft, now=NOW)
     assert (saved.path, saved.title, saved.revision) == ("sources/health-page.md", "Health page", 1)
     assert saved.check is not None and saved.check.as_dict() == sc.Check.from_dict(HTTP).as_dict()
     assert sc.section_text(saved.body, "fixes") == "- Restart it."
-    # Writing it wakes it: a row exists (its change rings the bell the open app listens to) and it is due at the next pass.
+    # Writing it wakes it: a row exists (its change rings the bell the open app listens to). An address waits for approval,
+    # so it is not due; a name lookup, which does not, is due at the next pass.
     assert saved.row is not None and saved.row.next_check_at == NOW and saved.row.checked_at is None
-    assert core.due(saved, NOW) is True
+    assert core.due(saved, NOW) is False and saved.waiting is True
+    lookup = _make(db, {"kind": "dns", "host": "example.test"}, title="Name lookup")
+    assert core.due(lookup, NOW) is True and lookup.row is not None
 
     for missing in ("title", "gives", "how", "since", "check"):
         parts = {**WHOLE, "check": HTTP}
@@ -83,20 +86,26 @@ def test_a_change_replaces_only_the_parts_it_names(db: psycopg.Connection) -> No
     assert (renamed.title, renamed.path) == ("Service health", "sources/health-page.md")
 
 
-def test_a_command_may_run_only_with_the_owners_approval_of_exactly_that_check(db: psycopg.Connection) -> None:
-    source = _make(db, CMD, title="Disk")
-    waiting = source_docs.prepare(db, owner=OWNER, ref=source.id)
-    assert (waiting.check.gated, waiting.runnable) == (True, False)
+def test_a_check_may_run_only_with_the_owners_approval_of_exactly_that_check(db: psycopg.Connection) -> None:
+    mcp = {"kind": "mcp", "url": "http://127.0.0.1:9100/mcp", "tool": "get_status"}
+    for title, raw, other in (
+        ("Disk", CMD, {**CMD, "argv": ["/bin/echo", "disk 72% used"]}),
+        ("Health page", HTTP, {**HTTP, "url": "https://example.test/health?x=1"}),
+        ("Status tool", mcp, {**mcp, "args": {"scope": "all"}}),
+    ):
+        source = _make(db, raw, title=title)
+        waiting = source_docs.prepare(db, owner=OWNER, ref=source.id)
+        assert (waiting.check.gated, waiting.runnable) == (True, False), title
 
-    core.approve(db, owner=OWNER, doc_id=source.id, check_hash=source.check.hash, now=NOW)
-    approved = source_docs.prepare(db, owner=OWNER, ref=source.id)
-    assert (approved.approved_hash, approved.runnable) == (source.check.hash, True)
+        core.approve(db, owner=OWNER, doc_id=source.id, check_hash=source.check.hash, now=NOW)
+        approved = source_docs.prepare(db, owner=OWNER, ref=source.id)
+        assert (approved.approved_hash, approved.runnable) == (source.check.hash, True), title
 
-    changed = source_docs.prepare(db, owner=OWNER, ref=source.id, check={**CMD, "argv": ["/bin/echo", "disk 72% used"]})
-    assert changed.check.hash != source.check.hash
-    assert changed.runnable is False, "the approval was of the other check"
+        changed = source_docs.prepare(db, owner=OWNER, ref=source.id, check=other)
+        assert changed.check.hash != source.check.hash
+        assert changed.runnable is False, f"the approval of the {raw['kind']} check was of the other one"
 
-    # An address, a name and a tool need no approval, whatever the document says.
+    # A name lookup is the one check that asks nothing, whatever the document says.
     assert source_docs.prepare(db, owner=OWNER, check={"kind": "dns", "host": "example.test"}, **{**WHOLE, "title": "Name"}).runnable
 
 
@@ -117,7 +126,7 @@ def test_a_hand_edited_check_nobody_can_read_has_no_check_and_runs_nothing(db: p
     assert (draft.check, draft.runnable) == (None, False)
     # Writing a good check puts it right.
     fixed = source_docs.prepare(db, owner=OWNER, ref=source.id, check=HTTP)
-    assert fixed.check is not None and fixed.runnable
+    assert fixed.check is not None and not fixed.runnable, "a good check is back, and waits for the owner like any address"
 
 
 def test_a_stale_draft_is_refused_and_an_unknown_source_is_not_found(db: psycopg.Connection) -> None:

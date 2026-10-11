@@ -21,6 +21,11 @@ T0 = datetime(2026, 10, 11, 7, 0, tzinfo=timezone.utc)
 MIN = timedelta(minutes=1)
 
 HTTP = {"kind": "http", "url": "https://example.test/health"}
+MCP = {"kind": "mcp", "url": "http://127.0.0.1:9100/mcp", "tool": "get_status", "args": {"scope": "all"}}
+FILE = {"kind": "file", "path": "~/logs/run.log", "max_age_hours": 26}
+# A name lookup is the one kind that needs no approval, so the state machine below (the two-failures rule, grey, ordering)
+# is shown on it: nothing in those rules depends on what a check reaches.
+NAME = {"kind": "dns", "host": "example.test"}
 CMD = {"kind": "cmd", "argv": ["/bin/echo", "disk 71% used"], "parse": r"(\d+)%", "max": 90}
 GOOD = Result(ok=True, detail="HTTP 200", ms=12)
 BAD = Result(ok=False, detail="HTTP 503", ms=9)
@@ -52,7 +57,7 @@ def _record(db: psycopg.Connection, source: core.Source, result: Result, now: da
 
 
 def test_one_failure_is_looked_at_again_quietly_and_two_make_red(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     first = _record(db, source, GOOD, T0)
     assert (first.failures, first.next_check_at) == (0, T0 + timedelta(hours=1))
     assert _look(db, source, T0 + MIN).status == OK
@@ -81,7 +86,7 @@ def test_one_failure_is_looked_at_again_quietly_and_two_make_red(db: psycopg.Con
 
 def test_a_failure_that_comes_too_soon_is_not_the_second(db: psycopg.Connection) -> None:
     """The agent runs a check by hand a minute after the timer saw it fail: that is the same incident."""
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     _record(db, source, BAD, T0)
     soon = _record(db, source, BAD, T0 + 2 * MIN)
     assert (soon.failures, soon.turned_red) == (1, False)
@@ -93,7 +98,7 @@ def test_a_failure_that_comes_too_soon_is_not_the_second(db: psycopg.Connection)
 
 
 def test_a_pass_clears_red_at_once_and_says_so(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     _record(db, source, BAD, T0)
     _record(db, source, BAD, T0 + timedelta(minutes=5))
     back = _record(db, source, GOOD, T0 + timedelta(minutes=65))
@@ -106,12 +111,12 @@ def test_a_pass_clears_red_at_once_and_says_so(db: psycopg.Connection) -> None:
 
 
 def test_an_answer_to_an_edited_check_starts_the_count_again(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     _record(db, source, BAD, T0)
     _record(db, source, BAD, T0 + timedelta(minutes=5))
     assert _look(db, source, T0 + timedelta(minutes=6)).status == RED
 
-    edited = _edit(db, source, {**HTTP, "url": "https://example.test/ready"})
+    edited = _edit(db, source, {**NAME, "host": "ready.example.test"})
     # The old answers say nothing about the new check: grey until it has run once.
     seen = core.view(edited, T0 + timedelta(minutes=7))
     assert (seen.status, seen.why, seen.detail, seen.checked_at) == (GREY, core.NEW, "", None)
@@ -125,7 +130,7 @@ def test_an_answer_to_an_edited_check_starts_the_count_again(db: psycopg.Connect
 
 
 def test_an_answer_older_than_two_hours_is_grey_not_red(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     _record(db, source, BAD, T0)
     _record(db, source, BAD, T0 + timedelta(minutes=5))
     t = T0 + timedelta(minutes=5)
@@ -134,7 +139,7 @@ def test_an_answer_older_than_two_hours_is_grey_not_red(db: psycopg.Connection) 
     assert (asleep.status, asleep.why, asleep.checked_at) == (GREY, core.STALE_ANSWER, t)
     assert asleep.since is None
     # The same for a source that was fine.
-    other = _source(db, "mail", HTTP)
+    other = _source(db, "mail", NAME)
     _record(db, other, GOOD, T0)
     assert core.view(core.find(db, owner=OWNER, ref=other.id), T0 + timedelta(hours=3)).why == core.STALE_ANSWER
 
@@ -148,7 +153,7 @@ def test_a_source_with_no_check_or_an_unreadable_one_or_no_answer_yet_is_grey(db
     unreadable = core.view(core.find(db, owner=OWNER, ref=broken.id), T0)
     assert (unreadable.status, unreadable.why) == (GREY, core.UNREADABLE)
     assert "never a shell line" in unreadable.error
-    fresh = _source(db, "web", HTTP)
+    fresh = _source(db, "web", NAME)
     assert (core.view(fresh, T0).why, core.due(fresh, T0)) == (core.NEW, True)
 
 
@@ -181,11 +186,21 @@ def test_a_command_waits_for_the_owner_and_only_for_that_exact_check(db: psycopg
     assert core.view(restored, T0).why == core.NEW and core.due(restored, T0)
 
 
-def test_only_a_command_or_a_file_needs_approval_and_only_a_readable_check_can_have_it(db: psycopg.Connection) -> None:
-    web = _source(db, "web", HTTP)
-    assert core.view(web, T0).needs_approval is False
+def test_whatever_reaches_something_waits_for_the_owner_and_only_a_name_lookup_does_not(db: psycopg.Connection) -> None:
+    for name, raw in (("web", HTTP), ("tool", MCP), ("disk", CMD), ("log", FILE)):
+        source = _source(db, name, raw)
+        seen = core.view(source, T0)
+        assert (seen.status, seen.why, seen.needs_approval, seen.approved) == (GREY, core.WAITING, True, False), name
+        assert not core.due(source, T0), f"an unapproved {raw['kind']} check is never run"
+        approved = core.approve(db, owner=OWNER, doc_id=source.id, check_hash=source.check.hash, now=T0)
+        assert (approved.approved, approved.needs_approval, approved.why) == (True, False, core.NEW), name
+        assert core.due(core.find(db, owner=OWNER, ref=source.id), T0), f"approved, a {raw['kind']} check is due now"
+
+    lookup = _source(db, "host", NAME)
+    assert (core.view(lookup, T0).needs_approval, core.view(lookup, T0).why) == (False, core.NEW)
+    assert core.due(lookup, T0), "a name lookup runs without asking"
     with pytest.raises(ValidationError, match="needs no approval"):
-        core.approve(db, owner=OWNER, doc_id=web.id, check_hash=web.check.hash, now=T0)
+        core.approve(db, owner=OWNER, doc_id=lookup.id, check_hash=lookup.check.hash, now=T0)
     plain = _source(db, "notes", None)
     with pytest.raises(ValidationError, match="no check to approve"):
         core.approve(db, owner=OWNER, doc_id=plain.id, check_hash="x", now=T0)
@@ -193,9 +208,28 @@ def test_only_a_command_or_a_file_needs_approval_and_only_a_readable_check_can_h
         core.approve(db, owner=OWNER, doc_id="NOSUCHID", check_hash="x", now=T0)
 
 
+def test_an_address_waits_again_when_any_part_of_it_changes_and_the_summary_shows_what_is_sent(db: psycopg.Connection) -> None:
+    web = _source(db, "web", HTTP)
+    core.approve(db, owner=OWNER, doc_id=web.id, check_hash=web.check.hash, now=T0)
+    assert core.view(core.find(db, owner=OWNER, ref=web.id), T0).why == core.NEW
+    # The address, the field it reads, the limit: each is a different check, and none rides on the old approval.
+    for change in ({"url": "https://example.test/other"}, {"url": "https://example.test/health?a=1"}, {"status": 204},
+                   {"value": "queue.depth"}, {"expect": {"status": "ok"}}):
+        edited = _edit(db, web, {**HTTP, **change})
+        seen = core.view(edited, T0)
+        assert (seen.why, seen.approved, seen.needs_approval) == (core.WAITING, False, True), change
+        _edit(db, web, HTTP)  # back to what was approved: no new approval needed
+    tool = _source(db, "tool", MCP)
+    assert core.view(tool, T0).summary == (
+        'Calls the tool get_status of http://127.0.0.1:9100/mcp with {"scope": "all"} every hour.'), "what is sent is shown"
+    core.approve(db, owner=OWNER, doc_id=tool.id, check_hash=tool.check.hash, now=T0)
+    changed = _edit(db, tool, {**MCP, "args": {"scope": "everything"}})
+    assert core.view(changed, T0).why == core.WAITING, "other arguments are another check"
+
+
 def test_an_owner_sees_and_approves_only_their_own_sources(db: psycopg.Connection) -> None:
     mine = _source(db, "disk", CMD)
-    _source(db, "theirs", HTTP, owner=OTHER)
+    _source(db, "theirs", NAME, owner=OTHER)
     assert [s.path for s in core.sources(db, owner=OWNER)] == ["sources/disk.md"]
     with pytest.raises(NotFound):
         core.approve(db, owner=OTHER, doc_id=mine.id, check_hash=mine.check.hash, now=T0)
@@ -207,7 +241,7 @@ def test_an_owner_sees_and_approves_only_their_own_sources(db: psycopg.Connectio
 
 
 def test_a_check_is_due_when_its_time_comes_and_one_pass_takes_it(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     assert core.due(source, T0)
     assert core.claim(db, owner=OWNER, source=source, now=T0)
     # A second pass that read the same row loses the claim: the first pass owns the check for ten minutes.
@@ -230,12 +264,12 @@ def test_a_check_is_due_when_its_time_comes_and_one_pass_takes_it(db: psycopg.Co
 
 
 def test_the_row_of_tiles_puts_what_needs_a_look_first(db: psycopg.Connection) -> None:
-    red = _source(db, "zeta", HTTP)
+    red = _source(db, "zeta", NAME)
     _source(db, "yankee", CMD)
     _source(db, "xray", None)
-    stale = _source(db, "whisky", HTTP)
-    _source(db, "victor", HTTP)
-    fine = _source(db, "alpha", HTTP)
+    stale = _source(db, "whisky", NAME)
+    _source(db, "victor", NAME)
+    fine = _source(db, "alpha", NAME)
     _record(db, red, BAD, T0 + timedelta(hours=4))
     _record(db, red, BAD, T0 + timedelta(hours=4, minutes=5))
     _record(db, stale, GOOD, T0)
@@ -253,7 +287,7 @@ def test_the_row_of_tiles_puts_what_needs_a_look_first(db: psycopg.Connection) -
 
 
 def test_an_answer_is_one_printable_line(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     _record(db, source, Result(ok=False, detail="line one\nline two\x07 " + "x" * 400), T0)
     detail = core.view(core.find(db, owner=OWNER, ref=source.id), T0).detail
     assert "\n" not in detail and "\x07" not in detail and len(detail) <= core.MAX_DETAIL and detail.endswith("…")
@@ -264,7 +298,7 @@ def test_an_answer_is_one_printable_line(db: psycopg.Connection) -> None:
 
 
 def test_deleting_the_document_takes_its_answers(db: psycopg.Connection) -> None:
-    source = _source(db, "web", HTTP)
+    source = _source(db, "web", NAME)
     _record(db, source, GOOD, T0)
     assert db.execute("SELECT count(*) FROM source_state").fetchone() == (1,)
     core_docs.delete(db, owner=OWNER, id=source.id)
