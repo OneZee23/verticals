@@ -82,7 +82,6 @@ const props = defineProps<{
    *  only (note 3 above); every other scale's label comes from `periodKey` alone. */
   anchorDate: string | null
   repeat: RepeatRule | null
-  hasChildren?: boolean
   /** Board-hosted Things-style surface; schedule moves into the quiet footer row. */
   inline?: boolean
 }>()
@@ -384,7 +383,6 @@ function cancelTitleEdit() {
         :id="props.id"
         :vertical="repeatVertical"
         :repeat="props.repeat"
-        :has-children="props.hasChildren ?? false"
       />
       <PopoverEngine>
         <template #trigger="{ open }">

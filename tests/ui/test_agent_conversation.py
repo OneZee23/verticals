@@ -556,7 +556,7 @@ def test_the_tags_stay_while_the_field_has_the_caret_or_the_conversation_is_open
 
 
 def test_no_agent_the_field_only_finds(ui_f2: UiSession) -> None:
-    """S2.P1.026: the web build has no gateway: ↵ does nothing, and Discuss with agent isn't offered."""
+    """S2.P1.026: the web build has no gateway: ↵ does nothing, and the menu has no Agent group with Discuss in it."""
     page = ui_f2.page
     page.wait_for_selector('[data-goal-id="SYNDAY01"]')
     page.keyboard.press("Control+k")
@@ -569,7 +569,8 @@ def test_no_agent_the_field_only_finds(ui_f2: UiSession) -> None:
     page.click('[data-goal-id="SYNDAY01"] > .goal-card__row [data-role="goal-actions-trigger"]')
     menu = page.locator('[data-role="goal-actions-menu"]')
     expect(menu).to_be_visible()
-    expect(menu.get_by_text("Discuss with agent")).to_have_count(0)
+    expect(menu.locator('[data-menu-section="agent"]')).to_have_count(0)
+    expect(menu.get_by_text("Discuss")).to_have_count(0)
 
 
 def _conversations(page: Page, goal: str) -> list[dict]:
@@ -611,7 +612,7 @@ def test_a_fresh_conversation_that_makes_a_task_becomes_the_tasks_conversation(u
     row = page.locator(f'[data-goal-id="{goal}"] > .goal-card__row').first
     row.hover()
     row.locator('[data-role="goal-actions-trigger"]').click()
-    page.get_by_text("Discuss with agent").click()
+    page.locator('[data-role="goal-context-menu"] [data-menu-item="discuss"]').click()
     expect(page.locator('.vt-window[data-window="goal"]')).to_have_count(1)
     expect(page.locator(f'{BALLOON}[data-who="you"]', has_text="Make me a task")).to_have_count(1, timeout=10000)
     assert json.loads(page.evaluate("localStorage.getItem('vt-chat:current')")) == session

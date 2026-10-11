@@ -26,7 +26,7 @@ def _discuss(page: Page, goal_id: str = GOAL) -> None:
     row = page.locator(f'[data-goal-id="{goal_id}"] > .goal-card__row').first
     row.hover()
     row.locator('[data-role="goal-actions-trigger"]').click()
-    page.get_by_text("Discuss with agent").click()
+    page.locator('[data-role="goal-context-menu"] [data-menu-item="discuss"]').click()
     expect(page.locator(f'{WINDOW}[data-window="goal"]')).to_have_count(1)
 
 

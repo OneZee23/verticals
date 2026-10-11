@@ -199,18 +199,29 @@ def test_open_comments_panel_from_icon(ui_f2: UiSession) -> None:
 def test_whole_card_comment_round_trip(ui_f2: UiSession) -> None:
     session = ui_f2
     page = session.page
+    quote = "a phrase in the notes"
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        goal_id = _create_goal(conn, "SYN whole-card comment goal")
+        goal_id = _create_goal(conn, "SYN whole-card comment goal", body=f"before {quote} after")
 
     page.reload()
     _open_goal(page, goal_id)
-    # A goal with no comments shows none on its card: the first one starts from its menu (KK, 29 Sep 2026).
+    # A goal with no comments shows none on its card, and its menu no longer starts one: comments live in documents, in
+    # their text (docs/design/goal-menu.md). The panel opens on a phrase selected in the notes, and "the whole card
+    # instead" lets the thread be about the card itself.
     assert page.locator(f'[data-goal-id="{goal_id}"] [data-cap="open-comments"]').count() == 0
     page.locator(f'[data-goal-id="{goal_id}"].goal-card--detail-open [data-role="goal-actions-trigger"]').click()
-    page.locator('[data-role="goal-context-menu"] [data-menu-item="comment"]').click()
+    expect(page.locator('[data-role="goal-context-menu"]')).to_be_visible()
+    assert page.locator('[data-role="goal-context-menu"] [data-menu-item="comment"]').count() == 0
+    page.keyboard.press("Escape")
+    body_selector = f'.goal-card--detail-open[data-goal-id="{goal_id}"] + .goal-card__children--open [data-cap="edit-body"]'
+    expect(page.locator(body_selector)).to_contain_text(quote, timeout=10000)
+    _select_phrase(page, body_selector, quote)
+    page.locator('[data-cap="comment-selection"]').click()
 
     panel = page.locator('[data-role="comments-panel"]')
     expect(panel).to_be_visible(timeout=10000)
+    panel.locator('[aria-label="Comment on the whole card instead"]').click()
+    expect(panel.locator('[data-role="comments-pending-anchor"]')).to_have_count(0)
     expect(panel.locator('[data-role="comments-empty"]')).to_be_visible()
     _assert_docked_overlay(page, panel, f'[data-goal-id="{goal_id}"]')
 

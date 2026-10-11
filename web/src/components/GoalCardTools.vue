@@ -14,8 +14,6 @@ import type { RepeatRule } from '../lib/api'
 
 const props = defineProps<{
   id: string
-  hasChildren: boolean
-  isParent: boolean
   vertical?: string | null
   repeat?: RepeatRule | null
   /** The card is the open goal: its facts line already shows the date, the checkbox completes it and it is open, so
@@ -23,30 +21,23 @@ const props = defineProps<{
   open?: boolean
 }>()
 const emit = defineEmits<{
-  details: []
-  complete: []
   'open-change': [open: boolean]
 }>()
 
 const trigger = ref<HTMLButtonElement | null>(null)
 const open = ref(false)
-/* Discussing a goal is one of the card's actions, shown only where an agent exists (docs/design-handoff S2.P1.023). */
-const agentChat = computed(() => agentChatState.available)
+/* The Agent section: Discuss, only where an agent exists (docs/design-handoff S2.P1.023; docs/design/goal-menu.md). The
+   open card's facts line offers it already, so that card's menu leaves the section out. */
+const showAgent = computed(() => agentChatState.available && !props.open)
 function discuss() {
   window.dispatchEvent(new CustomEvent('verticals:discuss-goal', { detail: { id: props.id } }))
   closeMenu()
 }
-/* A goal with no comments shows none on its card, so the menu is where one starts (KK picked it on 29 Sep 2026). An open
-   card that has some shows them in its facts line, which opens the same panel, so its menu leaves "Comment" out. The
-   panel names no goal, so a closed card opens as well, as "Details" does. */
-const showComment = computed(() => !props.open || store.unresolvedCommentCount('goal', props.id) === 0)
-function comment() {
-  if (!props.open) emit('details')
-  store.openCommentsPanel('goal', props.id)
-  closeMenu()
-}
 const fixedSameVerticalParent = computed(() => store.sameVerticalParentId(props.id))
 const repeatVertical = computed(() => (props.vertical && props.vertical !== 'life' ? props.vertical : null))
+/* A goal nested under a parent of its own vertical has no dates or parent of its own to change here (D179), so only its
+   Repeat stays, under Reschedule, and the Move group is left out. */
+const showReschedule = computed(() => !fixedSameVerticalParent.value || repeatVertical.value !== null)
 function onOpen() {
   open.value = true
   emit('open-change', true)
@@ -66,12 +57,7 @@ function closeMenu() {
   if (open.value) trigger.value?.click()
 }
 
-function act(name: 'details' | 'complete') {
-  if (name === 'details') emit('details')
-  else emit('complete')
-}
-
-/* Tomorrow and Next week move the goal at once; Date and Under open a step in place (S5.P5.003, .008). */
+/* Tomorrow and Next week move the goal at once; Date and Into a goal open a step in place (S5.P5.003, .008). */
 const step = ref<MoveStepName | null>(null)
 function day(offset: number): Date {
   const t = localDate(todayIso())
@@ -134,123 +120,100 @@ defineExpose({ openMenu })
       </button>
     </template>
 
-    <!-- A step (Date and its levels, Under) takes the menu's place, with ‹ back (docs/design-handoff S5.P5.008, .039). -->
+    <!-- A step (Date and its levels, Into a goal) takes the menu's place, with ‹ back (docs/design-handoff S5.P5.008, .039).
+         Otherwise the menu groups its actions by what they change: the agent's work, when, where, and the goal itself,
+         each group under a small grey word and a line from the one before (docs/design/goal-menu.md). A goal completes by
+         its box and comments live in documents, so neither is here. -->
     <MoveStep v-if="step" :id="id" :step="step" @go="(next) => step = next" @done="closeMenu" />
-    <template v-else>
-    <!-- An open card completes by its checkbox and offers the agent in its facts line, so those leave its menu. The menu
-         reads Discuss, Comment, Complete; then Move; then Repeat and Delete (S5.P5.007). -->
-    <div v-if="(agentChat && !props.open) || showComment || (props.isParent && !props.open)" data-menu-section="actions">
-      <button
-        v-if="agentChat && !props.open"
-        type="button"
-        role="menuitem"
-        class="dropdown__item goal-actions__item"
-        data-menu-item="discuss"
-        @click="discuss"
-      >Discuss with agent</button>
-      <button
-        v-if="showComment"
-        type="button"
-        role="menuitem"
-        class="dropdown__item goal-actions__item"
-        data-menu-item="comment"
-        @click="comment"
-      >Comment</button>
-      <button
-        v-if="props.isParent && !props.open"
-        type="button"
-        role="menuitem"
-        class="dropdown__item goal-actions__item"
-        data-menu-item="complete"
-        data-cap="complete"
-        @click="act('complete')"
-      >Complete</button>
-    </div>
-
-    <hr v-if="(agentChat && !props.open) || showComment || (props.isParent && !props.open)">
-
-    <div
-      class="goal-actions__legacy-content"
-      data-role="goal-actions-menu"
-      data-popover-surface
-    >
-    <!-- One small grey "Move" over three dates, then Under and Inbox after a gap, not a line (S5.P5.003-.005). -->
-    <div v-if="!fixedSameVerticalParent" class="goal-actions__move" data-menu-section="move">
-      <p class="goal-actions__heading" aria-hidden="true">Move</p>
-      <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="tomorrow" data-cap="schedule"
-        @click="moveTo('day', tomorrow)">Tomorrow</button>
-      <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="next-week"
-        @click="moveTo('week', nextWeek)">Next week</button>
-      <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="date" @click.stop="step = 'date'">
-        <span>Date</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
-      </button>
-      <div class="goal-actions__gap" aria-hidden="true"></div>
-      <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="under" @click.stop="step = 'under'">
-        <span>Under</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
-      </button>
-      <button
-        v-if="vertical"
-        type="button"
-        role="menuitem"
-        class="dropdown__item goal-actions__item"
-        data-move="inbox"
-        data-action="inbox"
-        @click="moveToInbox"
-      >Inbox</button>
-    </div>
-
-    <hr v-if="!fixedSameVerticalParent">
-
-    <PopoverEngine
-      v-if="props.open"
-      nested
-      data-action="tags"
-      surface-class="goal-actions__submenu goal-actions__tags"
-      :surface-attrs="{ 'data-role': 'tag-chips' }"
-    >
-      <template #trigger>
-        <button type="button" role="menuitem" class="dropdown__item goal-actions__item">
-          <span>Tags…</span>
-          <span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
-        </button>
-      </template>
-      <div class="goal-actions__tags-panel">
-        <div v-if="tags.length" class="chip-wrap">
-          <KChip
-            v-for="tag in tags"
-            :key="tag"
-            data-cap="set-tags"
-            :aria-label="`Remove ${tag}`"
-            @click="removeTag(tag)"
-          >{{ tag }} <AppIcon name="x" :size="12" /></KChip>
-        </div>
-        <KInlineAdd data-cap="set-tags" placeholder="Add tag…" @add="addTag" />
+    <div v-else class="goal-actions__content" data-role="goal-actions-menu">
+      <div v-if="showAgent" class="goal-actions__section" data-menu-section="agent" role="group" aria-label="Agent">
+        <p class="goal-actions__heading" aria-hidden="true">Agent</p>
+        <button
+          type="button"
+          role="menuitem"
+          class="dropdown__item goal-actions__item"
+          data-menu-item="discuss"
+          @click="discuss"
+        >Discuss</button>
       </div>
-    </PopoverEngine>
 
-    <RepeatPopover
-      v-if="repeatVertical"
-      :id="id"
-      :vertical="repeatVertical"
-      :repeat="repeat ?? null"
-      :has-children="hasChildren"
-    />
+      <div v-if="showReschedule" class="goal-actions__section" data-menu-section="reschedule" role="group" aria-label="Reschedule">
+        <p class="goal-actions__heading" aria-hidden="true">Reschedule</p>
+        <template v-if="!fixedSameVerticalParent">
+          <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="tomorrow" data-cap="schedule"
+            @click="moveTo('day', tomorrow)">Tomorrow</button>
+          <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="next-week"
+            @click="moveTo('week', nextWeek)">Next week</button>
+          <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="date" @click.stop="step = 'date'">
+            <span>Date</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
+          </button>
+        </template>
+        <RepeatPopover
+          v-if="repeatVertical"
+          :id="id"
+          :vertical="repeatVertical"
+          :repeat="repeat ?? null"
+        />
+      </div>
 
-    <hr v-if="props.open || repeatVertical">
+      <div v-if="!fixedSameVerticalParent" class="goal-actions__section" data-menu-section="move" role="group" aria-label="Move">
+        <p class="goal-actions__heading" aria-hidden="true">Move</p>
+        <button type="button" role="menuitem" class="dropdown__item goal-actions__item" data-move="under" @click.stop="step = 'under'">
+          <span>Into a goal</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
+        </button>
+        <button
+          v-if="vertical"
+          type="button"
+          role="menuitem"
+          class="dropdown__item goal-actions__item"
+          data-move="inbox"
+          data-action="inbox"
+          @click="moveToInbox"
+        >To Inbox</button>
+      </div>
 
-    <button
-      type="button"
-      role="menuitem"
-      class="dropdown__item goal-actions__item goal-actions__item--danger"
-      data-action="delete"
-      data-cap="delete"
-      @click="remove"
-    >
-      <AppIcon name="trash" data-icon="trash" />
-      <span>Delete</span>
-    </button>
+      <div v-if="props.open" class="goal-actions__section" data-menu-section="tags">
+        <PopoverEngine
+          nested
+          data-action="tags"
+          surface-class="goal-actions__submenu goal-actions__tags"
+          :surface-attrs="{ 'data-role': 'tag-chips' }"
+        >
+          <template #trigger>
+            <button type="button" role="menuitem" class="dropdown__item goal-actions__item">
+              <span>Tags…</span>
+              <span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
+            </button>
+          </template>
+          <div class="goal-actions__tags-panel">
+            <div v-if="tags.length" class="chip-wrap">
+              <KChip
+                v-for="tag in tags"
+                :key="tag"
+                data-cap="set-tags"
+                :aria-label="`Remove ${tag}`"
+                @click="removeTag(tag)"
+              >{{ tag }} <AppIcon name="x" :size="12" /></KChip>
+            </div>
+            <KInlineAdd data-cap="set-tags" placeholder="Add tag…" @add="addTag" />
+          </div>
+        </PopoverEngine>
+      </div>
+
+      <div class="goal-actions__section" data-menu-section="delete">
+        <button
+          type="button"
+          role="menuitem"
+          class="dropdown__item goal-actions__item goal-actions__item--danger"
+          data-action="delete"
+          data-cap="delete"
+          @click="remove"
+        >
+          <AppIcon name="trash" data-icon="trash" />
+          <span>Delete</span>
+        </button>
+      </div>
     </div>
-    </template>
   </PopoverEngine>
 </template>
 
@@ -301,22 +264,20 @@ defineExpose({ openMenu })
   transition: none;
 }
 
-.goal-actions__menu > hr,
-.goal-actions__legacy-content > hr {
-  height: 1px;
-  margin: 8px 0;
-  border: 0;
-  background: rgba(0, 0, 0, .08);
-}
-.goal-actions__legacy-content {
+.goal-actions__content {
   display: flex;
   flex-direction: column;
   min-width: 300px;
 }
-/* One small grey "Move" over the three dates; Under and Inbox after a gap, not a line (S5.P5.003, .005). */
-.goal-actions__move { display: flex; flex-direction: column; }
+/* A group of the menu: a small grey word over its items (S5.P5.003), and a line from the group before it, with the same 8 px
+   above and below as the lines inside a step (docs/design/goal-menu.md). */
+.goal-actions__section { display: flex; flex-direction: column; }
+.goal-actions__section + .goal-actions__section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, .08);
+}
 .goal-actions__heading { margin: 2px 14px 2px; color: rgb(45 48 54 / 52%); font: 400 13px/18px var(--font-body); }
-.goal-actions__gap { height: 10px; }
 .goal-actions__item.goal-actions__item,
 .goal-actions__submenu.goal-actions__submenu button {
   box-sizing: border-box;
@@ -357,12 +318,13 @@ defineExpose({ openMenu })
    that opens a submenu stays at the right. */
 .goal-actions__menu .goal-actions__item > svg,
 .goal-actions__menu .goal-actions__item > [data-role="icon-spacer"] { display: none; }
-.goal-actions__item.goal-actions__item--why { flex-direction: column; align-items: flex-start; gap: 0; }
-.goal-actions__why { font-size: 12px; line-height: 16px; }
 .goal-actions__tags-panel { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); min-width: 180px; }
 /* An open card shows its dots all the time: they are the way to its rarer actions. */
 .goal-card--detail-open > .goal-card__row .goal-actions__trigger { opacity: 1; }
-.goal-actions__item--danger { color: #c93a5b; }
+/* Delete shows its red (docs/design/goal-menu.md). The surface's `.Menu-floating.popover-engine__surface .dropdown__item`
+   sets `color: inherit` on three classes, and painted over the single-class red for as long as this class has existed;
+   these four outweigh it. */
+.goal-actions__menu.popover-engine__surface .goal-actions__item.goal-actions__item--danger { color: #c93a5b; }
 .goal-actions__submenu > div { display: flex; }
 .goal-actions__submenu > div > button { white-space: nowrap; }
 .goal-actions__days { display: grid !important; grid-template-columns: repeat(7, 1fr); }
