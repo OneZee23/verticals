@@ -401,7 +401,8 @@ def test_the_agent_is_told_to_link_what_it_made_and_to_name_the_rest_by_title() 
     """docs/design/agent-chips.md: the chips come from the links in the agent's words, so the agent links what it made or
     changed, each on a line of its own, and names any other goal by its title."""
     prompt = " ".join(_chat().PROMPT.split())
-    assert "What you made or changed in a turn stands under your words as chips" in prompt
-    assert "Link each goal as [title](#goal/<id>) and each document as [title](#doc/<id>), once, each on a line of its own" in prompt
+    assert "Link each goal and each document you made or changed in a turn, once, each on a line of its own after your words" in prompt
+    assert "goals as [title](#goal/<id>), documents as [title](#doc/<id>)" in prompt
+    assert "The app draws those lines as chips under your words" in prompt
     assert "Mention any other goal by its title, with no link" in prompt
     assert "Link board dates inside a sentence as [label](/h/YYYY-MM-DD)" in prompt
