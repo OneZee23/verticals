@@ -8,7 +8,7 @@
  *  750-line module rule (S-90a). They read no store state and hold none.
  */
 
-import { columnPeriodLabel, verticalHeadline } from './schedule'
+import { columnNames } from './columnNames'
 import type { BoardColumn, BoardResponse, GoalCard } from './api'
 import type { BoardColumnData, GoalCardData } from '../types'
 
@@ -132,18 +132,19 @@ export function toColumnData(
     decade: 'Visualise…',
     life: 'Become…',
   }
+  // The big name is the column's period and the small line above it its kind (docs/design/column-names.md).
+  const names = columnNames(col, anchor, today)
   return {
     vertical: verticalKey,
-    title: verticalHeadline(verticalKey),
-    // Every dated column gets the period-specific context above its stable generic headline.
-    subLabel: columnPeriodLabel(col, anchor, today),
+    title: names.name,
+    subLabel: names.kind || undefined,
     // COMPACT_BOARD_HANDOFF.md §3 (supersedes the "day is 1.78x, always" rule): `active` now
     // means THE expanded column — the one the user clicked, at most one, none by default. Day
     // gets no special width any more (KK ruling 2026-08-17).
     active: verticalKey !== 'maybe' && verticalKey === expandedVertical,
     addPlaceholder: addLabel[verticalKey] ?? 'Add…',
     goals: orderedRoots.map(goal => toCardData(goal, board, projectTags, cardIds, columnCards, settling)),
-    // `types.ts::BoardColumnData.periodKey`'s own doc comment: the same field `columnTitle` above
+    // `types.ts::BoardColumnData.periodKey`'s own doc comment: the same field `columnNames` above
     // just read to build `title`, carried through unchanged for `dropOnColumn` below.
     periodKey: col.period_key,
   }

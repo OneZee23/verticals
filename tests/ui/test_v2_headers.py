@@ -31,9 +31,10 @@ def test_v2_column_add_prompts_render_once_in_ladder_order(ui_f2: UiSession) -> 
     assert page.locator('[data-role="column-verb"]').count() == 0
 
 
-def test_v2_three_year_header_uses_generic_headline_and_period_label(ui_f2: UiSession) -> None:
+def test_v2_three_year_header_names_its_period_and_its_kind(ui_f2: UiSession) -> None:
+    """docs/design/column-names.md: the years are the big name, "Three years" the kind small above it."""
     page = ui_f2.page
     header = page.locator('[data-vertical="decade"] .column-header')
-    assert header.locator('.t-title').inner_text().strip() == "3 years"
-    assert header.locator('.t-caption').inner_text().strip() == "2026–2028"
+    assert header.locator('.t-title').inner_text().strip() == "2026–2028"
+    assert header.locator('.t-caption').inner_text().strip() == "Three years"
     assert header.locator('[data-role="column-verb"]').count() == 0

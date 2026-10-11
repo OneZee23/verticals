@@ -26,8 +26,8 @@ withDefaults(defineProps<{
 </template>
 
 <style>
-/* Period context sits above the headline. Keep both rows inside the compact header; the headline
-   remains single-line and ellipsized so narrow columns do not push the board out of alignment. */
+/* The kind sits above the column's name, the period (docs/design/column-names.md). Keep both rows inside the compact
+   header; the name remains single-line and ellipsized so narrow columns do not push the board out of alignment. */
 .column-header.column-header {
   position: relative;
   display: grid;

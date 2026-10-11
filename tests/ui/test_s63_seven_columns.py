@@ -11,8 +11,8 @@ Maybe bucket is reached through the Inbox nav view instead. `tests/ui/test_s65_c
 covers the Inbox screen's own inline-add; this file stays scoped to the board, matching S-63's own
 (updated) steps.
 
-R2 adds the fixed triennium as the 3-year column's period caption. Day retains its calendar-date
-caption; the other five columns remain title-only.
+Each header names its period big and its kind small above it (docs/design/column-names.md): at the pinned date,
+Saturday 8 Aug 2026, "Today" over "Day", "3–9 Aug" over "Week", and so on to "All time" over "Life".
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ from tests.ui.conftest import ARTIFACTS_ROOT, REPO_ROOT, UiSession
 # from `verticals/core/board.py::COLUMN_ORDER` with the `maybe` entry dropped, matching
 # `Board.vue`'s own `dated` computed.
 EXPECTED_VERTICALS = ("day", "week", "month", "quarter", "year", "decade", "life")
-EXPECTED_HEADLINES = ("Day", "Week", "Month", "Quarter", "Year", "3 years", "Life")
+EXPECTED_NAMES = ("Today", "3–9 Aug", "August", "Q3", "2026", "2026–2028", "All time")
+EXPECTED_KINDS = ("Day", "Week", "Month", "Quarter", "Year", "Three years", "Life")
 
 
 def test_s63_seven_columns(ui_f2: UiSession, request) -> None:
@@ -89,16 +90,16 @@ def test_s63_seven_columns(ui_f2: UiSession, request) -> None:
         f"({overflow['innerWidth']}) + 1 — the page itself is scrolling horizontally"
     )
 
-    # D171-D173: every header has a generic scale headline and quiet period label.
-    for vertical, headline in zip(EXPECTED_VERTICALS, EXPECTED_HEADLINES, strict=True):
+    # D171-D173, then docs/design/column-names.md: every header names its period (the big title) and its kind (the quiet
+    # caption above it).
+    for vertical, name, kind in zip(EXPECTED_VERTICALS, EXPECTED_NAMES, EXPECTED_KINDS, strict=True):
         title_el = session.page.locator(f'[data-vertical="{vertical}"] .pattern-vertical-board__header .t-title')
         assert title_el.count() == 1, f"{vertical} column: expected exactly one .t-title, found {title_el.count()}"
-        assert title_el.inner_text().strip() == headline
+        assert title_el.inner_text().strip() == name
 
-    for vertical in EXPECTED_VERTICALS:
         caption = session.page.locator(f'[data-vertical="{vertical}"] .pattern-vertical-board__header .t-caption')
-        assert caption.count() == 1, f"{vertical} column: expected one period label, found {caption.count()}"
-        assert caption.inner_text().strip(), f"{vertical} column: period label is empty"
+        assert caption.count() == 1, f"{vertical} column: expected one kind label, found {caption.count()}"
+        assert caption.inner_text().strip() == kind
 
     # --- reaching the life column required 0 navigations ------------------------------------------
     url_before = session.page.url

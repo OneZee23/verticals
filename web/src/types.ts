@@ -40,8 +40,9 @@ export interface GoalCardData {
 export interface BoardColumnData {
   /** vertical_scale enum value (ARCHITECTURE.md §3): day | week | month | quarter | year | decade | life. */
   vertical: string
+  /** The column's name: its period, "October", "5–11 Oct", "Today" (docs/design/column-names.md). */
   title: string
-  /** Period-specific context shown above the stable generic vertical headline. */
+  /** The kind, small above the name: "Month"; the year follows it when the period is outside the current year. */
   subLabel?: string
   active?: boolean
   addPlaceholder?: string
@@ -50,7 +51,7 @@ export interface BoardColumnData {
    *  `null` only for the Maybe bucket. Column-level drop (`docs/PLANNER_DND.md` §2 — a drop
    *  assigns this column's vertical AND anchors the date to this column's own period start) needs
    *  this to name *which* period of the column's scale to anchor into, the same field
-   *  `lib/schedule.ts::columnTitle` already reads to build the header's own label — one field,
+   *  `lib/columnNames.ts::columnNames` already reads to build the header's own name — one field,
    *  read twice, never recomputed independently. */
   periodKey?: string | null
 }
