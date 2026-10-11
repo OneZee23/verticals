@@ -215,8 +215,27 @@ function onWindowClick(index: number, event: MouseEvent): void {
 /* A document stands full height (docs/design/doc-full-height.md): half a pixel from the top and the bottom, one device
    pixel on a Retina screen and the room the window's hairline ring needs. Its width and its 24 px corners are any
    window's. A goal or a page stays a card that hugs what it holds: a sheet is a document, a card is a goal. */
-.vt-window--full { top: .5px; bottom: .5px; max-height: none; }
-.vt-window--full .vt-window__body { flex: 1 1 auto; }
+.vt-window--full {
+  --vt-foot-ramp: 48px;
+  --vt-foot-solid: calc(24px + var(--vt-field-height, 84px) + 12px + var(--vt-tags-lift, 0px));
+  --vt-foot: calc(24px + 84px + 12px + var(--vt-foot-ramp));
+  top: .5px;
+  bottom: .5px;
+  max-height: none;
+}
+.vt-window--full .vt-window__body { flex: 1 1 auto; scroll-padding-bottom: var(--vt-foot); }
+/* The field stands over the foot on a white fade. It is solid as high as the conversation keeps clear of the field
+   (AgentConversation.vue: 24 px under the circle, its height, 12 px over it, and the tags' lift while they are in), then
+   48 px of ramp. The end of a text rests above the fade as it is at rest (--vt-foot, DocWindowBody.vue). The fade lets
+   the pointer through to the text under it. */
+.vt-window--full::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--vt-foot-solid) + var(--vt-foot-ramp));
+  background: linear-gradient(to top, #fff var(--vt-foot-solid), rgb(255 255 255 / 0));
+  pointer-events: none;
+}
 .vt-window--front.vt-shadow--back { transition-duration: var(--vt-dur-step); }
 .vt-window--side { cursor: pointer; }
 .vt-window--side .vt-window__button, .vt-window--side .goal-card-tools { visibility: hidden; }

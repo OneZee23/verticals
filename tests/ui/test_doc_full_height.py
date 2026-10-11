@@ -1,6 +1,6 @@
 """A document stands full height (docs/design/doc-full-height.md): its window runs the window's full height, half a pixel
-from the top and the bottom (one device pixel on a Retina screen), 720 px wide, its 24 px corners kept. The windows
-beside it keep their 200 px at the sides, stepped back; a goal or a page stays a card.
+from the top and the bottom (one device pixel on a Retina screen), 720 px wide, its 24 px corners kept, the field over its
+foot on a white fade. The windows beside it keep their 200 px at the sides, stepped back; a goal or a page stays a card.
 
 The numbers are the owner's window, 1470 x 923. Before the change a document there was a 720 x 738 card, 32 px under the top
 and 153 px above the bottom, as tall as its text up to that. `ui_f2` throughout; every document is made through
@@ -16,7 +16,8 @@ from playwright.sync_api import Page, expect
 from verticals.core import comments as core_comments, docs as core_docs, goals as core_goals
 
 from tests.ui.conftest import UiSession
-from tests.ui.views import open_page, switch_view, tick
+from tests.ui.test_s69_nothing_is_red import _decode_png
+from tests.ui.views import open_page, show_tags, switch_view, tick
 
 OWNER_WINDOW = {"width": 1470, "height": 923}
 DOC = '.vt-window[data-window="doc"]'
@@ -35,6 +36,7 @@ WINDOWS = """() => [...document.querySelectorAll('.vt-window')].map((el) => {
   return { kind: el.dataset.window, front: el.classList.contains('vt-window--front'), x: b.x, y: b.y, w: b.width, h: b.height,
            right: b.right, bottom: b.bottom }
 })"""
+FADE_HEIGHT = "el => parseFloat(getComputedStyle(el, '::after').height)"
 
 
 def _doc(conn: psycopg.Connection, path: str, title: str, body: str = "") -> str:
@@ -49,6 +51,13 @@ def _rect(page: Page, selector: str) -> dict[str, float]:
 
 def _near(value: float, expected: float, tolerance: float = 0.01) -> bool:
     return abs(value - expected) <= tolerance
+
+
+def _pixels(page: Page, x: float, y: float, width: float, height: float) -> list[tuple[int, int, int]]:
+    """The colours of a clip of the screen, as the page draws it (decoded without a library: `_decode_png`)."""
+    png = page.screenshot(clip={"x": round(x), "y": round(y), "width": round(width), "height": round(height)})
+    w, h, channels, raw = _decode_png(png)
+    return [(raw[i], raw[i + 1], raw[i + 2]) for i in range(0, w * h * channels, channels)]
 
 
 def test_a_document_window_stands_full_height(ui_f2: UiSession) -> None:
@@ -220,3 +229,53 @@ def test_a_document_window_opens_at_its_full_height_and_lands_on_it(ui_f2: UiSes
     assert _near(frames[-1]["y"], final["y"]) and _near(frames[-1]["bottom"], final["bottom"]), (frames[-1], final)
     # It grew: the first frame is small, the last is the window.
     assert frames[0]["h"] < 0.4 * final["h"] and frames[0]["w"] < 0.4 * final["w"], frames[0]
+
+
+def test_the_field_stands_over_a_documents_foot_on_a_white_fade(ui_f2: UiSession) -> None:
+    """Its text fades to white before the field, which stands on the fade; pointed at, the field brings its tags and the
+    fade rises with them, as the conversation keeps clear of them; the end of the text rests above the fade; a press on the
+    fade still reaches the text under it."""
+    session = ui_f2
+    page = session.page
+    page.set_viewport_size(OWNER_WINDOW)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc_id = _doc(conn, "syn-full/fade.md", "SYN Fade", LONG_BODY)
+    page.reload()
+    switch_view(page, "docs")
+    page.mouse.move(8, 8)
+    open_page(page, doc_id)
+    page.wait_for_timeout(300)
+    box = _rect(page, DOC)
+
+    # The field's circle stands over the window's foot, and the foot is white around it: no word reads beside the circle.
+    circle = _rect(page, ".circle-field__shape")
+    assert circle["bottom"] < box["bottom"] and circle["y"] > box["bottom"] - 140, (circle, box)
+    foot = (box["x"] + 40, box["bottom"] - 100, circle["x"] - 16 - (box["x"] + 40), 70)
+    assert {c for c in _pixels(page, *foot)} == {(255, 255, 255)}, "text shows beside the field: the foot is not white"
+    # Higher up the text is still there.
+    higher = _pixels(page, box["x"] + 40, 380, box["w"] - 80, 60)
+    assert sum(1 for p in higher if max(p) < 110) > 40, "no text is drawn above the fade"
+
+    # The fade lets the pointer through: a press on it reaches the text under it, as the board's fade does.
+    reaches = page.evaluate(
+        "([x, y]) => !!document.elementFromPoint(x, y)?.closest('[data-role=\"doc-window\"]')", [box["x"] + 100, box["bottom"] - 60]
+    )
+    assert reaches, "the white fade takes the press that was for the text under it"
+
+    # Pointed at, the field brings its tags and the fade rises with them (as the conversation does), so they stand on white.
+    fade = float(page.locator(DOC).evaluate(FADE_HEIGHT))
+    assert 120 <= fade <= 200, fade
+    show_tags(page)
+    page.wait_for_timeout(200)
+    tags = _rect(page, ".circle-tags")
+    beside = _pixels(page, box["x"] + 40, tags["y"] - 4, tags["x"] - 16 - (box["x"] + 40), tags["h"] + 8)
+    assert {c for c in beside} == {(255, 255, 255)}, "text shows beside the field's tags: the fade did not rise with them"
+    assert float(page.locator(DOC).evaluate(FADE_HEIGHT)) == fade + 44
+    page.mouse.move(8, 8)
+    page.wait_for_timeout(200)
+
+    # The end of the document rests above the fade, so its last line is read, not covered.
+    page.locator(f"{DOC} .vt-window__body").evaluate("el => { el.scrollTop = el.scrollHeight }")
+    page.wait_for_timeout(200)
+    last = page.locator(f"{DOC} .doc-detail__body p").last.bounding_box()
+    assert last is not None and last["y"] + last["height"] <= box["bottom"] - fade + 0.5, (last, fade)

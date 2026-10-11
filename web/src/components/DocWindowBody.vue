@@ -89,7 +89,9 @@ watch(() => props.part, () => void nextTick(showPart))
 </template>
 
 <style>
-.doc-window { padding: 0 24px 24px; }
+/* The window runs full height with the field over its foot (WindowStack.vue, docs/design/doc-full-height.md): the end of
+   the text keeps clear of the white fade, so its last line is read, not covered. */
+.doc-window { padding: 0 24px var(--vt-foot); }
 /* The document under its one-line head, as the frame draws it (round 5's `.dw-in`): 48 px in, the title 6 px under the
    head at 28/34. */
 .doc-window .doc-detail { padding: 6px 24px 24px; }
