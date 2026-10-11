@@ -9,6 +9,7 @@ it the conversation so far.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ import threading
 import time
 import tomllib
 import uuid
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +46,7 @@ PROMPT = load_prompt()
 # "Verticals only" keeps a Claude turn to the board; every other permission mode is Claude Code's own: its tools, the
 # owner's MCP servers and the home folder, each action outside Verticals asked in the chat unless the mode allows it.
 BOARD_ONLY = "board"
+ASK_FIRST = "manual"  # Claude Code's mode that asks for every tool it was not told to allow
 ACCESS_PROMPT = {
     False: "In this conversation Verticals is all you reach: you have no shell, files or web.",
     True: "In this conversation you also have Claude Code's own tools (shell, files, web) and the owner's other MCP "
@@ -71,8 +74,13 @@ def load_morning_prompt():
 
 
 MORNING_PROMPT = load_morning_prompt()
-# The Verticals writes the morning report makes on its own, unattended: its document, its task in Day and their link.
-MORNING_WRITES = ["create", "schedule", "doc_create", "doc_save", "doc_link"]
+# The one value a message's `sources` may take: the morning report's turn (web lib/morning.ts), which gets the morning
+# guide and its own rules. `clean_settings` passes exactly this value on and nothing else (docs/design/agent-fixes.md, fix 1).
+CONNECTED = "connected"
+# The Verticals writes the morning report makes on its own, unattended: its document and the document's link to its task.
+# The task is the server's, made or moved to today before the ask (core/morning.py, docs/design/agent-fixes.md, fix 2), so
+# `create` and `schedule` are not among them: a second task or a move would ask the owner first.
+MORNING_WRITES = ["doc_create", "doc_save", "doc_link"]
 # Outside Verticals, the morning report only reads: a tool of another connected server runs when its name starts with a
 # reading verb (google-calendar list-events, telethon fetch_history, coin search_base); any other is declined, so an
 # unattended turn never sends, marks, reacts, books or deletes anything.
@@ -166,6 +174,62 @@ def window(label, used, resets=None):
 def usage_state(windows, missing):
     windows = [w for w in windows if w]
     return {"state": "ready", "windows": windows} if windows else {"state": "unavailable", "message": missing}
+
+
+# ---------------------------------------------------------------- the gateway's log
+
+# The agent's side of a bug report (docs/design/agent-fixes.md, fix 7): one small rotating file in the app's data folder,
+# beside api.log and mcp.log. A report may carry its last lines, so a line holds what happened and never what was said:
+# event kinds, tool names, flags, durations and the CLI's own exit details; not your words, the agent's, a tool's inputs
+# or results, a title, an ID or the token.
+LOG_FILE = "agent.log"
+LOG_BYTES = 200_000
+LOG_BACKUPS = 2  # three files at most, about 600 kB all told
+
+
+def open_log(state_dir, max_bytes=LOG_BYTES, backups=LOG_BACKUPS):
+    """The gateway's log. A logger of its own, not in the process-wide tree, so two gateways in one process (the tests) never
+    write each other's lines. A log that cannot be opened (a read-only folder, a full disk) is no reason to stop the chat: the
+    logger then has no handler and says nothing."""
+    log = logging.Logger("verticals.agent")
+    log.setLevel(logging.INFO)
+    try:
+        handler = RotatingFileHandler(Path(state_dir) / LOG_FILE, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
+    except OSError:
+        return log
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%dT%H:%M:%S%z"))
+    log.addHandler(handler)
+    return log
+
+
+def clip(text, limit=300):
+    """One line of a CLI's own words (an error, an exit): whitespace folded, cut at `limit`."""
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[:limit - 1] + "…"
+
+
+def log_line(session, event):
+    """The log's line for an event of a conversation, or None for the many that say nothing the log needs (the agent's
+    words, a tool's result when it went well). Only fields that carry no content are read."""
+    kind = event.get("t")
+    who = f"session={str(session)[:8]}"
+    if kind == "turn_start":
+        return f"turn_start provider={event.get('provider')} model={event.get('model') or '-'} effort={event.get('effort') or '-'} {who}"
+    if kind == "tool":
+        return f"tool name={event.get('name')} {who}"
+    if kind == "tool_result" and event.get("error"):
+        return f"tool_error id={event.get('id')} {who}"
+    if kind == "goal":
+        return f"goal_bound {who}"
+    if kind == "permission":
+        return f"permission tool={event.get('tool') or '-'} {who}"
+    if kind == "permission_done":
+        return f"permission_done value={event.get('value', event.get('label', '-'))} {who}"
+    if kind == "done":
+        return f"done error={bool(event.get('error'))} ms={event.get('ms')} {who}" + (f" detail={clip(event.get('detail'))}" if event.get("detail") else "")
+    if kind == "exit":
+        return f"exit code={event.get('code')} {who}" + (f" detail={clip(event.get('detail'))}" if event.get("detail") else "")
+    return None
 
 
 # ---------------------------------------------------------------- line-delimited JSON processes
@@ -280,14 +344,17 @@ class ClaudeAgent:
         effort = settings.get("effort")
         claude_settings = {"fastMode": bool(settings.get("fast")), "ultracode": effort == "ultracode"}
         # The morning report's turn (web lib/morning.ts) also reaches the owner's own connected tools, read-only, and
-        # makes its document and task in Verticals without asking, whatever the permission mode.
-        self.connected = settings.get("sources") == "connected"
+        # saves its document in Verticals without asking. Nobody watches it, so it never runs in the chat's mode:
+        # "Bypass permissions" or "Auto" would let a tool of another server run before this gateway could judge it. It
+        # always asks first, and handle() answers: another server's tool only if its name reads, a Verticals write beyond
+        # the report goes to the owner (docs/design/agent-fixes.md, fix 4).
+        self.connected = settings.get("sources") == CONNECTED
         self.full = full_access(settings) and not self.connected
         allowed = READ_TOOLS + (MORNING_WRITES if self.connected else [])
-        mode = settings.get("permission") or BOARD_ONLY
+        mode = ASK_FIRST if self.connected else settings.get("permission") or BOARD_ONLY
         args = [which("claude"), "--print", "--verbose", "--include-partial-messages",
                 "--input-format", "stream-json", "--output-format", "stream-json",
-                "--permission-mode", "manual" if mode == BOARD_ONLY else mode,
+                "--permission-mode", ASK_FIRST if mode == BOARD_ONLY else mode,
                 "--permission-prompts", "host", "--permission-prompt-tool", "stdio",
                 *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_mcp),
                 "--settings", json.dumps(claude_settings),
@@ -361,7 +428,7 @@ class ClaudeAgent:
                 return self.decide(rid, "accept" if self.connected and reads_only(tool) else "decline")
             s.ask(self, rid, f"Allow Claude to use {short(tool)}?",
                   "\n\n".join(filter(None, [req.get("decision_reason"), json.dumps(tool_input, indent=2, ensure_ascii=False)])),
-                  [("Allow once", "accept"), ("Decline", "decline")])
+                  [("Allow once", "accept"), ("Decline", "decline")], tool=short(tool), tool_input=tool_input)
         elif kind == "control_cancel_request":
             s.resolve(msg.get("request_id"), "Cancelled")
         elif kind == "control_response" and msg.get("response", {}).get("request_id") == "initialize":
@@ -379,6 +446,11 @@ class ClaudeAgent:
         self.proc.close()
 
 
+def codex_mode(settings):
+    """The permission mode a Codex turn runs in: the chat's own, except the morning turn, which only reads."""
+    return "read-only" if settings.get("sources") == CONNECTED else settings.get("permission") or "auto-review"
+
+
 def codex_policy(mode, cwd=None):
     """Enjoy's sO(): permission mode -> Codex approval policy and sandbox."""
     out = {"approvalPolicy": "never" if mode == "full-access" else "on-request",
@@ -390,6 +462,13 @@ def codex_policy(mode, cwd=None):
                                 {"type": "readOnly", "networkAccess": False} if mode == "read-only" else
                                 {"type": "workspaceWrite", "writableRoots": [cwd], "networkAccess": False})
     return out
+
+
+def codex_instructions(settings):
+    """What Codex is told at the start of a thread: the board prompt, the morning turn's guide after it, and Verticals
+    under the name Codex knows its server by."""
+    text = PROMPT + ("\n" + MORNING_PROMPT if settings.get("sources") == CONNECTED else "")
+    return text.replace('server "verticals"', 'server "verticals_desktop"')
 
 
 def codex_args(chat):
@@ -450,8 +529,8 @@ class CodexAgent:
         self.proc.request("initialize", {"clientInfo": {"name": "verticals-desktop", "title": "Verticals", "version": "0.1.0"},
                                          "capabilities": {"experimentalApi": True}})
         self.proc.notify("initialized", {})
-        params = {**codex_policy(settings.get("permission") or "auto-review"), "cwd": str(chat.workdir),
-                  "developerInstructions": PROMPT.replace('server "verticals"', 'server "verticals_desktop"'),
+        params = {**codex_policy(codex_mode(settings)), "cwd": str(chat.workdir),
+                  "developerInstructions": codex_instructions(settings),
                   "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False},
                   "serviceTier": "fast" if settings.get("fast") else None}
         if settings.get("model"):
@@ -475,7 +554,7 @@ class CodexAgent:
 
     def send(self, text):
         settings = self.settings = self.s.settings
-        params = {**codex_policy(settings.get("permission") or "auto-review", str(self.chat.workdir)),
+        params = {**codex_policy(codex_mode(settings), str(self.chat.workdir)),
                   "serviceTier": "fast" if settings.get("fast") else None, "threadId": self.thread_id,
                   "input": [{"type": "text", "text": text, "text_elements": []}]}
         if settings.get("model"):
@@ -626,6 +705,7 @@ class Session:
         self.settings = {}
         self.started_at = None
         self.reply = ""                  # text of the agent's current reply, for handoffs
+        self.tools = {}                  # tool call id -> (name, input) until its result comes
 
     # -- events
 
@@ -635,10 +715,20 @@ class Session:
             self.events.append((self.seq, event))
             del self.events[:-MAX_EVENTS]
             self.cond.notify_all()
+        if line := log_line(self.id, event):
+            self.chat.log.info(line)
         if event["t"] == "text":
             self.reply += event["text"]
         elif event["t"] == "text_start" and self.reply:
             self.reply += "\n\n"
+        elif event["t"] == "tool":
+            self.tools[event.get("id")] = (event.get("name"), event.get("input") or {})
+        elif event["t"] == "tool_result":
+            name, tool_input = self.tools.pop(event.get("id"), (None, {}))
+            goal_id = made_goal(event.get("summary")) if name == "create" and not event.get("error") else None
+            if goal_id:
+                title = tool_input.get("title") if isinstance(tool_input, dict) else None
+                self.chat.bind_goal(self, goal_id, title if isinstance(title, str) else "")
 
     def since(self, seq, timeout):
         with self.cond:
@@ -646,10 +736,13 @@ class Session:
                 self.cond.wait(timeout)
             return [(s, e) for s, e in self.events if s > seq]
 
-    def ask(self, agent, key, title, body, options):
+    def ask(self, agent, key, title, body, options, tool=None, tool_input=None):
+        """`tool` and `tool_input` are the write the agent wants to make, as it calls it: the app draws what will change from
+        them (web lib/askDetail.ts, docs/design/agent-fixes.md, fix 6), where `body` is only stored."""
         self.asks[key] = agent
         self.emit({"t": "permission", "requestId": key, "title": title, "body": body,
-                   "options": [{"label": label, "value": value} for label, value in options]})
+                   "options": [{"label": label, "value": value} for label, value in options],
+                   **({"tool": tool, "input": tool_input or {}} if tool else {})})
 
     def resolve(self, key, label):
         if key is not None and self.asks.pop(str(key), None):
@@ -661,6 +754,7 @@ class Session:
         if not self.running:
             return
         self.running = False
+        self.tools.clear()
         ms = int((time.time() - (self.started_at or time.time())) * 1000)
         self.chat.record(self.id, "assistant", self.reply)
         at = time.time()
@@ -685,6 +779,8 @@ class Session:
 class Chat:
     def __init__(self, state_dir: Path, mcp_url: str, token: str):
         self.state_dir, self.mcp_url, self.token = state_dir, mcp_url, token
+        self.log = open_log(state_dir)
+        self.log.info("gateway start pid=%d", os.getpid())
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
         self.store_path = state_dir / "chat-sessions.json"
@@ -738,6 +834,19 @@ class Chat:
                  for id, entry in self.load().items()
                  if isinstance(entry, dict) and (entry.get("goal") or {}).get("id") == goal_id]
         return sorted(found, key=lambda c: c["lastTurnAt"], reverse=True)
+
+    def bind_goal(self, s, goal_id, title):
+        """A conversation about no goal that makes one becomes that goal's conversation (docs/design/agent-chips.md): Discuss
+        with agent on the new goal goes on with it. The first goal made is the one; a conversation that already has a goal
+        keeps it. The app is told (a `goal` event) so its own record of the conversation says the same."""
+        with self.lock:
+            data = self.load()
+            entry = data.setdefault(s.id, {})
+            if entry.get("goal"):
+                return
+            entry["goal"] = {"id": goal_id, "title": title[:300]}
+            self.save(data)
+        s.emit({"t": "goal", "id": goal_id, "title": title[:300]})
 
     def session(self, id) -> Session:
         try:
@@ -858,6 +967,13 @@ class Chat:
     # -- turns
 
     def send(self, id, text, context=None, settings=None, mode="send"):
+        try:
+            self._send(id, text, context, settings, mode)
+        except ChatError as e:
+            self.log.warning("refused %s session=%s", clip(e), str(id)[:8])
+            raise
+
+    def _send(self, id, text, context, settings, mode):
         if not isinstance(text, str) or not text.strip():
             raise ChatError("Empty message")
         s = self.session(id)
@@ -867,6 +983,8 @@ class Chat:
             self.update(id, goal={"id": goal["id"], "title": str(goal.get("title", ""))[:300]})
         if not which(settings["provider"]):
             raise ChatError(f"{AGENTS[settings['provider']]['label']} is not installed.")
+        self.log.info("send provider=%s permission=%s morning=%s chars=%d mode=%s queued=%s session=%s",
+                      settings["provider"], settings["permission"], "sources" in settings, len(text), mode, s.running, str(id)[:8])
         s.emit({"t": "user", "text": text, "provider": settings["provider"], "model": settings.get("model"),
                 "effort": settings.get("effort")})
         self.record(id, "user", text)
@@ -903,6 +1021,8 @@ class Chat:
                     "effort": settings.get("effort")})
             if agent is None:
                 s.emit({"t": "activity", "label": "Starting…"})
+                self.log.info("agent_start provider=%s resume=%s handoff=%d session=%s", provider, bool(resume), len(handoff),
+                              str(s.id)[:8])
                 agent = AGENT_CLASSES[provider](self, s, settings, resume)
                 s.agent = agent
                 self.update(s.id, provider=provider, sessionId=agent.session_id)
@@ -912,12 +1032,14 @@ class Chat:
             agent.send(body + text)
         except (ChatError, OSError) as e:
             s.running = False
+            self.log.warning("turn_failed_to_start %s session=%s", clip(e), str(s.id)[:8])
             s.emit({"t": "done", "error": True, "detail": str(e), "ms": 0})
 
     def decide(self, id, request_id, value):
         s = self.session(id)
         agent = s.asks.pop(str(request_id), None)
         if agent is None:
+            self.log.warning("refused permission no longer active session=%s", str(id)[:8])
             raise ChatError("This request is no longer active")
         agent.decide(str(request_id), value)
         s.emit({"t": "permission_done", "requestId": str(request_id), "value": value})
@@ -937,6 +1059,10 @@ class Chat:
         for s in list(self.sessions.values()):
             if s.agent:
                 s.agent.close()
+        self.log.info("gateway stop")
+        for handler in list(self.log.handlers):
+            handler.close()
+            self.log.removeHandler(handler)
 
 
 ClaudeAgent.signature_of = staticmethod(lambda settings: settings)
@@ -950,10 +1076,14 @@ def clean_settings(raw):
     efforts = {v for v, _ in agent["efforts"]} | {"default"}
     permissions = {v for v, _, _ in agent["permissions"]}
     model = raw.get("model") if isinstance(raw.get("model"), str) and len(raw["model"]) < 200 else ""
-    return {"provider": provider, "model": model,
-            "effort": raw.get("effort") if raw.get("effort") in efforts else agent["defaultEffort"],
-            "fast": bool(raw.get("fast")),
-            "permission": raw.get("permission") if raw.get("permission") in permissions else agent["defaultPermission"]}
+    cleaned = {"provider": provider, "model": model,
+               "effort": raw.get("effort") if raw.get("effort") in efforts else agent["defaultEffort"],
+               "fast": bool(raw.get("fast")),
+               "permission": raw.get("permission") if raw.get("permission") in permissions else agent["defaultPermission"]}
+    # The morning report's turn is the one that sends `sources`; the gateway gives it its own guide and rules (CONNECTED).
+    if raw.get("sources") == CONNECTED:
+        cleaned["sources"] = CONNECTED
+    return cleaned
 
 
 def codex_usage(raw):
@@ -989,6 +1119,20 @@ def format_handoff(transcript, current):
 
 def short(tool):
     return tool.removeprefix("mcp__verticals__")
+
+
+# What the Verticals MCP server's `create` answers (verticals/mcp/tools.py `_handle_create`): "Created 'Plan the review'
+# [AB12CD34]", then " + 3 descendant(s)" for a plan with steps and " (replayed)" for a retry. tests/mcp pins the words. An
+# agent that hands on the result's structured content instead gives {"goal": {"id": "AB12CD34", ...}, ...}.
+MADE_GOAL = re.compile(r"^Created .* \[([A-Za-z0-9_-]+)\](?: \+ \d+ descendant\(s\))?(?: \(replayed\))?$", re.S)
+MADE_GOAL_JSON = re.compile(r'^\{\s*"goal"\s*:\s*\{\s*"id"\s*:\s*"([A-Za-z0-9_-]+)"')
+
+
+def made_goal(summary):
+    """The id of the goal a `create` result names, or None."""
+    text = str(summary or "").strip()
+    match = MADE_GOAL.match(text) or MADE_GOAL_JSON.match(text)
+    return match.group(1) if match else None
 
 
 def result_text(content):

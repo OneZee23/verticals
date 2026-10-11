@@ -46,6 +46,9 @@ export interface Ask {
   options: { label: string; value: string }[]
   done: boolean
   chosen?: string
+  /** The write the agent asks to make, as it calls it (the gateway sends it for a Claude ask): lib/askDetail.ts draws it. */
+  tool?: string
+  input?: Record<string, unknown>
 }
 export interface Balloon { key: string; who: 'you' | 'agent'; text: string; error?: boolean; ask?: Ask; pending?: boolean }
 
@@ -137,6 +140,7 @@ export const balloons = computed<Balloon[]>(() => {
         balloon.ask = {
           requestId: String(event.requestId), title: String(event.title ?? ''), body: String(event.body ?? ''),
           options: (event.options as Ask['options']) ?? [], done: false,
+          ...(typeof event.tool === 'string' ? { tool: event.tool, input: (event.input as Ask['input']) ?? {} } : {}),
         }
         break
       }
@@ -345,6 +349,11 @@ function follow(event: ChatEvent): void {
       break
     case 'permission_done':
       if (agentChat.running) touchThread({ status: 'working' })
+      break
+    case 'goal':
+      // The gateway: the agent made a goal in a conversation about no goal, so the conversation is now that goal's
+      // (docs/design/agent-chips.md). Discuss on the goal goes on with it, and your next words carry the goal.
+      if (!currentThread.value?.goal && typeof event.id === 'string') touchThread({ goal: { id: event.id, title: String(event.title ?? '') } })
       break
     case 'done':
       agentChat.running = false

@@ -3,8 +3,8 @@
 // pointed at, focused or holding words, a field whose line is your cursor, then your caret. Enter sends the words
 // (`submit`); the board follows every letter through `commandFilter`. Open, it is as wide as its caption, and while you
 // type it never gets narrower than that (Inbox and Documents redesign, rounds 9–10). A message of the agent's inside it
-// takes a message's corners, and the documents it brings stand on its left, the first one's page under a short title
-// (rounds 10–11; .local-design/inbox-and-docs/final, section 1).
+// takes a message's corners, and what it made or changed stands under its words as chips, as in its balloon
+// (docs/design/agent-chips.md).
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { store } from '../store'
 import { commandFilter } from '../lib/commandFilter'
@@ -20,13 +20,13 @@ import { curve, reducedMotion } from '../lib/motion'
 import { launch } from '../lib/chatFlight'
 import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
+import AgentChips from './AgentChips.vue'
 import CircleTags from './CircleTags.vue'
-import DocPage from './DocPage.vue'
-import { docLinks, withoutDocLines } from '../lib/docLinks'
-import { docCard } from '../lib/docCard'
+import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import MovingStack from './MovingStack.vue'
 import { backspace as pickBackspace, escape as movingEscape, tab as pickTab } from '../lib/moving'
 import { dots } from '../lib/spansDrag'
+import { brush, type Brush } from '../lib/brush'
 import './circleField.css'
 
 defineKnobs('The field', [
@@ -46,11 +46,12 @@ const CIRCLE = 84
 /* The open field's caption has 32 px on each side; "Ready?" has 36 (round 8's pill, at least the circle's 136). */
 const PAD_CAPTION = 32
 const PAD_ASK = 36
-/* A message bringing documents: the page 50 × 67 (three lines), 24 px in from the left, 16 px to the words; the words
-   236 px wide, a short title and two lines of the message; 32 px on the right and 12 above and below (round 11). */
-const NOTE_PAGE = 50
-const NOTE_PAGE_H = 67
-const NOTE_WORDS = 236
+/* A message bringing chips is the balloon in the field: the words 376 px wide, two lines of them, 32 px in from the sides,
+   then the chips with 14 px between (the balloon's own), three at most and "N more" for the rest. */
+const CHIPS_PAD = 32
+const CHIPS_SHOWN = 3
+const CHIPS_GAP = 14
+const CHIP_HEIGHT = { doc: 67, goal: 44 }
 
 const body = ref<HTMLElement | null>(null)
 const shape = ref<HTMLElement | null>(null)
@@ -100,21 +101,29 @@ function textWidth(value: string): number {
   return Math.max(0, ...value.split('\n').map((part) => measureCtx!.measureText(part).width))
 }
 
-/* The documents the answer brings: the field shows the first one's page, a stack when there are more. */
-const answerDocs = computed(() => (circleWords.value?.kind === 'answer' ? docLinks(circleWords.value.text) : []))
-const behind = computed(() => (answerDocs.value.length > 1 ? 4 : 0))
-const noteTitle = computed(() => {
-  const docs = answerDocs.value
-  if (docs.length !== 1) return `${docs.length} documents`
-  const name = docCard(docs[0]!.id)?.title || docs[0]!.label || 'Document'
-  return name.split(' — ')[0]!.trim()
-})
-const noteDoc = computed(() => (answerDocs.value.length ? docCard(answerDocs.value[0]!.id) : null))
+/* What the answer made or changed, under its words as in its balloon: the first few chips, the rest counted. */
+const answerChips = computed(() => (circleWords.value?.kind === 'answer' ? chipLinks(circleWords.value.text) : []))
+const shownChips = computed(() => answerChips.value.slice(0, CHIPS_SHOWN))
+const moreChips = computed(() => answerChips.value.length - shownChips.value.length)
 const answerText = computed(() => {
   if (!circleWords.value) return ''
-  return plainWords(answerDocs.value.length ? withoutDocLines(circleWords.value.text) : circleWords.value.text)
+  return plainWords(answerChips.value.length ? withoutChipLines(circleWords.value.text) : circleWords.value.text)
 })
-const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(circleWords.value.lead) : ''))
+/* What the answer says to one who does not see it: its words, or the names of what it made when it has none. */
+const answerSays = computed(() => answerText.value || answerChips.value.map((chip) => chip.label).join(', '))
+const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(withoutChipLines(circleWords.value.lead)) : ''))
+/* The chips' height is theirs to say (a title takes one line or two): measured, with the first guess until they are drawn. */
+const chipsBox = ref<HTMLElement | null>(null)
+const chipsMeasured = ref(0)
+const chipsHeight = computed(() => {
+  if (chipsMeasured.value) return chipsMeasured.value
+  const guess = shownChips.value.reduce((sum, chip) => sum + CHIP_HEIGHT[chip.kind] + 12, -12)
+  return guess + (moreChips.value ? 12 + 22 : 0)
+})
+/* The words above the chips: two lines at most, and 14 px to the first chip. */
+const chipWords = computed(() => (answerText.value ? Math.min(2, answerLines.value) * 22 + CHIPS_GAP : 0))
+/* An ask says what it will change under its question: the goal and its date (lib/askDetail.ts). */
+const changesText = computed(() => (circleWords.value?.kind === 'ask' ? circleWords.value.changes : ''))
 const stopping = computed(() => state.value === 'working' && circle.pointed)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
@@ -126,7 +135,7 @@ const openWidth = computed(() => Math.min(maxWidth.value, Math.ceil(PAD_CAPTION 
 
 const width = computed(() => {
   if (carry.over) return 120
-  if (state.value === 'answer' && answerDocs.value.length) return 24 + NOTE_PAGE + behind.value + 16 + NOTE_WORDS + 32
+  if (state.value === 'answer' && answerChips.value.length) return ANSWER_MEASURE + 2 * CHIPS_PAD
   if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
   if (stopping.value) return 132
   // "Ready?": the pointed field's pill as wide as its word, the word in its middle (round 8).
@@ -143,7 +152,7 @@ const width = computed(() => {
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))
 const height = computed(() => {
   if (state.value === 'typing') return PAD_Y * 2 + shownLines.value * LINE
-  if (state.value === 'answer' && answerDocs.value.length) return Math.max(CIRCLE, 12 + NOTE_PAGE_H + behind.value + 12)
+  if (state.value === 'answer' && answerChips.value.length) return Math.max(CIRCLE, PAD_Y * 2 + chipWords.value + chipsHeight.value)
   if (state.value === 'answer') {
     const ask = circleWords.value?.kind === 'ask' ? 44 + (leadLines.value ? leadLines.value * 22 + 8 : 0) : 0
     return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask)
@@ -217,7 +226,7 @@ function moved(): void {
 watch([text, width, height], () => void nextTick(measure))
 
 /* The answer's shape hugs its words: one line as wide as they are, more at the 376 px measure, three at most (S2.P4.040). */
-watch(answerText, async () => {
+watch([answerText, changesText], async () => {
   await nextTick()
   const el = answerMeasure.value
   if (!el) return
@@ -225,6 +234,16 @@ watch(answerText, async () => {
   // The blinking line after the words takes its 5 px on the last line.
   answerWidth.value = answerLines.value > 1 ? ANSWER_MEASURE : Math.min(ANSWER_MEASURE, Math.ceil(el.scrollWidth) + 6)
 }, { immediate: true, flush: 'post' })
+/* The chips' height, as they are drawn: a title takes one line or two, and a goal's line arrives once the goal is read. */
+let chipsWatch: ResizeObserver | null = null
+watch(chipsBox, (el) => {
+  chipsWatch?.disconnect()
+  chipsWatch = null
+  chipsMeasured.value = 0
+  if (!el || typeof ResizeObserver === 'undefined') return
+  chipsWatch = new ResizeObserver(() => { chipsMeasured.value = Math.round(el.offsetHeight) })
+  chipsWatch.observe(el)
+}, { flush: 'post' })
 /* An ask in the field carries the agent's last words on top, two lines at most (S2.P1.044). */
 watch(leadText, async () => {
   await nextTick()
@@ -252,6 +271,11 @@ watch(() => state.value === 'working', (working, was) => {
   if (from && from !== 'none') el.animate([{ transform: from }, { transform: 'none' }], { duration: 165, easing: curve('large') })
 })
 
+/* The answer goes back into the circle and the conversation keeps it: Esc does it, and so does brushing it away with a
+   sideways swipe or a drag down (lib/brush.ts; docs/design/agent-fixes.md, fix 8). */
+function sendBack(): void {
+  agentChat.answer = null
+}
 /* The answer goes up into the conversation as its last balloon, and the field takes the caret (S2.P4.003). */
 function reply(): void {
   const words = shape.value?.querySelector('.circle-field__answer-words')?.getBoundingClientRect()
@@ -371,7 +395,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
     return
   }
   if (event.key === 'Escape' && circleWords.value?.kind === 'answer') {
-    agentChat.answer = null
+    sendBack()
     return
   }
   if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1 || event.key === ' ') return
@@ -384,6 +408,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   focusField()
 }
 function onShapeClick(): void {
+  if (brushing?.swallowed()) return  // the end of a drag is no click on the answer
   if (state.value === 'go') void sayGo()
   else if (circleWords.value?.kind === 'answer') reply()
   else if (!circleWords.value) focusField()
@@ -394,7 +419,9 @@ defineExpose({ focusField })
 
 let stopNews: (() => void) | null = null
 let stopFinding: (() => void) | null = null
+let brushing: Brush | null = null
 onMounted(() => {
+  if (shape.value) brushing = brush(shape.value, () => state.value === 'answer' && circleWords.value?.kind === 'answer', sendBack)
   const match = /^\/search\/(.*)/.exec(location.pathname)
   if (match?.[1]) { try { commandFilter.text = decodeURIComponent(match[1]) } catch { commandFilter.text = match[1] } }
   window.addEventListener('keydown', onWindowKeyDown, true)
@@ -405,6 +432,8 @@ onMounted(() => {
   void document.fonts?.ready.then(() => void nextTick(measure))
 })
 onBeforeUnmount(() => {
+  chipsWatch?.disconnect()
+  brushing?.stop()
   window.removeEventListener('keydown', onWindowKeyDown, true)
   window.removeEventListener('resize', onResize)
   document.fonts?.removeEventListener('loadingdone', onFontsLoaded)
@@ -478,28 +507,21 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <span v-if="state === 'go'" class="circle-field__go" data-role="circle-go" role="button" aria-label="Ready? Hand your edits to the agent">{{ GO_WORD }}</span>
-        <div v-if="circleWords" class="circle-field__answer" :class="[`circle-field__answer--${circleWords.kind}`, { 'circle-field__answer--note': answerDocs.length }]" data-role="circle-answer"
-          :aria-label="circleWords.kind === 'answer' ? `${answerText}. Press any key to reply` : undefined">
-          <template v-if="answerDocs.length">
-            <span class="circle-field__note-page" :style="{ paddingTop: `${behind}px`, paddingRight: `${behind}px` }" data-role="circle-note-page">
-              <i v-if="behind" class="circle-field__note-behind" aria-hidden="true"></i>
-              <DocPage v-if="noteDoc" :doc="noteDoc" :width="NOTE_PAGE" />
-            </span>
-            <div class="circle-field__note-words">
-              <p class="circle-field__note-title" data-role="circle-note-title">{{ noteTitle }}</p>
-              <p class="circle-field__note-text">{{ answerText }}<span class="circle-field__answer-caret" aria-hidden="true"></span></p>
-            </div>
-          </template>
-          <template v-else>
+        <div v-if="circleWords" class="circle-field__answer" :class="[`circle-field__answer--${circleWords.kind}`, { 'circle-field__answer--chips': answerChips.length }]" data-role="circle-answer"
+          :aria-label="circleWords.kind === 'answer' ? `${answerSays}. Press any key to reply` : undefined">
           <p v-if="leadText" class="circle-field__answer-lead">{{ leadText }}</p>
-          <p class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <p v-if="answerText || !answerChips.length" class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <p v-if="changesText" class="circle-field__answer-changes" data-role="circle-ask-changes">{{ changesText }}</p>
+          <div v-if="answerChips.length" ref="chipsBox" class="circle-field__answer-chips">
+            <AgentChips :links="shownChips" />
+            <p v-if="moreChips" class="circle-field__answer-more" data-role="circle-answer-more">{{ moreChips }} more</p>
+          </div>
           <div v-if="circleWords.kind === 'ask' && openAsk" class="circle-field__answer-choices">
             <button v-for="option in openAsk.options" :key="option.value" type="button" class="circle-field__answer-choice"
               @click.stop="decide(openAsk.requestId, option.value)">{{ option.label }}</button>
           </div>
-          </template>
         </div>
-        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}</p>
+        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}<template v-if="changesText"><br>{{ changesText }}</template></p>
         <p ref="leadMeasure" class="circle-field__answer-measure circle-field__answer-measure--lead" aria-hidden="true">{{ leadText }}</p>
         <button v-if="stopping" type="button" class="circle-field__stop" aria-label="Stop the agent" @click.stop="stop()">
           <span aria-hidden="true"></span>
