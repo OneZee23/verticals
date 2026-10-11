@@ -219,6 +219,8 @@ def log_line(session, event):
         return f"tool name={event.get('name')} {who}"
     if kind == "tool_result" and event.get("error"):
         return f"tool_error id={event.get('id')} {who}"
+    if kind == "goal":
+        return f"goal_bound {who}"
     if kind == "permission":
         return f"permission tool={event.get('tool') or '-'} {who}"
     if kind == "permission_done":
@@ -703,6 +705,7 @@ class Session:
         self.settings = {}
         self.started_at = None
         self.reply = ""                  # text of the agent's current reply, for handoffs
+        self.tools = {}                  # tool call id -> (name, input) until its result comes
 
     # -- events
 
@@ -718,6 +721,14 @@ class Session:
             self.reply += event["text"]
         elif event["t"] == "text_start" and self.reply:
             self.reply += "\n\n"
+        elif event["t"] == "tool":
+            self.tools[event.get("id")] = (event.get("name"), event.get("input") or {})
+        elif event["t"] == "tool_result":
+            name, tool_input = self.tools.pop(event.get("id"), (None, {}))
+            goal_id = made_goal(event.get("summary")) if name == "create" and not event.get("error") else None
+            if goal_id:
+                title = tool_input.get("title") if isinstance(tool_input, dict) else None
+                self.chat.bind_goal(self, goal_id, title if isinstance(title, str) else "")
 
     def since(self, seq, timeout):
         with self.cond:
@@ -743,6 +754,7 @@ class Session:
         if not self.running:
             return
         self.running = False
+        self.tools.clear()
         ms = int((time.time() - (self.started_at or time.time())) * 1000)
         self.chat.record(self.id, "assistant", self.reply)
         at = time.time()
@@ -822,6 +834,19 @@ class Chat:
                  for id, entry in self.load().items()
                  if isinstance(entry, dict) and (entry.get("goal") or {}).get("id") == goal_id]
         return sorted(found, key=lambda c: c["lastTurnAt"], reverse=True)
+
+    def bind_goal(self, s, goal_id, title):
+        """A conversation about no goal that makes one becomes that goal's conversation (docs/design/agent-chips.md): Discuss
+        with agent on the new goal goes on with it. The first goal made is the one; a conversation that already has a goal
+        keeps it. The app is told (a `goal` event) so its own record of the conversation says the same."""
+        with self.lock:
+            data = self.load()
+            entry = data.setdefault(s.id, {})
+            if entry.get("goal"):
+                return
+            entry["goal"] = {"id": goal_id, "title": title[:300]}
+            self.save(data)
+        s.emit({"t": "goal", "id": goal_id, "title": title[:300]})
 
     def session(self, id) -> Session:
         try:
@@ -1094,6 +1119,20 @@ def format_handoff(transcript, current):
 
 def short(tool):
     return tool.removeprefix("mcp__verticals__")
+
+
+# What the Verticals MCP server's `create` answers (verticals/mcp/tools.py `_handle_create`): "Created 'Plan the review'
+# [AB12CD34]", then " + 3 descendant(s)" for a plan with steps and " (replayed)" for a retry. tests/mcp pins the words. An
+# agent that hands on the result's structured content instead gives {"goal": {"id": "AB12CD34", ...}, ...}.
+MADE_GOAL = re.compile(r"^Created .* \[([A-Za-z0-9_-]+)\](?: \+ \d+ descendant\(s\))?(?: \(replayed\))?$", re.S)
+MADE_GOAL_JSON = re.compile(r'^\{\s*"goal"\s*:\s*\{\s*"id"\s*:\s*"([A-Za-z0-9_-]+)"')
+
+
+def made_goal(summary):
+    """The id of the goal a `create` result names, or None."""
+    text = str(summary or "").strip()
+    match = MADE_GOAL.match(text) or MADE_GOAL_JSON.match(text)
+    return match.group(1) if match else None
 
 
 def result_text(content):

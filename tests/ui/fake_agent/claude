@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each
 message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[ask:NAME]` asks
-permission for one of the writes in ASKS, shaped as the real tool is called, `[slow]` works for a second and a half,
+permission for one of the writes in ASKS, shaped as the real tool is called, `[make:ID|Title]` makes the goal ID
+by calling `create` and gets the words Verticals' server answers it with, `[slow]` works for a second and a half,
 `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers with the words after it, and
 `[context]` with the app context Verticals sent. Each start appends the arguments it was given to `argv.log` in its
 folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions)."""
@@ -40,7 +41,7 @@ def answer_for(words):
         return ("Here is the first part of a longer answer, with **bold** words.\n\n"
                 "The second part goes on about the plan, the dates and what could move next week.\n\n"
                 "The third part closes it with one more line to read.")
-    said = re.sub(r"\[[a-z:_]+\]", "", words).strip()
+    said = re.sub(r"\[(?:[a-z:_]+|make:[^\]]*)\]", "", words).strip()
     return f"Done: {said}" if said else "Done."
 
 
@@ -83,6 +84,13 @@ for msg in iter(read, None):
         time.sleep(0.3)
         out({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": f"tool-{name}", "content": "ok"}]}})
+    for goal, title in re.findall(r"\[make:([A-Za-z0-9_-]+)\|([^\]]*)\]", words):
+        out({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"make-{goal}", "name": "mcp__verticals__create", "input": {"title": title}}]}})
+        time.sleep(0.3)
+        # What the server's `create` tool says (verticals/mcp/tools.py), which tests/mcp pins.
+        out({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"make-{goal}", "content": [{"type": "text", "text": f"Created {title!r} [{goal}]"}]}]}})
     if "[slow]" in words:
         time.sleep(1.5)
     if "[fail]" in words:
