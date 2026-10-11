@@ -1,37 +1,72 @@
-# Reader-facing report contract
+# The report's shape
 
-Use [worked-example.md](worked-example.md) for a complete, case-based rendering. These sections are a proven default from actual use, not an obligation to print empty tables or copy another owner's timezone and source names.
+One report a day is one document, `reports/morning/<YYYY-MM-DD>.md`, titled `Morning report — <d Month YYYY>` and linked to the open "Morning report" task. The title is the document's own: the body does not repeat it. Read from top to bottom, the document has the parts below, in this order. A part with nothing to say is left out, except the check line and the sources. [worked-example.md](worked-example.md) shows a whole report.
 
-## Header and navigation
+Code reads four places in it: the red block, the check line, the rows' last cell and the sources. Keep their shapes exactly as written here.
 
-Title the document `Morning report — <local date>`. The opening line says whether it is pre-talk or post-talk, the reader's timezone, the baseline report and source interval, what was checked through when, any targeted later checks, and what was excluded. State if an intended delivery time was missed; do not disguise it as the source cutoff or completion time.
+## 1. What could not be read, in red
 
-Start with `What changed`: material corrections, new commitments, delivered results, and status changes since the previous report. Next use the nonempty sections `Inbox — decisions needed`, `Today`, and `This week — keep in mind` when relevant. Preserve the reader's known priority order, and label carry-over rather than treating an old date as a newly assigned priority. Do not fill the active view with completed or deliberately deferred history.
+A fenced block named `unread`, at the very top, one line for each source or tool: its name, what happened, since when.
 
-Each navigation table uses four columns when the reader edits comments:
+````
+```unread
+Mail: waiting for your Approve, so it was not read.
+Team chat: get_messages answered with an error at 06:51.
+```
+````
 
-| Task / owning session | Summary / purpose | Latest updates / next action | Reader comments and decisions |
-| --- | --- | --- | --- |
-| Real linked task and current owning session | Stable intended result | Verified recent state; what remains; next actor | Exact comment awaiting verified transfer, or `[]` |
+It holds every source that is red or waiting for the reader's Approve, every tool that was declined or failed, and every source with no tool listed for reading it. The app draws it in red. Leave it out when everything was read. A source named here still has its row in the sources, with the window it had before.
 
-The first link must route to the task's real owning session, not a historical coordination bucket. If a route is unresolved, say so. The purpose is stable; the updates cell carries progress, limits, and next action. Keep one main outcome per row. Group true child work beneath its parent in a short Markdown list, linking only real child sessions. A compact child list may not hide an urgent blocker or promise: state its consequence in the parent row. Use native Markdown, not HTML line breaks inside tables.
+## 2. The check
 
-## Detail below navigation
+One line, directly under the red block (or at the very top when there is none), written as:
 
-Add only the sections needed to make the concise rows actionable: meeting or conversation context; source → exact destination → readback map; material constraints and choices; near-term calendar; unresolved comments; source coverage and limitations; processed comment history. Attribute ideas to speakers and keep proposals distinct from promises and accepted scope. Preserve enough substance to discuss a decision without opening every source, but do not duplicate every goal or transcript. When a source was not checked, say which claims remain uncertain and its last verified window; an absence of search results is not a fresh negative finding.
+`Not checked yet: a second agent is reading it against the sources.`
 
-The report must distinguish `discussed`, `agreed`, `saved`, `delivered`, `recipient response`, and `reader acceptance`. Examples from actual usage: a sent strategy is not a promised second document; an annual payment discussion is not cash received; a merged skills PR and recipient use do not themselves close the owner's overall task. Check later replies before calling a message or handoff pending.
+Write that line and no verdict. A second agent reads the report against the raw sources and the app puts its verdict in this place: how many of ten checks passed, and a short table of every one that did not. [second-check.md](second-check.md) lists the ten. The reader is told the report is ready only after it has been checked.
 
-## Comments and second copy
+## 3. The rows
 
-The fourth column is an input queue. Process each discovered comment as follows:
+Under these headings, in this order, leaving out the ones with no rows: `## Inbox — decisions needed`, `## Today`, `## This week — keep in mind`. Under each, one table with exactly these columns:
 
-1. Read the exact existing task on the configured authoritative Verticals backend. Preserve the comment verbatim, including punctuation and line breaks; keep report date, row, and source revision or equivalent provenance alongside it rather than editing the quoted text.
-2. Check existing task comments for the same source occurrence before creating one. Reuse an exact existing copy. The same words on another task or in a separate reader input are not automatically duplicates.
-3. Save the comment to that task and read it back from the authoritative backend. Verify destination, original text, and provenance; retain the task/comment reference and readback state in compact history. A local mirror save does not satisfy this step. If the destination is ambiguous, access fails, or readback differs, leave the original report cell visible with the transfer blocker.
-4. After verified transfer, clear the cell to `[]` even when the underlying work has not started. Preserve unfinished work, the next actor, and any need for a direct reader command in the third column. Keep the original text and transfer receipt in history; clearing the input cell does not complete or accept the task.
-5. When owning-session notification is authorized, send only the saved-input reference and information-only notice. State that the notification authorizes no assessment, research, revision, execution, or report edit; wait for a separate direct reader command and require no routine acknowledgement. A notification failure is recorded separately and does not undo a verified transfer or repopulate the input cell. Do not create a new session merely to route it.
+| Task | Purpose | Latest | Next action | Your comment |
+| --- | --- | --- | --- | --- |
 
-Even an imperative such as “revise the PDF” in a discovered report comment is stored input, not an execution command to the owning session. A separate direct reader command remains valid for its own scope. A dispatch, draft, formatting approval, or agent's test result does not accept underlying work; apply explicit acceptance only to its stated scope and conditions.
+- **Task:** the task linked as `[Name](goal:<id>)`, with its name from the board, never reworded. A task with children is **bold** (`**[Name](goal:<id>)**`), and its children follow on the lines under it, each starting with an en dash and a space (`– [Name](goal:<id>)`); only real children from the board. In the Inbox group, a proposal that has no task yet is named by its result ("Launch plan is shared", not "Work on the launch plan") and links nothing.
+- **Purpose:** the result the task is for, in one sentence. It stays the same from one report to the next.
+- **Latest:** what changed since the last report, only what a source shows, in one or two sentences. Write dates as the board's schedule does: `Fri 25 Sep`, `21–27 Sep`, `August`, `Q3`; never "yesterday" or "last week". Say a thing once: what the Purpose already says is not repeated.
+- **Next action:** who acts next, and what. Say when it waits for the reader's own command.
+- **Your comment:** empty. The reader writes there.
 
-Update the same dated report after review. If a native Verticals document is configured as a second copy, save identical content and compare both after writing. Keep the pre-talk state through existing revision/history, not a second daily briefing. Publish a short chat link and actual-change summary; do not paste duplicate tables by default.
+One main outcome to a row. A short list of children may not hide a blocker or a promise: say its consequence in the parent's row. Keep the reader's priority order. A carried-over date keeps its date and is labelled as carried over; an old date is not a new priority. A closed task is not a row.
+
+Say which state a thing is in, and no more: discussed, agreed, saved, delivered, answered by the recipient, accepted by the reader. A proposal is not a promise, a merged change is not the reader's acceptance, and a talk about payment is not money received. Check later replies before calling a message or a handoff pending.
+
+## 4. What was closed since the last report
+
+`## Closed since the last report`, once, after the rows. One line for each task: `- [Name](goal:<id>): what shows it is done, and in which source.` Close a task only when a source shows it done beyond doubt and the reader has not left it open on purpose. Close it on the board first (`update` with `done` true), then record how you know with `evidence_update` (the source, the claim in your own words, the source's cut-off). A closed task is listed here once and never in the rows.
+
+## 5. The sources
+
+The last section, `## Sources`. Its first line says the zone the times are in, as the context names it:
+
+`Times in Europe/Berlin.`
+
+Then one table with a row for every source, in this shape, the numbers after `Read` being counts:
+
+| Source | Window | Read | Tasks | Inbox | Done | Put off | Context | Gap |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [Team chat](doc:sources/team-chat.md) | 2026-10-11 18:40 – 2026-10-12 06:57 | 42 | 11 | 4 | 6 | 3 | 15 | 3 |
+
+- **Source:** the source's document, linked as `doc:<its path>`.
+- **Window:** from where the last report stopped reading it (`cutoff`) to the time you began (`Now:`), as `YYYY-MM-DD HH:MM – YYYY-MM-DD HH:MM` in the zone above. The next morning starts here. A source you could not read keeps the window it had: both times are its old end, and every count is 0.
+- **Read:** how many items the source gave inside the window: messages of a chat, events of a calendar, threads of a mailbox. The second agent counts them again.
+- **The six after it** say where those items went, and add up to `Read`, to the last one: a **task** (it became a row or went into one), the **Inbox** (it needs the reader's decision), **done** (newer news answered or finished it), **put off** (the reader put it off), **context** (it changes no row) or a **gap** (you could not place or understand it). Every request the reader made, in a voice note, a chat or a call, is its own item with what comes out of it and who does it; "probably create…" counts as asked.
+
+A row whose counts do not add up is a message with no place: the app fails the check on it.
+
+## The reader's comments
+
+The reader's words in a row's last cell are input, not an order. At the start of each morning the app saves every comment in the last report's cells on its task, word for word, reads each back from the thread, and clears the cell; the ask lists them. Do not save them a second time and do not act on them.
+
+When the reader later asks you to check a report again, do the same for the comments in it: for each, `comment_add` on the row's task with the cell's words exactly as written (no summary, no fixed punctuation), read it back with `comments` and compare, then clear the cell and add "Your comment is on the task." to Next action. Check the task's comments first and reuse an exact copy. If the readback differs or the task is unclear, leave the cell and say why in Next action. Keep unfinished work in Next action. A task that is closed leaves the table. Edit only the cells you change, in the same dated report: do not make a second briefing.

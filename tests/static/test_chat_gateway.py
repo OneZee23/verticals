@@ -21,21 +21,20 @@ def _chat():
     return module
 
 
-def test_the_morning_turn_reads_other_tools_and_changes_nothing_there() -> None:
+def test_no_tool_is_judged_by_its_name_any_more() -> None:
+    """The morning turn used to run a tool of another server when its name began with a reading verb: a chat server's
+    `recent_dialogs` or `unread_overview` was declined, and a write called `get_and_send` would have run. A source's document
+    now names the tools that read it, and nothing else outside Verticals runs without the reader."""
     chat = _chat()
-    for tool in ("mcp__google-calendar__list-events", "mcp__telethon__fetch_history", "mcp__coin-prod__search_base",
-                 "mcp__mail__searchThreads", "mcp__coin-account__get_transcript"):
-        assert chat.reads_only(tool), tool
-    for tool in ("mcp__telethon__send_reply", "mcp__telethon__mark_read", "mcp__google-calendar__create-event",
-                 "mcp__google-calendar__delete-event", "mcp__telethon__react", "mcp__mail__createDraft"):
-        assert not chat.reads_only(tool), tool
+    assert not hasattr(chat, "reads_only") and not hasattr(chat, "READ_VERBS")
 
 
-def test_the_morning_prompt_carries_the_skill_and_its_two_references() -> None:
+def test_the_morning_prompt_carries_the_skill_and_its_three_references() -> None:
     prompt = _chat().MORNING_PROMPT
     assert prompt.startswith("## This turn: the morning report")
     assert "reports/morning/<YYYY-MM-DD>.md" in prompt
-    assert "## Reference: source reconciliation" in prompt and "## Reference: report contract" in prompt
+    for reference in ("source reconciliation", "report contract", "the second check"):
+        assert f"## Reference: {reference}" in prompt, reference
 
 
 def test_replan_reaches_the_agent_with_its_plans_and_how_to_write_the_document() -> None:
@@ -67,13 +66,22 @@ class _Session:
         pass
 
 
-def _claude(settings):
-    """A Claude agent started the way a message starts it: its settings come through the gateway's own clean."""
+def _claude(settings, sources=None, role=None):
+    """A Claude agent started the way a message starts it: its settings come through the gateway's own clean. `sources` is what
+    the server lists when the morning turn asks for the sources' tools; `role` seats the second agent, which the flow does."""
     chat = _chat()
     chat.JsonProcess, chat.which = _Proc, lambda provider: "claude"
     session = _Session()
-    host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."))
-    return chat.ClaudeAgent(host, session, chat.clean_settings(settings), None), session
+
+    def api(method, path, body=None, timeout=20):
+        if sources is None:
+            raise chat.ChatError("no server")
+        assert (method, path) == ("GET", "/api/sources")
+        return {"sources": sources}
+
+    host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."), api=api, log=None)
+    cleaned = chat.clean_settings(settings)
+    return chat.ClaudeAgent(host, session, {**cleaned, **({"role": role} if role else {})}, None), session
 
 
 def _system_prompt(agent) -> str:
@@ -133,7 +141,7 @@ def test_the_morning_turn_keeps_its_own_rules_in_any_mode() -> None:
     agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"})
     args = agent.proc.args
     assert args[args.index("--tools") + 1] == "" and "--add-dir" not in args
-    _bash(agent)
+    _bash(agent)  # it has no shell, files or web: a request for one is declined, and nobody is asked about it
     assert not session.asked and agent.proc.sent[-1]["response"]["response"]["behavior"] == "deny"
 
 
@@ -188,24 +196,109 @@ def test_the_morning_turn_asks_first_whatever_mode_the_chat_is_in() -> None:
     assert _flag(_claude({"permission": "bypassPermissions"})[0], "--permission-mode") == "bypassPermissions"
 
 
-def test_the_morning_turn_reads_elsewhere_and_writes_in_verticals_only_what_the_report_needs() -> None:
-    """Fix 4: outside Verticals only a tool named for reading runs; in Verticals the report's writes run by themselves
-    and any other write is asked of the owner in the chat."""
-    agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"})
+TEAM_CHAT = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+SOURCES = [
+    {"title": "Team chat", "approved": True, "needs_approval": False, "reads": TEAM_CHAT},
+    {"title": "Mail", "approved": True, "needs_approval": False, "reads": ["mcp__mail__searchThreads", "mcp__mail__getThreadMsgs"]},
+    {"title": "Calendar", "approved": False, "needs_approval": True, "reads": ["mcp__google-calendar__list-events"]},
+    {"title": "Sneaky", "approved": True, "needs_approval": False,
+     "reads": ["mcp__verticals__delete", "mcp__verticals-desktop__schedule", "not a tool", 7, None]},
+]
+
+
+def test_the_morning_turn_calls_the_tools_its_sources_declare_and_asks_for_every_other() -> None:
+    """docs/design/morning-quality.md: a tool was judged by its name (a chat server's `recent_dialogs` was declined). Each source's
+    document now declares the tools that read it, inside the check the owner approved; the turn allows exactly those on the
+    command line and asks the reader about any other, and about nothing it was already told to allow."""
+    agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"}, sources=SOURCES)
     allowed = _flag(agent, "--allowedTools").split(",")
-    for tool in ("doc_create", "doc_save", "doc_link", "board", "doc_get"):
+    for tool in (*TEAM_CHAT, "mcp__mail__searchThreads", "mcp__mail__getThreadMsgs"):
+        assert tool in allowed, tool
+    # A source whose check the owner has not approved declares nothing; Verticals' own tools cannot be declared; junk is junk.
+    for tool in ("mcp__google-calendar__list-events", "mcp__verticals__delete", "mcp__verticals-desktop__schedule", "not a tool"):
+        assert tool not in allowed, tool
+    assert agent.reads["mcp__telethon__recent_dialogs"] == "Team chat"
+    # Anything else outside Verticals comes to the reader, a reading name or not.
+    for other in ("mcp__google-calendar__list-events", "mcp__telethon__send_message", "mcp__telethon__get_everything_and_send",
+                  "mcp__mail__createDraft"):
+        _tool(agent, other, {"to": "x"})
+        assert session.asked[-1] == f"Allow Claude to use {other}?", other
+        assert session.write == (other, {"to": "x"})
+    assert len(session.asked) == 4 and not agent.proc.sent[2:]  # no decision was made for the reader
+
+
+def test_the_morning_turn_writes_in_verticals_only_what_the_report_needs() -> None:
+    """Fix 4, as docs/design/morning-quality.md leaves it: the report's own writes and the evidence of what it closes run by
+    themselves; closing a task is told apart by what it is called with; any other write is asked of the reader."""
+    agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"}, sources=SOURCES)
+    allowed = _flag(agent, "--allowedTools").split(",")
+    for tool in ("doc_create", "doc_save", "doc_link", "evidence_update", "board", "doc_get", "sources"):
         assert f"mcp__verticals__{tool}" in allowed, tool
     # The report's task is the server's (core/morning.py): the agent neither makes it nor moves it without asking.
     for tool in ("create", "schedule", "delete", "update", "reparent", "doc_delete"):
         assert f"mcp__verticals__{tool}" not in allowed, tool
-    _tool(agent, "mcp__google-calendar__list-events")
+    _tool(agent, "mcp__verticals__update", {"id": "SYN00001", "done": True})
     assert _decision(agent) == "allow"
-    for write in ("mcp__telethon__send_message", "mcp__telethon__mark_read", "mcp__google-calendar__delete-event"):
-        _tool(agent, write)
-        assert _decision(agent) == "deny", write
-    assert not session.asked
+    _tool(agent, "mcp__verticals__update", {"ids": ["SYN00001", "SYN00002"], "done": True, "client_token": "t"})
+    assert _decision(agent) == "allow" and not session.asked
+    for call in ({"id": "SYN00001", "done": True, "title": "A new name"}, {"id": "SYN00001", "done": False},
+                 {"id": "SYN00001", "ids": ["SYN00002"], "done": True}, {"id": "SYN00001", "body": "x"}, {"done": True}):
+        _tool(agent, "mcp__verticals__update", call)
+    assert session.asked == ["Allow Claude to use update?"] * 5
     _tool(agent, "mcp__verticals__delete", {"id": "SYN00001"})
-    assert session.asked == ["Allow Claude to use delete?"]
+    assert session.asked[-1] == "Allow Claude to use delete?" and len(session.asked) == 6
+
+
+def test_the_morning_turn_loads_none_of_the_owners_settings_files() -> None:
+    """The owner's own Claude Code settings may allow a tool outright (an allow rule), and an allowed tool never comes to this
+    gateway to be judged. The morning turn, which nobody watches, starts the CLI with no setting source at all; the owner's
+    other turns keep their settings, which the owner chose in the app."""
+    for mode in ("board", "manual", "bypassPermissions", "auto"):
+        morning, _ = _claude({"permission": mode, "sources": "connected"}, sources=[])
+        args = morning.proc.args
+        assert args[args.index("--setting-sources") + 1] == "", mode
+        assert "--setting-sources" not in _claude({"permission": mode})[0].proc.args, mode
+    second, _ = _claude({"sources": "connected"}, sources=[], role="checker")
+    assert _flag(second, "--setting-sources") == ""
+
+
+def test_the_second_agent_reads_what_the_sources_declare_and_is_declined_for_everything_else() -> None:
+    """It writes nothing and has nobody to ask: no Verticals write is on its command line, a close or any other change is
+    declined, a tool no source lists is declined and not put to the reader."""
+    agent, session = _claude({"permission": "manual", "sources": "connected"}, sources=SOURCES, role="checker")
+    allowed = _flag(agent, "--allowedTools").split(",")
+    for tool in ("board", "goal", "doc_get", "sources", *TEAM_CHAT):
+        assert tool in allowed or f"mcp__verticals__{tool}" in allowed, tool
+    for tool in ("doc_create", "doc_save", "doc_link", "evidence_update"):
+        assert f"mcp__verticals__{tool}" not in allowed, tool
+    for name, call in (("mcp__verticals__update", {"id": "SYN00001", "done": True}), ("mcp__verticals__doc_save", {"id": "x"}),
+                       ("mcp__telethon__send_message", {}), ("mcp__google-calendar__list-events", {})):
+        _tool(agent, name, call)
+        assert _decision(agent) == "deny", name
+    assert not session.asked
+    prompt = _system_prompt(agent)
+    assert "## This turn: the second check of the morning report" in prompt and "## This turn: the morning report" not in prompt
+    assert "## Reference: the second check" in prompt and "## Reference: report contract" in prompt
+
+
+def test_a_source_list_that_cannot_be_read_declares_nothing_and_the_turn_still_starts() -> None:
+    agent, session = _claude({"sources": "connected"})  # the host's API raises
+    allowed = _flag(agent, "--allowedTools").split(",")
+    assert agent.reads == {} and all(tool.startswith("mcp__verticals__") for tool in allowed)
+    _tool(agent, "mcp__telethon__recent_dialogs")
+    assert session.asked == ["Allow Claude to use mcp__telethon__recent_dialogs?"]
+
+
+def test_a_declared_tool_names_its_source_in_the_step_the_field_shows() -> None:
+    agent, session = _claude({"sources": "connected"}, sources=SOURCES)
+    events = []
+    session.emit = events.append
+    agent.handle({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "mcp__telethon__recent_dialogs", "input": {}},
+        {"type": "tool_use", "id": "t2", "name": "mcp__verticals__doc_get", "input": {}},
+        {"type": "tool_use", "id": "t3", "name": "mcp__telethon__send_message", "input": {}}]}})
+    tools = [event for event in events if event["t"] == "tool"]
+    assert [event.get("step") for event in tools] == ["Reading Team chat", None, None]
 
 
 def test_the_morning_turn_of_codex_reads_whatever_mode_the_chat_is_in() -> None:

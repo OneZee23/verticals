@@ -1,0 +1,20 @@
+# The second check
+
+A second agent reads each morning report against the raw sources before the reader is told it is ready. It did not write the report and it writes nothing. It answers ten checks with `pass`, `fail` or `gap`; the app writes the answers into the report under the red block. A **gap** is a check it could not make (a source did not answer, a tool was declined, the window was too long to read): a gap is never a pass, and it does not hold the report. A **fail** sends the report back to the agent that wrote it, for one fixing turn, and it is checked again.
+
+The app also puts its own floor under some checks, from the report alone, so they fail on arithmetic whatever anyone says: a row whose counts do not add up to `Read`, a window that starts after the last report stopped, a source with no row, a source that is red or waiting for Approve and is not named at the top, a closed task in the rows, a child under a task that is not its parent, a row linking a task that is not on the board, a wrong title, and a report not linked to its task. The worse of the two answers stands.
+
+The answer is one fenced json block, `{"checks": {"<key>": {"result": "pass"}, ...}}`, with an entry for every key below and a one-line `note` for each fail or gap: say what is wrong with the number or the name that shows it, never a verdict without a fact.
+
+| Key | Check | It looks at | It fails when |
+| --- | --- | --- | --- |
+| `sources` | Every source read | Each document under `sources/` against the report's sources section and its red block. | A source has no row, a red or waiting source is not named at the top, or a source the report says it read was not read with the tools its document lists. |
+| `inputs` | Every message placed | Count each source's items inside its window with its listed tools and compare with `Read`. Then take at least five items from each source (all when fewer) and find where each went. | Your count differs from `Read`; a request of the reader has no item or the wrong place; an item sits in a place that does not fit it. |
+| `continuity` | Continues the last report | The report before this one, `reports/morning/`: its rows, promises and sources. | A row or a promise of the last report vanished with no word; a window leaves a hole after the last one; a comment left in the last report is not on its task. |
+| `inbox` | Inbox | The undated goals and the report's Inbox group. | A decision waiting for the reader appears nowhere, or twice, or an Inbox goal that the sources already answer still asks. |
+| `changes` | Changes allowed | The goals changed today (`done_at`, dates, titles, parents) against the report. | This run changed anything but the report, its link and the closing of tasks with evidence; a task was closed with no evidence, or while a source says it is open. |
+| `state` | Current state | Each row's Latest and Next action against the board now and the newest word in the sources. | A row says what a later message or the board contradicts: "waiting for review" after a merge, a task shown open that is done. |
+| `names` | Names | The task names in the rows and the proposals in the Inbox group. | A name is not the board's title for that task, one thing has two names in the report, or a proposed task is named by what is done and not by its result. |
+| `hierarchy` | Hierarchy and dates | The rows' order, bold and dashes, and every date written in them. | A parent in the table has its children apart from it, a child is set under another task, or a date is wrong or not written as the schedule writes it (`Fri 25 Sep`, `21–27 Sep`, `August`, `Q3`). |
+| `where` | Where each item went | A sample of the items that became rows or went into them: the message, then the task. | An item points at a task it does not belong to, or at one that is not on the board. |
+| `copy` | Published copy | The document as saved (`doc_get`, `doc_history`). | It is cut off, a table is broken, its path or title is not the day's, it is not linked to the open "Morning report" task, or a link opens no goal. |

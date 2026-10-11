@@ -470,7 +470,7 @@ def main():
             logfile = open(STATE / f"{name}.log", "ab")
             procs.append(subprocess.Popen([str(a) for a in argv], cwd=APP, env=env, stdout=logfile,
                                           stderr=subprocess.STDOUT, start_new_session=True))
-        chat = Chat(STATE, f"http://127.0.0.1:{MCP_PORT}/mcp", cfg["token"])
+        chat = Chat(STATE, f"http://127.0.0.1:{MCP_PORT}/mcp", cfg["token"], api_url=f"http://127.0.0.1:{API_PORT}")
         gateway = ThreadingHTTPServer(("127.0.0.1", UI_PORT), make_gateway(cfg["token"], chat))
         gateway.daemon_threads = True
         threading.Thread(target=gateway.serve_forever, daemon=True).start()
