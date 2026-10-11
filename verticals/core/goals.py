@@ -22,6 +22,7 @@ from verticals.core import ideas as ideas_mod
 from verticals.core import idem
 from verticals.core import moves, repeat as repeat_mod, sizes as sizes_mod
 from verticals.core import tree
+from verticals.core import trash as trash_mod
 from verticals.core.errors import HasChildren, LockNotAvailable, NotFound, ValidationError
 # The field bounds and per-field validators moved to `core/field_rules.py` when D239's
 # `short_label` pushed this module past S-90a's 750-line cap. The bounds re-export here (plain
@@ -693,6 +694,8 @@ def delete(conn: psycopg.Connection, *, owner: str, id: str, cascade: bool = Fal
                     descendants=descendants,
                 )
 
+            # A copy of the subtree goes aside first, so a delete can be taken back (`core/trash.py`).
+            trash_mod.stash(conn, owner=owner, id=id, pattern=pattern)
             cur = conn.execute(
                 "DELETE FROM goals"
                 " WHERE owner = %(owner)s AND (id = %(id)s OR path LIKE %(pattern)s ESCAPE '\\')",
