@@ -2,6 +2,10 @@
 real `/__chat/*` server, whose agent is `tests/ui/fake_agent/claude` (docs/design-handoff S2.P1).
 
     python tests/ui/agent_gateway.py <ui_port> <api_port> <state_dir> <token>
+
+The agents' own homes are inside the state folder (`claude-config`, `codex-home`, `home`): the sessions of tasks are files there
+(docs/design/task-sessions.md), samples a scenario writes, and the owner's own `~/.claude` and `~/.codex` never come into it. The
+gateway looks at those files every 0.2 s instead of every two seconds.
 """
 
 from __future__ import annotations
@@ -22,6 +26,10 @@ def main() -> None:
     os.environ["VERTICALS_DESKTOP_STATE"] = str(state)
     os.environ["PATH"] = f"{HERE / 'fake_agent'}:{os.environ.get('PATH', '')}"
     state.mkdir(parents=True, exist_ok=True)
+    os.environ.update(HOME=str(state / "home"), CLAUDE_CONFIG_DIR=str(state / "claude-config"),
+                      CODEX_HOME=str(state / "codex-home"), VERTICALS_WATCH_SECONDS="0.2")
+    for name in ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+        Path(os.environ[name]).mkdir(exist_ok=True)
     sys.path.insert(0, str(REPO / "desktop"))
     import launcher  # noqa: E402  (reads the ports above at import)
 

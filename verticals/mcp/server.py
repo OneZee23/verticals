@@ -30,6 +30,7 @@ the token is never echoed back).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import hmac
 import logging
@@ -119,7 +120,7 @@ def create_server(cfg: config.Config) -> Server:
     from `cfg`, never taken from a call's own arguments: this process answers as exactly one
     owner, the same rule `api/routes_board.py` states for the HTTP side.
     """
-    owner = cfg.owner
+    owner, gateway_url = cfg.owner, cfg.gateway_url
 
     async def _on_list_tools(
         _ctx: ServerRequestContext, _params: types.PaginatedRequestParams | None
@@ -137,7 +138,9 @@ def create_server(cfg: config.Config) -> Server:
             # to roll back. `pool.connection()` is itself psycopg_pool's transaction-scoped
             # checkout, matching `api/deps.py::get_conn`'s identical reasoning on the HTTP side.
             with pool.connection() as conn:
-                return tools.call_tool(conn, owner=owner, name=params.name, arguments=params.arguments)
+                return tools.call_tool(
+                    conn, owner=owner, name=params.name, arguments=params.arguments, gateway_url=gateway_url
+                )
 
         # core/ is synchronous psycopg3 (`db/pool.py`'s own docstring); never run it inline on
         # the event loop that is also carrying every other in-flight request.
@@ -205,12 +208,12 @@ def create_http_app(cfg: config.Config, *, host: str) -> Callable:
 # --- entrypoint ----------------------------------------------------------------------------------
 
 
-def _boot_or_exit(transport: str) -> config.Config:
+def _boot_or_exit(transport: str, gateway_url: str = "") -> config.Config:
     """Everything that can refuse boot, before a socket or a stdio session ever opens —
     `api/app.py::_boot_or_exit`'s own shape. Stdio needs no bind at all; http additionally
     refuses a non-loopback `VERTICALS_MCP_BIND` here, not after uvicorn is already listening."""
     try:
-        cfg = config.load()
+        cfg = dataclasses.replace(config.load(), gateway_url=config.parse_gateway_url(gateway_url))
         if transport == "http":
             _parse_loopback_bind(cfg.mcp_bind)
     except config.ConfigError as exc:
@@ -237,9 +240,11 @@ def _run_http(cfg: config.Config) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m verticals.mcp.server")
     parser.add_argument("--transport", choices=("stdio", "http"), default="stdio")
+    # Given by the desktop app that starts this server, so the link tool knows where the app keeps the sessions of tasks.
+    parser.add_argument("--gateway-url", default="", help="the desktop app's loopback address, http://127.0.0.1:<port>")
     args = parser.parse_args(argv)
 
-    cfg = _boot_or_exit(args.transport)
+    cfg = _boot_or_exit(args.transport, args.gateway_url)
     # AC-139 / the mcp-suite stream rule: stderr is *expected* non-empty, at least one
     # structured line for the run. A tool call already logs one (tools.py::call_tool), but a
     # session that never calls a tool — S-118's own `tools/list`-then-nothing shape, or a probe

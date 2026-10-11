@@ -386,7 +386,9 @@ _READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "do
 # there is no HTTP write route and no F5 capability row (F5's `ui_selector` column has nothing
 # to name). A second entry here without a spec section like §6 backing it should be treated as
 # suspicious — this set exists for capabilities that are agent tooling, not user capabilities.
-_AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report"}
+# `session_link` (docs/design/task-sessions.md) is the same kind: an agent in a Claude Code or Codex session ties it to a task, over
+# MCP only, and what it writes is the desktop app's own list of sessions, not the board, so it has no HTTP route and no F5 row.
+_AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report", "session_link"}
 # The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. The morning's one ask a
 # day (docs/design/agent-fixes.md): the app asks once its morning hour has come and the server answers whether this
 # morning's report is still to be asked for; the report itself is the agent's, made when that ask reaches it. The daily

@@ -472,7 +472,9 @@ def main():
         start_database(pg, cfg, env)
         db_started = True
         for name, argv in (("api", [PYTHON, "-m", "verticals.api.app"]),
-                           ("mcp", [PYTHON, "-m", "verticals.mcp.server", "--transport", "http"])):
+                           # The MCP server is told where the app keeps the sessions of tasks (its link tool tells the app).
+                           ("mcp", [PYTHON, "-m", "verticals.mcp.server", "--transport", "http",
+                                    "--gateway-url", f"http://127.0.0.1:{UI_PORT}"])):
             logfile = open(STATE / f"{name}.log", "ab")
             procs.append(subprocess.Popen([str(a) for a in argv], cwd=APP, env=env, stdout=logfile,
                                           stderr=subprocess.STDOUT, start_new_session=True))
