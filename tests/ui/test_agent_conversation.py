@@ -186,6 +186,43 @@ def test_the_morning_report_is_asked_once_a_day_by_the_server(ui_agent: UiSessio
         other.close()
 
 
+def _cli_starts(tmp_path: Path) -> list[list[str]]:
+    """The arguments of every agent the gateway started for a conversation (the fake agent logs them), oldest first."""
+    log = tmp_path / "desktop-state" / "chat-workspace" / "argv.log"
+    starts = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return [args for args in starts if "--append-system-prompt" in args]
+
+
+def _flag(args: list[str], name: str) -> str:
+    return args[args.index(name) + 1]
+
+
+def test_the_morning_turn_gets_its_guide_and_asks_first_whatever_mode_the_chat_is_in(ui_agent: UiSession, tmp_path: Path) -> None:
+    """Fixes 1, 4 and 5 through the real gateway: the morning ask reaches the CLI with the morning guide and the ask-first
+    mode though the chat is set to "Bypass permissions"; an ordinary message in the same chat keeps the owner's mode;
+    and both carry the same instructions on length, titles and the seven columns."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    page.evaluate("() => localStorage.setItem('vt-chat:agent-prefs', JSON.stringify({ claude: { permission: 'bypassPermissions' } }))")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        conn.execute("DELETE FROM idempotency WHERE owner = %s AND client_token LIKE 'morning:%%'", (F2_OWNER,))
+    page.reload()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report", timeout=15000)
+    (morning,) = _cli_starts(tmp_path)
+    assert _flag(morning, "--permission-mode") == "manual" and "--add-dir" not in morning and _flag(morning, "--tools") == ""
+    assert "## This turn: the morning report" in _flag(morning, "--append-system-prompt")
+    page.locator(".circle-field__shape").click()
+    _send(page, "Hello")
+    _answered(page, "Done: Hello")
+    ordinary = _cli_starts(tmp_path)[-1]
+    assert _flag(ordinary, "--permission-mode") == "bypassPermissions"
+    assert "## This turn: the morning report" not in _flag(ordinary, "--append-system-prompt")
+    for args in (morning, ordinary):
+        instructions = _flag(args, "--append-system-prompt")
+        assert "one or two short paragraphs" in instructions and "seven columns" in instructions
+        assert "Report exact IDs" not in instructions
+
+
 def _morning_tasks(conn: psycopg.Connection) -> list[tuple]:
     """The open "Morning report" tasks of the owner: id, scale, day, author."""
     return conn.execute(
@@ -258,6 +295,57 @@ def test_an_ask_is_the_agents_balloon_with_its_choices(ui_agent: UiSession) -> N
     ask.get_by_role("button", name="Allow once").click()
     _answered(page, "Done: Change it")
     expect(ask.get_by_role("button", name="Allow once")).to_be_disabled()
+
+
+def _select(page: Page, words: str) -> None:
+    """Select `words` inside the agent's last balloon, the way a drag across them would."""
+    page.evaluate(
+        """words => {
+          const walker = document.createTreeWalker(document.querySelector('[data-balloon][data-who="agent"]'), NodeFilter.SHOW_TEXT)
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const at = node.textContent.indexOf(words)
+            if (at < 0) continue
+            const range = document.createRange()
+            range.setStart(node, at)
+            range.setEnd(node, at + words.length)
+            const selection = getSelection()
+            selection.removeAllRanges()
+            selection.addRange(range)
+            return
+          }
+          throw new Error('not found: ' + words)
+        }""",
+        words,
+    )
+
+
+def test_the_text_you_selected_goes_with_the_next_message_once(ui_agent: UiSession) -> None:
+    """Fix 5: the prompt promises the selected text, so what you select on the page goes with the message you send next,
+    even though the field takes the focus and the selection with it; only that message carries it."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "[say] The plan has three steps: write, test and ship.")
+    _answered(page, "The plan has three steps")
+    _select(page, "write, test and ship")
+    _send(page, "[context]")
+    _answered(page, "Selected text: write, test and ship")
+    _send(page, "[context]")
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).to_contain_text("Today:", timeout=10000)
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).not_to_contain_text("Selected text")
+
+
+def test_a_selection_you_pressed_away_from_is_not_sent(ui_agent: UiSession) -> None:
+    """Fix 5: a press anywhere else but the field lets the selection go, and it goes unsent."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "[say] The plan has three steps: write, test and ship.")
+    _answered(page, "The plan has three steps")
+    _select(page, "write, test and ship")
+    page.locator(BALLOON).first.click()  # your own balloon: a press that is not in the field
+    page.evaluate("() => getSelection().removeAllRanges()")
+    _send(page, "[context]")
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).to_contain_text("Today:", timeout=10000)
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).not_to_contain_text("Selected text")
 
 
 def test_a_conversation_from_before_opens_with_its_messages(ui_agent: UiSession) -> None:

@@ -206,3 +206,25 @@ def test_the_morning_turn_of_codex_reads_whatever_mode_the_chat_is_in() -> None:
         assert chat.codex_policy(chat.codex_mode(settings), "/work")["sandboxPolicy"]["type"] == "readOnly", mode
     assert chat.codex_mode(chat.clean_settings({"provider": "codex", "permission": "full-access"})) == "full-access"
     assert chat.codex_mode(chat.clean_settings({"provider": "codex"})) == "auto-review"
+
+
+def test_the_agents_instructions_agree_with_themselves() -> None:
+    """Fix 5 (docs/design/agent-fixes.md): one length in every turn, goals by title and not by ID, and the board as it is."""
+    prompt = _chat().PROMPT
+    # One length: one or two short paragraphs, and a document for anything longer.
+    assert "one or two short paragraphs" in prompt and "document" in prompt.split("one or two short paragraphs", 1)[1][:200]
+    # Goals by title: nothing tells the agent to report IDs.
+    assert "by title" in prompt and "exact IDs" not in prompt and "Report exact" not in prompt
+    # Seven columns, not a ladder of five rungs.
+    assert "Life → Year → Quarter → Week → Day" not in prompt
+    for column in ("Life", "3 years", "Year", "Quarter", "Month", "Week", "Day", "Inbox"):
+        assert column in prompt.split("The user talks to you", 1)[0], column
+
+
+def test_the_text_the_owner_selected_reaches_the_agent_in_its_context() -> None:
+    """Fix 5: the prompt promises "any text they selected", so the context carries it, cut at 2000 characters."""
+    chat = _chat()
+    context = chat.format_context({"today": "2026-10-11", "selection": "The second paragraph of the plan"})
+    assert "Selected text: The second paragraph of the plan" in context
+    assert len(chat.format_context({"today": "2026-10-11", "selection": "x" * 5000}).split("Selected text: ")[1]) == 2000
+    assert "Selected text" not in chat.format_context({"today": "2026-10-11"})

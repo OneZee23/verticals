@@ -2,7 +2,8 @@
 """A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each
 message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[slow]` works
 for a second and a half, `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers
-with the words after it, and `[context]` with the app context Verticals sent."""
+with the words after it, and `[context]` with the app context Verticals sent. Each start appends the arguments it was given to `argv.log` in its folder, so a
+scenario can read what the gateway really asked of the CLI (its mode, tools and instructions)."""
 import json
 import re
 import sys
@@ -29,6 +30,9 @@ def answer_for(words):
     said = re.sub(r"\[[a-z:_]+\]", "", words).strip()
     return f"Done: {said}" if said else "Done."
 
+
+with open("argv.log", "a") as argv_log:
+    argv_log.write(json.dumps(sys.argv[1:]) + "\n")
 
 started = False
 for msg in iter(read, None):
