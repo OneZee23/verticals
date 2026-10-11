@@ -66,6 +66,12 @@ function onAdd(title: string) {
 function onHeaderClick(): void {
   if (!props.span) store.toggleExpandedColumn(props.vertical)
 }
+/* The column's accessible name says the words on its header, the kind first as they read, then the name the column's room
+   gives it; the year the kind line carries stays, without its dot (docs/design/column-names.md). */
+const accessibleName = computed(() => [
+  props.subLabel.replace(' · ', ' '),
+  props.active && props.wideTitle ? props.wideTitle : props.title,
+].filter(Boolean).join(', '))
 /* While a goal is dragged the dots take the period controls' place; a span has neither (S5.P2.017, .019). */
 const dragging = computed(() => store.state.drag.id !== null)
 
@@ -296,6 +302,8 @@ onBeforeUnmount(() => swapAnimation?.cancel())
     }"
     :data-vertical="vertical"
     :data-period-key="periodKey ?? ''"
+    role="group"
+    :aria-label="accessibleName"
   >
     <ColumnDots v-if="dragging && vertical !== 'life' && vertical !== 'maybe' && !span" :vertical="vertical as SpanScale" />
     <div v-else-if="vertical !== 'life' && !span" class="column-period-controls" data-cap="period-nav">
