@@ -395,3 +395,13 @@ def test_a_goal_made_in_a_conversation_survives_the_gateway_starting_again(scrat
         assert [c["session"] for c in second.goal_conversations("SYN00001")] == [SESSION]
     finally:
         second.shutdown()
+
+
+def test_the_agent_is_told_to_link_what_it_made_and_to_name_the_rest_by_title() -> None:
+    """docs/design/agent-chips.md: the chips come from the links in the agent's words, so the agent links what it made or
+    changed, each on a line of its own, and names any other goal by its title."""
+    prompt = " ".join(_chat().PROMPT.split())
+    assert "What you made or changed in a turn stands under your words as chips" in prompt
+    assert "Link each goal as [title](#goal/<id>) and each document as [title](#doc/<id>), once, each on a line of its own" in prompt
+    assert "Mention any other goal by its title, with no link" in prompt
+    assert "Link board dates inside a sentence as [label](/h/YYYY-MM-DD)" in prompt
