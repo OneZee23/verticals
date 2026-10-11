@@ -223,3 +223,23 @@ def test_stopping_the_api_ends_the_timer_and_a_command_it_is_running(f2_dsn: str
     while subprocess.run(running, capture_output=True).returncode == 0:
         assert time.monotonic() < deadline, "the command outlived the API"
         time.sleep(0.05)
+
+
+def test_the_list_carries_the_tools_that_read_each_source_and_where_the_last_report_stopped(api: httpx.Client) -> None:
+    """For the morning report (docs/design/morning-quality.md): `reads` is in the check the owner approves, `cutoff` is the end
+    of the source's window in the report before the day asked for."""
+    reads = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+    made = _source(api, "team-chat", {"kind": "dns", "host": "localhost", "reads": reads})
+    plain = _source(api, "mail", {"kind": "dns", "host": "localhost"})
+    report = ("Not checked yet: a second agent is reading it against the sources.\n\n## Sources\n\nTimes in Europe/Berlin.\n\n"
+              "| Source | Window | Read | Tasks | Inbox | Done | Put off | Context | Gap |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+              "| [Team chat](doc:sources/team-chat.md) | 2026-10-10 07:00 – 2026-10-11 06:58 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |\n")
+    assert api.post("/api/docs", json={"path": "reports/morning/2026-10-11.md", "title": "Morning report — 11 October 2026",
+                                         "body": report}).status_code == 201
+    listed = {s["id"]: s for s in api.get("/api/sources", params={"day": "2026-10-12"}).json()["sources"]}
+    assert listed[made["id"]]["reads"] == reads and listed[made["id"]]["cutoff"] == "2026-10-11T06:58:00+02:00"
+    assert listed[plain["id"]]["reads"] == [] and listed[plain["id"]]["cutoff"] is None
+    # The report of the same day is not the one before it.
+    again = {s["id"]: s for s in api.get("/api/sources", params={"day": "2026-10-11"}).json()["sources"]}
+    assert again[made["id"]]["cutoff"] is None
+    assert api.get("/api/sources", params={"day": "yesterday"}).status_code == 422
