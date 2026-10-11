@@ -1,24 +1,28 @@
 // "Check again" (docs/design/doc-comments-inline.md). It took the place of "Ready?" (Inbox and Documents redesign, round 5,
 // frames m4–m5, and round 8; KK 6–7 Oct 2026: "When commenting or editing document, I believe we should have some sort of a
 // button black that will prompt agent to acknowledge edits … Not GO, but Go? It should question user, if he edited …
-// Ready?"): after a comment or an edit in the document in front, a black pill beside the count of its comments, above the
-// field. A click is your yes: the comments and the edits go to the agent in one message, and its answer lands in the field
-// (S2.P4) in two lines. When its turn has ended the document is read again, and the words the agent rewrote are lit green
-// in it (lib/docChanges.ts). Ignored, the question goes when the document closes. After "Check again" on a morning
-// report, its task is done.
+// Ready?"): when the document in front has something to hand over, a black pill beside the count of its comments, above
+// the field. Two things are something: an edit or a comment of this session (kept in memory; ignored, it goes when the
+// document closes, as "Ready?" did), and an open comment nobody has answered, whose last word is yours (the threads are on
+// the server, so a reload or a reopened document keeps it). A click is your yes: the comments and the edits go to the
+// agent in one message, and its answer lands in the field (S2.P4) in two lines. When its turn has ended the document and
+// its comments are read again: the words the agent rewrote are lit green (lib/docChanges.ts), and the comments it answered
+// stop counting, so the pill goes unless one is left unanswered. After "Check again" on a morning report, its task is done.
 import { computed, reactive, watch } from 'vue'
 import { fetchDocRevision, getDoc } from './api'
-import { agentChat, newThread, send } from './agentChat'
+import { agentChat, currentThread, newThread, send } from './agentChat'
 import { flushPending } from './beforeQuit'
 import { commandFilter } from './commandFilter'
 import { rewritten } from './docChanges'
-import { frontDocId } from './docComments'
+import { frontDocId, unansweredThreads } from './docComments'
 import { MORNING_FOLDER, MORNING_TITLE } from './morning'
 import { windows } from './windows'
 import { store } from '../store'
 
-/** The documents with a comment or an edit that has not been handed over. */
-export const check = reactive({ docs: [] as string[] })
+/** `docs`: the documents with a comment or an edit of this session that has not been handed over. `busy`: the documents
+ *  being handed over, from the press until the agent's turn is over and the document and its comments are read again. */
+export const check = reactive({ docs: [] as string[], busy: [] as string[] })
+const free = (id: string): void => { check.busy = check.busy.filter((other) => other !== id) }
 
 if (typeof window !== 'undefined') {
   window.addEventListener('verticals:doc-edited', (event) => {
@@ -38,11 +42,19 @@ const shownIds = computed(() => {
 // A document closed with its edits unsaid: the question goes with it.
 watch(shownIds, (shown) => { check.docs = check.docs.filter((id) => shown.has(id)) })
 
-/** "Check again" is offered: the document in front has a comment or an edit to hand over, there is an agent to hand it to,
- *  and the field is free. */
+/** The document in front has something to hand over: an edit or a comment of this session, or an open comment nobody has
+ *  answered. */
+const waiting = computed(() => {
+  const id = frontDocId.value
+  return !!id && (check.docs.includes(id) || unansweredThreads.value.length > 0)
+})
+
+/** "Check again" is offered: there is something to hand over, an agent to hand it to, and the field is free. It stays away
+ *  from a document being handed over, so it does not flash back between the press and the turn, or at the turn's end before
+ *  the comments the agent answered are read. */
 export const checkShown = computed(() => {
   const id = frontDocId.value
-  return !!id && agentChat.available && check.docs.includes(id) && !commandFilter.text && !agentChat.running && !agentChat.open
+  return !!id && waiting.value && !check.busy.includes(id) && agentChat.available && !commandFilter.text && !agentChat.running && !agentChat.open
 })
 
 /** What the agent is told. It starts a conversation of its own, so the message carries all it needs. */
@@ -56,14 +68,12 @@ export function checkAsk(link: string): string {
 /** The longest an agent's turn is waited for before the document is let be. */
 const TURN_LIMIT_MS = 15 * 60_000
 
-/** A press is being handed over: the pill stays on the page while what you wrote is saved, and a second press in that
- *  moment is the same press. */
-let handing = false
-
 export async function checkAgain(): Promise<void> {
   const id = frontDocId.value
-  if (handing || !id || !check.docs.includes(id)) return
-  handing = true
+  // A second press while the first is being handed over is the same press.
+  if (!id || check.busy.includes(id) || !waiting.value) return
+  check.busy.push(id)
+  let following = false
   try {
     // What you wrote is saved first, so the agent reads it and the copy compared afterwards is the one it started from.
     await flushPending()
@@ -75,8 +85,12 @@ export async function checkAgain(): Promise<void> {
     const name = (doc.title || doc.path).replace(/[[\]]/g, '')
     newThread()
     agentChat.engaged = false
-    void send(checkAsk(`[${name}](#doc/${doc.id})`))
-    followTurn(id, doc.revision)
+    const letGo = followTurn(id, doc.revision)
+    following = true
+    // The message did not go (the gateway refused it): no turn will start, and the pill comes back.
+    void send(checkAsk(`[${name}](#doc/${doc.id})`)).then(() => {
+      if (!agentChat.running && currentThread.value?.status !== 'working') letGo()
+    })
     // A morning report gone through has nothing left to wait for: its open task is done.
     if (!doc.path.startsWith(`${MORNING_FOLDER}/`)) return
     for (const link of doc.linked_goals) {
@@ -84,13 +98,14 @@ export async function checkAgain(): Promise<void> {
       if (goal && goal.title === MORNING_TITLE && goal.done_at === null) void store.completeGoal(goal.id, true)
     }
   } finally {
-    handing = false
+    if (!following) free(id)
   }
 }
 
-/** Waits for the agent's turn to end, then reads the document again and lights what it rewrote. Nothing is lit when the
- *  owner wrote in the document meanwhile: the new revisions are then not all the agent's, and the app cannot tell whose. */
-function followTurn(id: string, base: number): void {
+/** Waits for the agent's turn to end, then reads the document and its comments again. Nothing is lit when the owner wrote
+ *  in the document meanwhile: the new revisions are then not all the agent's, and the app cannot tell whose. Returns the
+ *  way to give up following (the turn never started). */
+function followTurn(id: string, base: number): () => void {
   let began = false
   let touched = false
   // A save of the text is the owner's hand in it (a comment or a reply is not: it leaves the words as they are).
@@ -99,10 +114,14 @@ function followTurn(id: string, base: number): void {
     if (detail?.id === id && detail.by !== 'agent' && detail.doc) touched = true
   }
   window.addEventListener('verticals:doc-edited', own)
-  const done = (): void => {
+  const stopFollowing = (): void => {
     stop()
     clearTimeout(timer)
     window.removeEventListener('verticals:doc-edited', own)
+  }
+  const giveUp = (): void => {
+    stopFollowing()
+    free(id)
   }
   const stop = watch(() => agentChat.running, (running) => {
     if (running) {
@@ -110,13 +129,16 @@ function followTurn(id: string, base: number): void {
       return
     }
     if (!began) return
-    done()
-    void lightWhatChanged(id, base, touched)
+    stopFollowing()
+    // The pill stays away until the reading is done: the comments the agent answered stop counting first.
+    void readAgain(id, base, touched).finally(() => free(id))
   })
-  const timer = setTimeout(done, TURN_LIMIT_MS)
+  const timer = setTimeout(giveUp, TURN_LIMIT_MS)
+  // A turn that has begun is followed to its end; one that never began (the message did not go) is let go.
+  return () => { if (!began) giveUp() }
 }
 
-async function lightWhatChanged(id: string, base: number, touched: boolean): Promise<void> {
+async function readAgain(id: string, base: number, touched: boolean): Promise<void> {
   const shown = windows.list.some((w) => w.kind === 'doc' && w.target === id) || store.state.docs.currentId === id
   if (!shown) return
   try {
@@ -129,9 +151,13 @@ async function lightWhatChanged(id: string, base: number, touched: boolean): Pro
       }))
       if (store.state.docs.currentId === id) await store.openDoc(id)
     }
-    // Its replies in the comments, and the ones it resolved.
-    if (store.state.comments.targetType === 'doc' && store.state.comments.targetId === id) await store.loadCommentsFor('doc', id)
   } catch {
     // The document or its history could not be read: it stays as it is, and the next look reads it again.
+  }
+  // Its replies in the comments, and the ones it resolved: what it answered stops counting.
+  try {
+    if (store.state.comments.targetType === 'doc' && store.state.comments.targetId === id) await store.loadCommentsFor('doc', id)
+  } catch {
+    // The comments stay as they were.
   }
 }

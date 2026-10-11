@@ -24,6 +24,10 @@ export const docThreads = computed<CommentThread[]>(() => {
 
 export const openThreads = computed(() => docThreads.value.filter((thread) => thread.resolved_at === null))
 
+/** The open comments nobody has answered: the last thing said on them is the person's. The threads are on the server, so
+ *  this is still true after a reload or a reopened document (lib/checkAgain.ts offers Check again for them). */
+export const unansweredThreads = computed(() => openThreads.value.filter((thread) => thread.messages[thread.messages.length - 1]?.author === 'human'))
+
 /** What the list and the card call a comment's words: the quote, or the whole page when it has none. */
 export function threadWords(thread: CommentThread): string {
   return thread.anchor?.quote.trim() || 'Whole document'
