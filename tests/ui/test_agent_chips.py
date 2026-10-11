@@ -15,6 +15,8 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from verticals.core import docs as core_docs
+from verticals.core import goals as core_goals
+from verticals.core import privacy as core_privacy
 
 from tests.ui.conftest import F2_OWNER, UiSession
 from tests.ui.test_agent_conversation import (  # noqa: F401  (the fixture, and the scenarios' own words)
@@ -181,6 +183,51 @@ def test_a_chip_follows_its_goal_when_it_is_renamed_and_moved(ui_agent: UiSessio
                       headers=api, timeout=10)
     assert moved.status_code == 200, moved.text
     expect(chip.locator('[data-role="goal-chip-when"]')).to_have_text("10–16 Aug · changed just now", timeout=10000)
+
+
+def test_a_private_goals_chip_hides_its_title_as_the_board_does(ui_agent: UiSession) -> None:
+    """Privacy mode (shift-cmd-P) hides a private goal's title on the board and in the Inbox, transparent words over a grey
+    bar (lib/privacy.ts). The chip follows the same rule and wears the same look, in the field and in the conversation; the line
+    of where and when stays, and the square. The agent's own words above a chip are out of scope: the app does not read them."""
+    dsn = ui_agent.backend.dsn
+    secret = goal_made(dsn, "SYN the private plan")
+    plain = goal_made(dsn, "SYN the public plan")
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        core_goals.update(conn, owner=F2_OWNER, ids=[secret], private=True)
+        core_privacy.set_mode(conn, owner=F2_OWNER, mode=True)
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{plain}"]')
+    # The board itself hides it: the rule the chip must agree with.
+    expect(page.locator(f'.goal-card[data-goal-id="{secret}"]')).to_have_class(re.compile(r"\bgoal-card--private\b"))
+    _send(page, f"[slow] [say] Made two.\n[SYN the private plan](#goal/{secret})\n[SYN the public plan](#goal/{plain})")
+    close_the_conversation(page)
+    expect(page.locator(f"{ANSWER} {GOAL_CHIP}")).to_have_count(2, timeout=10000)
+
+    def title_is_hidden(scope: str) -> None:
+        private_chip, public_chip = (page.locator(f'{scope} {GOAL_CHIP}[data-goal-id="{goal}"]') for goal in (secret, plain))
+        words = private_chip.locator(".goal-chip__name")
+        expect(words).to_have_css("color", "rgba(0, 0, 0, 0)")
+        expect(words).to_have_css("background-color", "rgb(228, 228, 228)")  # the board's bar, #e4e4e4
+        expect(words).to_have_css("border-radius", "2px")
+        # (Marking it private changed it, so it says "changed", as it would for any change.)
+        expect(private_chip.locator('[data-role="goal-chip-when"]')).to_have_text(re.compile(r"^Today · (made|changed) just now$"))
+        expect(private_chip.locator('[data-role="goal-chip-square"]')).to_be_visible()
+        # The goal that is not private is read as always.
+        expect(public_chip.locator(".goal-chip__name")).to_have_css("color", "rgb(255, 255, 255)")
+        expect(public_chip.locator(".goal-chip__name")).to_have_css("background-color", "rgba(0, 0, 0, 0)")
+
+    title_is_hidden(ANSWER)
+    page.locator(".circle-field__answer-words").click()
+    expect(page.locator(f"{AGENT_BALLOON} {GOAL_CHIP}")).to_have_count(2)
+    title_is_hidden(AGENT_BALLOON)
+    # Privacy mode off (the hotkey, as on the board): the title comes back, in the chip and on the board.
+    page.keyboard.press("Control+Shift+P")
+    private_chip = page.locator(f'{AGENT_BALLOON} {GOAL_CHIP}[data-goal-id="{secret}"]')
+    expect(private_chip.locator(".goal-chip__name")).to_have_css("color", "rgb(255, 255, 255)", timeout=10000)
+    expect(private_chip.locator(".goal-chip__name")).to_have_css("background-color", "rgba(0, 0, 0, 0)")
+    expect(private_chip.locator(".goal-chip__name")).to_have_text("SYN the private plan")
+    expect(page.locator(f'.goal-card[data-goal-id="{secret}"]')).not_to_have_class(re.compile(r"\bgoal-card--private\b"))
 
 
 def test_a_chip_for_a_goal_that_is_not_on_the_board_says_so_and_opens_nothing(ui_agent: UiSession) -> None:

@@ -6,11 +6,12 @@
 // where it is and when ("Today · made just now", "Week · changed 2 min ago"). It stands on a message's black, as DocChip
 // does there (`dark`), the field's answer and the agent's balloon alike. A click opens the goal as its window, as the
 // Inbox opens one (S3.P2). The square is only drawn: it is the board's own box without its input, so a press on it is a
-// press on the chip.
+// press on the chip. In privacy mode a private goal's title is hidden as the board and the Inbox hide it (lib/privacy.ts).
 import { computed } from 'vue'
 import '../kit-ext/goal-affordance/goal-affordance.css'
 import { chipLine, useGoalChip, useNow } from '../lib/goalChip'
 import { goalSquare } from '../lib/look'
+import { isPrivate } from '../lib/privacy'
 import { openWindow } from '../lib/windows'
 
 const props = defineProps<{ id: string; label?: string }>()
@@ -18,6 +19,8 @@ const props = defineProps<{ id: string; label?: string }>()
 const { goal } = useGoalChip(() => props.id)
 const now = useNow()
 const gone = computed(() => goal.value === 'gone')
+/* The board's own rule: privacy mode is on and the goal is one it hides (a private goal and everything under it). */
+const hidden = computed(() => isPrivate(props.id))
 const data = computed(() => (goal.value && goal.value !== 'gone' ? goal.value : null))
 /* Until the goal is read the chip has the words of the link that brought it. */
 const name = computed(() => data.value?.title || props.label || 'Goal')
@@ -34,7 +37,8 @@ function open(event: Event): void {
 </script>
 
 <template>
-  <button type="button" class="goal-chip" data-role="goal-chip" :data-goal-id="id" :aria-disabled="gone || undefined" @click.stop="open">
+  <button type="button" class="goal-chip" :class="{ 'goal-chip--private': hidden }" data-role="goal-chip" :data-goal-id="id"
+          :aria-disabled="gone || undefined" @click.stop="open">
     <span class="goal-chip__page" aria-hidden="true">
       <span class="goal-chip__mark checkbox checkbox--size-s goal-affordance">
         <span class="checkbox__box goal-affordance__square" :class="{ 'is-done': data?.done }" :style="square" data-role="goal-chip-square"></span>
@@ -65,6 +69,9 @@ function open(event: Event): void {
   font: 500 15px/22px var(--font-body, Commissioner, system-ui, sans-serif); overflow-wrap: anywhere; }
 .goal-chip__when { display: block; min-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font: 400 13px/22px var(--font-body, Commissioner, system-ui, sans-serif); color: rgb(255 255 255 / 50%); }
+/* Privacy mode: the title goes transparent over the grey bar the board and the Inbox give a hidden title (goalCard.css,
+   InboxTile.vue), the bar as wide as the words, the same on the message's black. Where and when stay: they name nothing. */
+.goal-chip--private .goal-chip__name { width: fit-content; max-width: 100%; color: transparent; background-color: #e4e4e4; border-radius: 2px; }
 .goal-chip:focus-visible { outline: 2px solid #007aff; outline-offset: 2px; }
 .goal-chip[aria-disabled='true'] { cursor: default; }
 </style>
