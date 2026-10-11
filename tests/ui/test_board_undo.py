@@ -408,3 +408,22 @@ def test_a_reorder_inside_a_column_goes_back_to_its_slot(ui_f2: UiSession) -> No
         page.keyboard.press(redo)
         wait_for(page, order, moved, "redo puts it where the drop left it")
         assert [i for i in column_ids(page, "week") if i in was] == moved
+
+
+def test_undo_sets_back_only_what_the_step_changed(ui_f2: UiSession) -> None:
+    """The agent (or a second window) renames a goal after you ticked it: taking your tick back leaves its new title alone."""
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        session.gestures.click(TICK)
+        wait_for(page, lambda: goal(conn, "SYNCOL01")[4], True, "the tick is stored")
+        conn.execute("UPDATE goals SET title = 'Renamed by someone else' WHERE id = 'SYNCOL01'")
+        expect(page.locator('[data-goal-id="SYNCOL01"] .goal-card__title-text').first).to_contain_text("Renamed by someone else", timeout=8000)
+
+        page.keyboard.press(undo)
+        wait_for(page, lambda: goal(conn, "SYNCOL01")[4], False, "the tick is taken back")
+        assert goal(conn, "SYNCOL01")[5] == "Renamed by someone else", "the other change is left as it is"
+        page.keyboard.press(redo)
+        wait_for(page, lambda: goal(conn, "SYNCOL01")[4], True, "and played again")
+        assert goal(conn, "SYNCOL01")[5] == "Renamed by someone else"

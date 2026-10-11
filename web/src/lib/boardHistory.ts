@@ -10,8 +10,8 @@
 import { nextTick } from 'vue'
 import { toast } from '@konstantinopolskii/vue'
 import { findGoal } from './boardIndex'
-import { currentShot, settleShots, type Outcome, type RestorePorts } from './boardRestore'
-import { changed, parentDiffers, placeDiffers, shotOf, shotsOf, slotDiffers, type Shot } from './boardShots'
+import { currentShot, settleShots, type Outcome, type RestorePorts, type Target } from './boardRestore'
+import { changeBetween, changed, parentDiffers, placeDiffers, shotOf, shotsOf, slotDiffers, type Shot } from './boardShots'
 import { dismiss, say, type Segment } from './fieldNotice'
 import { changeWords, putBackWords } from './historyWords'
 import { messageForError } from './scheduleFeedback'
@@ -145,9 +145,9 @@ interface Pair {
 
 /** The step for goals that went from `before` to `after`. `mainId` is the one the gesture was about. */
 function editStep(pairs: Pair[], mainId: string): Step {
-  const first = (shots: Shot[]): Shot[] => [...shots.filter((s) => s.id === mainId), ...shots.filter((s) => s.id !== mainId)]
-  const befores = pairs.map((p) => p.before)
-  const afters = pairs.map((p) => p.after)
+  const first = (targets: Target[]): Target[] => [...targets.filter((t) => t.shot.id === mainId), ...targets.filter((t) => t.shot.id !== mainId)]
+  const befores = pairs.map((p) => ({ shot: p.before, change: changeBetween(p.before, p.after) }))
+  const afters = pairs.map((p) => ({ shot: p.after, change: changeBetween(p.after, p.before) }))
   const main = pairs.find((p) => p.before.id === mainId) ?? pairs[0]!
   const structural = pairs.some(({ before, after }) => parentDiffers(before, after) || placeDiffers(before, after) || slotDiffers(before, after))
   return {

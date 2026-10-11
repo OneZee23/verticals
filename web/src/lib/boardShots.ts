@@ -99,6 +99,20 @@ export const placeDiffers = (a: Shot, b: Shot): boolean =>
 export const slotDiffers = (a: Shot, b: Shot): boolean =>
   a.before !== undefined && b.before !== undefined && a.before !== b.before
 
+/** What a step changed on one goal. Undo and redo set back only these, so what someone else changed on the goal since (the
+ *  agent, a second window) is not undone with it. */
+export interface Change {
+  done: boolean
+  fields: PatchField[]
+  parent: boolean
+  place: boolean
+  slot: boolean
+}
+
+export function changeBetween(a: Shot, b: Shot): Change {
+  return { done: doneDiffers(a, b), fields: differingFields(a, b), parent: parentDiffers(a, b), place: placeDiffers(a, b), slot: slotDiffers(a, b) }
+}
+
 /** Whether a gesture changed anything at all in `a` → `b` (the order counts only when it can be told). */
 export function changed(a: Shot, b: Shot): boolean {
   return doneDiffers(a, b) || differingFields(a, b).length > 0 || parentDiffers(a, b) || placeDiffers(a, b) || slotDiffers(a, b)

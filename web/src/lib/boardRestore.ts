@@ -3,7 +3,8 @@
 // the board already makes (a tick, a patch, a schedule with a slot, a reparent, a reorder), each with its optimistic
 // placement, so the live feed, the epoch guard and the motion are the ones that exist. It writes nothing of its own kind.
 //
-// It looks at what the goal is now and does only what differs, in an order that stays legal:
+// It looks at what the goal is now and does only what differs, and of that only what the step changed (`Change`), in an
+// order that stays legal:
 //   1. the fields (done, title, repeat, tags, foil, expected size);
 //   2. the structure: the parent and the period. A goal stays at or below its parent's scale, so which of the two goes
 //      first depends on the gesture being taken back: the period first when undoing, the parent first when redoing
@@ -20,7 +21,7 @@ import {
 import { findGoal } from './boardIndex'
 import { reorderPlacement, reparentPlacement, schedulePlacement } from './boardPlacement'
 import {
-  differingFields, doneDiffers, parentDiffers, placeDiffers, shotOf, shotOfCard, slotDiffers, type Shot,
+  differingFields, doneDiffers, parentDiffers, placeDiffers, shotOf, shotOfCard, slotDiffers, type Change, type Shot,
 } from './boardShots'
 import { reorderWrite, scheduleOrdering } from './drag'
 import type { VerticalScale } from './periods'
@@ -40,6 +41,12 @@ export interface RestorePorts {
  *  step stays, for another try. */
 export type Outcome = 'done' | 'drop' | 'retry'
 
+/** A goal to set to a shot, and what of it the step changed. */
+export interface Target {
+  shot: Shot
+  change: Change
+}
+
 /** A goal's shot as it stands: from the board, or from the server when the board does not carry it, or when `fresh` asks
  *  for the server (the board may not have heard of a change yet). `null`: gone. */
 export async function currentShot(ports: RestorePorts, id: string, fresh = false): Promise<Shot | null> {
@@ -53,13 +60,18 @@ export async function currentShot(ports: RestorePorts, id: string, fresh = false
   }
 }
 
-async function setFields(ports: RestorePorts, now: Shot, target: Shot): Promise<void> {
+/** The fields of the step that are not as the shot says. */
+const fieldsToSet = (now: Shot, target: Shot, change: Change) => differingFields(now, target).filter((field) => change.fields.includes(field))
+const fieldsDiffer = (now: Shot, target: Shot, change: Change): boolean =>
+  (change.done && doneDiffers(now, target)) || fieldsToSet(now, target, change).length > 0
+
+async function setFields(ports: RestorePorts, now: Shot, target: Shot, change: Change): Promise<void> {
   const onBoard = !!findGoal(ports.board(), target.id)
-  if (doneDiffers(now, target)) {
+  if (change.done && doneDiffers(now, target)) {
     if (onBoard) await ports.completeGoal(target.id, target.done)
     else await patchGoal(target.id, { done: target.done })
   }
-  const fields = differingFields(now, target)
+  const fields = fieldsToSet(now, target, change)
   if (fields.length) {
     const patch = Object.fromEntries(fields.map((field) => [field, target[field]])) as UpdatePatch
     if (onBoard) await ports.updateGoal(target.id, patch)
@@ -134,23 +146,21 @@ async function setSlot(ports: RestorePorts, target: Shot, now: Shot): Promise<vo
  *  own verbs tell the person why, and keep what they showed). */
 type Settled = 'done' | 'gone' | 'failed'
 
-const fieldsDiffer = (a: Shot, b: Shot): boolean => doneDiffers(a, b) || differingFields(a, b).length > 0
-
-/** Sets one goal to `target`. */
-async function settleOne(ports: RestorePorts, target: Shot, direction: 'back' | 'forward'): Promise<Settled> {
+/** Sets one goal to the shot, as far as the step changed it. */
+async function settleOne(ports: RestorePorts, { shot: target, change }: Target, direction: 'back' | 'forward'): Promise<Settled> {
   let now = await currentShot(ports, target.id)
   if (!now) return 'gone'
-  if (fieldsDiffer(now, target)) {
-    await setFields(ports, now, target)
+  if (fieldsDiffer(now, target, change)) {
+    await setFields(ports, now, target, change)
     now = (await currentShot(ports, target.id)) ?? now
     // The tick and the patch are the store's own verbs, which keep their failures to themselves: the goal is not as it
     // should be, so the server is asked whether it is there at all.
-    if (fieldsDiffer(now, target)) return (await currentShot(ports, target.id, true)) ? 'failed' : 'gone'
+    if (fieldsDiffer(now, target, change)) return (await currentShot(ports, target.id, true)) ? 'failed' : 'gone'
   }
 
   now = (await currentShot(ports, target.id)) ?? now
-  const parent = parentDiffers(now, target)
-  const place = placeDiffers(now, target)
+  const parent = change.parent && parentDiffers(now, target)
+  const place = change.place && placeDiffers(now, target)
   if (parent && place) {
     let [first, second] = direction === 'back' ? [setPlace, setParent] : [setParent, setPlace]
     try {
@@ -165,25 +175,25 @@ async function settleOne(ports: RestorePorts, target: Shot, direction: 'back' | 
   else if (parent) await setParent(ports, target)
 
   now = (await currentShot(ports, target.id)) ?? now
-  if (slotDiffers(now, target)) await setSlot(ports, target, now)
+  if (change.slot && slotDiffers(now, target)) await setSlot(ports, target, now)
   return 'done'
 }
 
 /** Sets the goals of a step to `targets` (the one the gesture was about first). */
-export async function settleShots(ports: RestorePorts, targets: Shot[], direction: 'back' | 'forward'): Promise<Outcome> {
+export async function settleShots(ports: RestorePorts, targets: Target[], direction: 'back' | 'forward'): Promise<Outcome> {
   const [head, ...rest] = targets
   if (!head) return 'done'
   try {
     const first = await settleOne(ports, head, direction)
     if (first === 'gone') {
-      toast(`“${head.title}” is gone, so this can’t be taken back.`)
+      toast(`“${head.shot.title}” is gone, so this can’t be taken back.`)
       return 'drop'
     }
     if (first === 'failed') {
       await ports.reloadBoard()
       return 'retry'
     }
-    for (const shot of [...rest].sort((a, b) => b.position - a.position)) await settleOne(ports, shot, direction)
+    for (const target of [...rest].sort((a, b) => b.shot.position - a.shot.position)) await settleOne(ports, target, direction)
     return 'done'
   } catch (err) {
     toast(messageForError(err))
