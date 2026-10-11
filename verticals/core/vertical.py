@@ -129,6 +129,10 @@ VERTICALS: tuple[VerticalDescriptor, ...] = (
     VerticalDescriptor("life", "Life", "Life", partial(period_key, "life"), _bounds_life, False),
 )
 
+# The scale the app's own morning task is planned in: the "Morning report" task is a task of its day (core/morning.py).
+# Named here, with every other scale-specific choice (AC-012 / S-108b).
+DAY: str = VERTICALS[0].key
+
 # The roll (docs/design-handoff S4.P1, KK E086-E090, E246): a missed plan moves on in its own scale until the next larger
 # scale turns, then falls into it, one scale per turn, up to Year. Scales past the ladder move on in their own column.
 ROLL_LADDER: tuple[str, ...] = tuple(h.key for h in VERTICALS[:5])
