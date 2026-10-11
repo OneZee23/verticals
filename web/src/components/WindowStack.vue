@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The windows over the board (docs/design-handoff S3.P2, S3.P3): one in the centre, 720 px, 32 px from the top; the
+// The windows over the board (docs/design-handoff S3.P2, S3.P3): one in the centre, 720 px; a goal or a page a card 32 px
+// from the top, a document full height, half a pixel from the top and the bottom (docs/design/doc-full-height.md); the
 // others at the sides, 200 px of each in view, stepped back to 94%, softer and lit less; beyond the neighbours they wait
 // off the screen in the order they opened. Under the conversation the centre one steps back and blurs down its height.
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -143,6 +144,7 @@ function onWindowClick(index: number, event: MouseEvent): void {
           'vt-shadow--back': index === windows.front && agentChat.open,
           'vt-window--front': index === windows.front,
           'vt-window--side': index !== windows.front,
+          'vt-window--full': win.kind === 'doc',
         }"
         :data-window="win.kind"
         :data-key="win.key"
@@ -210,6 +212,11 @@ function onWindowClick(index: number, event: MouseEvent): void {
   will-change: transform;
 }
 .vt-window.vt-shadow--lit { background: rgb(var(--vt-pale)); }
+/* A document stands full height (docs/design/doc-full-height.md): half a pixel from the top and the bottom, one device
+   pixel on a Retina screen and the room the window's hairline ring needs. Its width and its 24 px corners are any
+   window's. A goal or a page stays a card that hugs what it holds: a sheet is a document, a card is a goal. */
+.vt-window--full { top: .5px; bottom: .5px; max-height: none; }
+.vt-window--full .vt-window__body { flex: 1 1 auto; }
 .vt-window--front.vt-shadow--back { transition-duration: var(--vt-dur-step); }
 .vt-window--side { cursor: pointer; }
 .vt-window--side .vt-window__button, .vt-window--side .goal-card-tools { visibility: hidden; }
