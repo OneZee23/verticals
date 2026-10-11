@@ -322,6 +322,20 @@ def record(
                     next_check_at=nxt)
 
 
+def wake(conn: psycopg.Connection, *, owner: str, doc_id: str, now: datetime) -> None:
+    """A source document was just written by the agent's tool: the source is due at the next pass, and the bell rings (the
+    trigger on this table), which a document's save alone does not. The open app reads the Sources row again when it rings,
+    so a source waiting for approval appears at once instead of when the Inbox is next opened."""
+    owner = validate_owner(owner)
+    conn.execute(
+        """
+        INSERT INTO source_state (doc_id, owner, next_check_at) VALUES (%(id)s, %(owner)s, %(now)s)
+        ON CONFLICT (doc_id) DO UPDATE SET next_check_at = LEAST(source_state.next_check_at, EXCLUDED.next_check_at)
+        """,
+        {"id": doc_id, "owner": owner, "now": now},
+    )
+
+
 # --- approving -------------------------------------------------------------------------------------------------------
 
 

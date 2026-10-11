@@ -329,6 +329,8 @@ def _spawn_backend(dsn: str, owner: str, port: int, log_path: Path, tmp_path: Pa
         VERTICALS_POOL_MIN="2",
         VERTICALS_POOL_MAX="10",
         VERTICALS_LOG_LEVEL="warning",
+        # The sources timer is off: the answers a scenario shows are written by the scenario, at the times it chooses.
+        VERTICALS_SOURCES_TICK="0",
     )
     # Append, never truncate: a restart must not erase the first process's log, which is the only
     # record of what the backend was doing before the scenario killed it.

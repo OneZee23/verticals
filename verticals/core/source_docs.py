@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 import psycopg
 
@@ -120,12 +121,15 @@ def prepare(
                  approved_hash=approved, changed=(body != source.body or name != source.title))
 
 
-def save(conn: psycopg.Connection, *, owner: str, draft: Draft) -> core.Source:
-    """Write the document. A draft that changed nothing writes nothing."""
+def save(conn: psycopg.Connection, *, owner: str, draft: Draft, now: datetime) -> core.Source:
+    """Write the document, and wake the source so the open app sees it. A draft that changed nothing writes nothing."""
     owner = validate_owner(owner)
     if draft.created:
-        made = core_docs.create(conn, owner=owner, path=draft.path, title=draft.title, body=draft.body).doc
-        return core.find(conn, owner=owner, ref=made.id)
+        doc_id = core_docs.create(conn, owner=owner, path=draft.path, title=draft.title, body=draft.body).doc.id
+    else:
+        doc_id = draft.id
+        if draft.changed:
+            core_docs.save(conn, owner=owner, id=doc_id, expected_revision=draft.revision, title=draft.title, body=draft.body)
     if draft.changed:
-        core_docs.save(conn, owner=owner, id=draft.id, expected_revision=draft.revision, title=draft.title, body=draft.body)
-    return core.find(conn, owner=owner, ref=draft.id)
+        core.wake(conn, owner=owner, doc_id=doc_id, now=now)
+    return core.find(conn, owner=owner, ref=doc_id)

@@ -25,7 +25,7 @@ WHOLE = {"title": "Health page", "gives": "Whether the service answers.", "how":
 
 def _make(db: psycopg.Connection, check: dict, **parts: object) -> core.Source:
     draft = source_docs.prepare(db, owner=OWNER, check=check, **{**WHOLE, **parts})
-    return source_docs.save(db, owner=OWNER, draft=draft)
+    return source_docs.save(db, owner=OWNER, draft=draft, now=NOW)
 
 
 def test_a_new_source_needs_every_part_and_is_made_under_sources(db: psycopg.Connection) -> None:
@@ -33,10 +33,13 @@ def test_a_new_source_needs_every_part_and_is_made_under_sources(db: psycopg.Con
     assert (draft.created, draft.id, draft.revision, draft.path) == (True, None, None, "sources/health-page.md")
     assert draft.check is not None and draft.check.hash == sc.Check.from_dict(HTTP).hash
     assert draft.runnable is True, "an address needs no approval"
-    saved = source_docs.save(db, owner=OWNER, draft=draft)
+    saved = source_docs.save(db, owner=OWNER, draft=draft, now=NOW)
     assert (saved.path, saved.title, saved.revision) == ("sources/health-page.md", "Health page", 1)
     assert saved.check is not None and saved.check.as_dict() == sc.Check.from_dict(HTTP).as_dict()
     assert sc.section_text(saved.body, "fixes") == "- Restart it."
+    # Writing it wakes it: a row exists (its change rings the bell the open app listens to) and it is due at the next pass.
+    assert saved.row is not None and saved.row.next_check_at == NOW and saved.row.checked_at is None
+    assert core.due(saved, NOW) is True
 
     for missing in ("title", "gives", "how", "since", "check"):
         parts = {**WHOLE, "check": HTTP}
@@ -67,16 +70,16 @@ def test_a_change_replaces_only_the_parts_it_names(db: psycopg.Connection) -> No
     assert sc.section_text(draft.body, "fixes") == sc.NO_FIXES
     assert "If it is slow, wait a minute before believing it." in draft.body, "the owner's own line stays"
     assert draft.check is not None and draft.check.hash == source.check.hash
-    saved = source_docs.save(db, owner=OWNER, draft=draft)
+    saved = source_docs.save(db, owner=OWNER, draft=draft, now=NOW)
     assert saved.revision == 3 and saved.title == "Health page"
 
     # The same change again changes nothing, and writes no revision.
     again = source_docs.prepare(db, owner=OWNER, ref="sources/health-page.md", fixes=[])
     assert again.changed is False
-    assert source_docs.save(db, owner=OWNER, draft=again).revision == 3
+    assert source_docs.save(db, owner=OWNER, draft=again, now=NOW).revision == 3
 
     # A new title is the document's own; its file name stays.
-    renamed = source_docs.save(db, owner=OWNER, draft=source_docs.prepare(db, owner=OWNER, ref=source.id, title="Service health"))
+    renamed = source_docs.save(db, owner=OWNER, draft=source_docs.prepare(db, owner=OWNER, ref=source.id, title="Service health"), now=NOW)
     assert (renamed.title, renamed.path) == ("Service health", "sources/health-page.md")
 
 
@@ -122,6 +125,6 @@ def test_a_stale_draft_is_refused_and_an_unknown_source_is_not_found(db: psycopg
     draft = source_docs.prepare(db, owner=OWNER, ref=source.id, fixes=["Restart it."])
     core_docs.save(db, owner=OWNER, id=source.id, expected_revision=source.revision, body=source.body + "\nMore.")
     with pytest.raises(RevisionMismatch):
-        source_docs.save(db, owner=OWNER, draft=draft)
+        source_docs.save(db, owner=OWNER, draft=draft, now=NOW)
     with pytest.raises(NotFound):
         source_docs.prepare(db, owner=OWNER, ref="sources/none.md", fixes=[])

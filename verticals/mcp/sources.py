@@ -168,7 +168,7 @@ def handle_source(conn: psycopg.Connection, owner: str, args: dict[str, Any]) ->
         result = runner.run_check(draft.check)
         why_not = None if result is not None else "the server was closing"
 
-    saved = source_docs.save(conn, owner=owner, draft=draft)
+    saved = source_docs.save(conn, owner=owner, draft=draft, now=utcnow())
     if result is not None:
         core.record(conn, owner=owner, doc_id=saved.id, check_hash=draft.check.hash, result=result, now=utcnow())
     view = core.view(core.find(conn, owner=owner, ref=saved.id), utcnow(), body=True)
