@@ -37,15 +37,24 @@ export interface GoalCardData {
   children?: GoalCardData[]
 }
 
+/** One way to write a column's name: the big name, and the small kind line above it. */
+export interface NameForm {
+  name: string
+  kind: string
+}
+
 export interface BoardColumnData {
   /** vertical_scale enum value (ARCHITECTURE.md §3): day | week | month | quarter | year | decade | life. */
   vertical: string
-  /** The column's name: its period, "October", "5–11 Oct", "Today" (docs/design/column-names.md). */
+  /** The column's name, its period, in full: "October", "5–11 Oct", "Today" (docs/design/column-names.md). */
   title: string
-  /** The name where the column is wide, when the period has a longer one: a week across two months says its last day. */
-  wideTitle?: string
-  /** The kind, small above the name: "Month"; the year follows it when the period is outside the current year. */
+  /** The kind, small above the name: "Month"; the year follows it, short, when the period is outside the current year. */
   subLabel?: string
+  /** The same name in shorter forms, longest first: the column shows the first form that fits its room, so a name is never
+   *  cut with "…" (`lib/fitName.ts`). */
+  shorter?: NameForm[]
+  /** The accessible name: the full name with full years, whichever form is on screen. */
+  label?: string
   active?: boolean
   addPlaceholder?: string
   goals: GoalCardData[]

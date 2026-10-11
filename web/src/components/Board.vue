@@ -249,8 +249,9 @@ onBeforeUnmount(() => document.body.classList.remove('pattern-vertical-board__no
       :key="column.vertical"
       :vertical="column.vertical"
       :title="column.title"
-      :wide-title="column.wideTitle"
       :sub-label="column.subLabel"
+      :shorter="column.shorter"
+      :label="column.label"
       :active="column.active"
       :deck-main="mainVertical === column.vertical"
       :deck-active="store.state.openGoalId === null

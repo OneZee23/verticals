@@ -12,18 +12,20 @@ import type { SpanScale } from '../lib/spans'
 import { store } from '../store'
 import { playSound } from '../lib/sound'
 import type { PeriodDirection } from '../lib/periodNavigation'
-import type { GoalCardData } from '../types'
+import type { GoalCardData, NameForm } from '../types'
 import { filterActive } from '../lib/commandFilter'
 
 const props = withDefaults(
   defineProps<{
     vertical: string
-    /** The column's name, its period (docs/design/column-names.md). */
+    /** The column's name, its period, in full (docs/design/column-names.md). */
     title: string
-    /** The name where the column is wide, when the period has a longer one (a week across two months). */
-    wideTitle?: string
     /** The kind, small above the name. */
     subLabel?: string
+    /** The name in shorter forms, longest first, for where the column's room is short: its header shows the first that fits. */
+    shorter?: NameForm[]
+    /** The accessible name: the full name with full years, whichever form is on screen. */
+    label?: string
     active?: boolean
     deckActive?: boolean
     deckMain?: boolean
@@ -38,7 +40,7 @@ const props = withDefaults(
     end?: string
   }>(),
   {
-    wideTitle: '', subLabel: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
+    subLabel: '', shorter: () => [], label: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
     periodDirection: 1, periodSwapId: 0, span: false, end: '',
   },
 )
@@ -66,12 +68,9 @@ function onAdd(title: string) {
 function onHeaderClick(): void {
   if (!props.span) store.toggleExpandedColumn(props.vertical)
 }
-/* The column's accessible name says the words on its header, the kind first as they read, then the name the column's room
-   gives it; the year the kind line carries stays, without its dot (docs/design/column-names.md). */
-const accessibleName = computed(() => [
-  props.subLabel.replace(' · ', ' '),
-  props.active && props.wideTitle ? props.wideTitle : props.title,
-].filter(Boolean).join(', '))
+/* The column's accessible name says the full name of its header, the kind first as they read, whichever form of it is on
+   screen (docs/design/column-names.md). A span has no forms, so its own words are its name. */
+const accessibleName = computed(() => props.label || [props.subLabel, props.title].filter(Boolean).join(', '))
 /* While a goal is dragged the dots take the period controls' place; a span has neither (S5.P2.017, .019). */
 const dragging = computed(() => store.state.drag.id !== null)
 
@@ -145,8 +144,8 @@ type SlideState = 'outgoing' | 'incoming' | 'current'
 interface PeriodSlide {
   id: number
   title: string
-  wideTitle: string
   subLabel: string
+  shorter: NameForm[]
   goals: GoalCardData[]
   periodKey: string | null
   state: SlideState
@@ -157,8 +156,8 @@ function snapshot(state: SlideState): PeriodSlide {
   return {
     id: ++slideId,
     title: props.title,
-    wideTitle: props.wideTitle,
     subLabel: props.subLabel,
+    shorter: props.shorter,
     goals: [...props.goals],
     periodKey: props.periodKey,
     state,
@@ -205,7 +204,7 @@ watch(
       return
     }
     if (props.periodKey === latest.periodKey) {
-      latest = { ...latest, title: props.title, wideTitle: props.wideTitle, subLabel: props.subLabel, goals: [...props.goals] }
+      latest = { ...latest, title: props.title, subLabel: props.subLabel, shorter: props.shorter, goals: [...props.goals] }
       if (slides.value.length === 1) slides.value = [latest]
       return
     }
@@ -244,7 +243,7 @@ watch(
 )
 
 watch(
-  () => [props.title, props.wideTitle, props.subLabel, props.goals, props.periodKey] as const,
+  () => [props.title, props.subLabel, props.shorter, props.goals, props.periodKey] as const,
   () => {
     if (slides.value.length !== 1) return
     /* Ordinary writes update the current slide without changing its key. Remounting the whole
@@ -252,8 +251,8 @@ watch(
     latest = {
       ...slides.value[0],
       title: props.title,
-      wideTitle: props.wideTitle,
       subLabel: props.subLabel,
+      shorter: props.shorter,
       goals: [...props.goals],
       periodKey: props.periodKey,
       state: 'current',
@@ -346,8 +345,9 @@ onBeforeUnmount(() => swapAnimation?.cancel())
         <!-- Header click = expand/unfold toggle (KK ruling 2026-08-17). The pager cluster is a
              sibling of the header, so its own clicks never reach this handler. -->
         <ColumnHeader
-          :title="active && slide.wideTitle ? slide.wideTitle : slide.title"
+          :title="slide.title"
           :sub-label="slide.subLabel"
+          :shorter="slide.shorter"
           :end="end"
           :data-cap="span ? undefined : 'column-expand'"
           @click="onHeaderClick"

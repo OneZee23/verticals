@@ -132,13 +132,16 @@ export function toColumnData(
     decade: 'Visualise…',
     life: 'Become…',
   }
-  // The big name is the column's period and the small line above it its kind (docs/design/column-names.md).
+  // The big name is the column's period and the small line above it its kind, each in forms from long to short
+  // (docs/design/column-names.md).
   const names = columnNames(col, anchor, today)
+  const [full, ...shorter] = names.forms
   return {
     vertical: verticalKey,
-    title: names.name,
-    wideTitle: names.wideName,
-    subLabel: names.kind || undefined,
+    title: full.name,
+    subLabel: full.kind || undefined,
+    shorter,
+    label: names.label,
     // COMPACT_BOARD_HANDOFF.md §3 (supersedes the "day is 1.78x, always" rule): `active` now
     // means THE expanded column — the one the user clicked, at most one, none by default. Day
     // gets no special width any more (KK ruling 2026-08-17).
