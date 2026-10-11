@@ -7,7 +7,7 @@ are in `test_field_notice.py`, the movement in `test_board_undo_motion.py`."""
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import psycopg
 from playwright.sync_api import Page, expect
@@ -350,6 +350,52 @@ def test_an_occurrence_with_a_comment_on_it_stays_too(ui_f2: UiSession) -> None:
         assert [(row[1], row[2]) for row in series()] == [(0, False), (1, False)], "the goal is reopened, and nothing else"
         assert series()[1][0] == made, "a comment is a touch"
         assert [w[0] for w in writes(session, start)] == ["PATCH"], "one write: the reopening, and no delete"
+
+
+def test_a_move_of_a_goal_with_subgoals_is_taken_back_with_the_subgoals_in_their_order(ui_f2: UiSession) -> None:
+    """The subgoals nested in a card travel with it (D109) and come back in the order they were drawn in, the goal in its
+    slot, the column as it was. Ids are what the server once numbered them by, so the drawn order is set against them."""
+    session = ui_f2
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        parent = core_goals.create(
+            conn, owner="t1", title="SYN order parent", vertical="day", anchor_date=date(2026, 8, 8), before_id="SYNCOL03"
+        ).goal
+        kids = [
+            core_goals.create(
+                conn, owner="t1", title=f"SYN order kid {n}", parent_id=parent.id, vertical="day", anchor_date=date(2026, 8, 8)
+            ).goal
+            for n in range(4)
+        ]
+        drawn = [kid.id for kid in sorted(kids, key=lambda kid: kid.id, reverse=True)]
+        for place, kid_id in enumerate(drawn):
+            conn.execute("UPDATE goals SET position = %s WHERE id = %s", (90_000 + 1024 * place, kid_id))
+        kid_order = lambda: [  # noqa: E731
+            row[0] for row in conn.execute("SELECT id FROM goals WHERE parent_id = %s ORDER BY position", (parent.id,)).fetchall()
+        ]
+        day = lambda: conn.execute("SELECT anchor_date::text FROM goals WHERE id = %s", (parent.id,)).fetchone()[0]  # noqa: E731
+        assert kid_order() == drawn
+
+        session.page.reload()
+        page = board(session)
+        undo, redo = keys(page)
+        column_before = column_ids(page, "day")
+        assert column_before[column_before.index(parent.id) + 1:][:4] == drawn, "the card draws the subgoals in that order"
+
+        open_menu(page, "day", parent.id)
+        page.click('#dropdownPortal [data-move="tomorrow"]')
+        wait_for(page, day, "2026-08-09", "the goal and its subgoals have moved to tomorrow")
+        wait_for(page, lambda: [row[0] for row in conn.execute("SELECT anchor_date::text FROM goals WHERE parent_id = %s", (parent.id,)).fetchall()], ["2026-08-09"] * 4, "the subgoals went with it")
+        assert kid_order() == drawn, "moving the family does not shuffle the subgoals"
+
+        page.keyboard.press(undo)
+        wait_for(page, day, "2026-08-08", "undo brings the goal back to its day")
+        wait_for(page, lambda: [row[0] for row in conn.execute("SELECT anchor_date::text FROM goals WHERE parent_id = %s", (parent.id,)).fetchall()], ["2026-08-08"] * 4, "the subgoals came back with it")
+        assert kid_order() == drawn, "the subgoals are back in their order"
+        wait_for(page, lambda: column_ids(page, "day"), column_before, "the column is as it was: the goal in its slot, the subgoals under it")
+
+        page.keyboard.press(redo)
+        wait_for(page, day, "2026-08-09", "redo moves the family again")
+        assert kid_order() == drawn, "and keeps their order again"
 
 
 def test_a_goal_you_add_is_taken_away_by_undo_and_comes_back_under_its_id_by_redo(ui_f2: UiSession) -> None:
