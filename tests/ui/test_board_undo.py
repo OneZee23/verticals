@@ -369,3 +369,42 @@ def test_a_step_whose_goal_is_gone_is_told_and_let_go(ui_f2: UiSession) -> None:
         page.keyboard.press(undo)  # the step is gone from the history: nothing older is touched
         page.wait_for_timeout(400)
         assert goal(conn, "SYNCOL02")[4] is False
+
+
+def test_a_reorder_inside_a_column_goes_back_to_its_slot(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    activate_column(page, "week")
+    first, fourth = '[data-goal-id="SYNORD01"] > [data-cap="reorder"]', '[data-goal-id="SYNORD04"] > [data-cap="reorder"]'
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        order = lambda: [  # noqa: E731
+            r[0] for r in conn.execute(
+                "SELECT id FROM goals WHERE id IN ('SYNORD01','SYNORD02','SYNORD03','SYNORD04') ORDER BY position, id"
+            ).fetchall()
+        ]
+        was = ["SYNORD01", "SYNORD02", "SYNORD03", "SYNORD04"]
+        assert order() == was
+        a, b = page.locator(first).bounding_box(), page.locator(fourth).bounding_box()
+        assert a is not None and b is not None
+        sx, sy = a["x"] + GRIP["x"], a["y"] + GRIP["y"]
+        tx, ty = b["x"] + min(GRIP["x"], b["width"] * 0.45), b["y"] + b["height"] * 0.15
+        page.mouse.move(sx, sy)
+        page.mouse.down()
+        page.mouse.move(sx + 8, sy)
+        page.wait_for_timeout(50)
+        page.mouse.move((sx + tx) / 2, (sy + ty) / 2, steps=5)
+        page.mouse.move(tx, ty, steps=5)
+        page.wait_for_timeout(50)
+        page.mouse.up()
+        wait_for(page, lambda: order()[0], "SYNORD02", "the goal has left the first slot")
+        moved = order()
+        assert moved != was and moved.index("SYNORD01") > 0
+
+        page.keyboard.press(undo)
+        wait_for(page, order, was, "undo puts it back first")
+        assert [i for i in column_ids(page, "week") if i in was] == was
+        expect_no_notice(page)
+        page.keyboard.press(redo)
+        wait_for(page, order, moved, "redo puts it where the drop left it")
+        assert [i for i in column_ids(page, "week") if i in was] == moved
