@@ -31,6 +31,10 @@
    `useCommentFlow`'s own local-DOM thread ids) — those live in the wrapper markup below as plain
    buttons and a `KCommentNew`, not inside `KCommentThread` itself (it has no slots to inject into).
 
+   A document's comments are not here any more: they stand on their words and open over them (`DocCommentCard.vue`,
+   docs/design/doc-comments-inline.md), so the panel stays shut while the target is a document; a goal's comments are
+   as they were.
+
    Agent-authored messages: `KCommentThread` already sets `data-author-role="agent"` on a message
    whose `role` prop is `'agent'` (compiled source, confirmed) — the kit ships no CSS for that
    attribute (it exists only to gate the kebab's own Approve item), so this file's own `<style>`
@@ -114,7 +118,7 @@ watch(
 
 <template>
   <aside
-    v-if="store.state.comments.open"
+    v-if="store.state.comments.open && store.state.comments.targetType !== 'doc'"
     ref="rootEl"
     class="comments-panel"
     :class="{ 'comments-panel--over-windows': windows.list.length > 0 }"
