@@ -17,6 +17,7 @@ import DevZoomPanel from './components/DevZoomPanel.vue'
 import './lib/look'
 import { DEV_TUNING_ENABLED } from './lib/devTuning'
 import { isPrivacyHotkey, togglePrivacy } from './lib/privacy'
+import { startHistoryKeys } from './lib/boardHistory'
 import { store, todayIso } from './store'
 import { commandFilter } from './lib/commandFilter'
 import { agentChat, currentThread, newThread, openForGoal, openThread, send, startAgentChat } from './lib/agentChat'
@@ -38,6 +39,7 @@ import { ensureMorning } from './lib/morning'
    would otherwise come back to yesterday's board. See `store.ts`'s own rollover comment. */
 let stopDayRollover: (() => void) | null = null
 let stopLiveBoard: (() => void) | null = null
+let stopHistoryKeys: (() => void) | null = null // ⌘Z / ⇧⌘Z take the board's last change back (lib/boardHistory.ts)
 const devPanelsVisible = ref(false)
 const searchBar = ref<InstanceType<typeof SearchBar> | null>(null)
 
@@ -106,6 +108,7 @@ function onWindowKeyUp(event: KeyboardEvent) {
 onMounted(() => {
   stopDayRollover = store.startDayRollover()
   stopLiveBoard = store.startLiveBoard()
+  stopHistoryKeys = startHistoryKeys()
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('pointercancel', onWindowPointerCancel)
@@ -117,6 +120,8 @@ onUnmounted(() => {
   stopDayRollover = null
   stopLiveBoard?.()
   stopLiveBoard = null
+  stopHistoryKeys?.()
+  stopHistoryKeys = null
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerCancel)

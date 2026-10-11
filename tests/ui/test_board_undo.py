@@ -1,0 +1,363 @@
+"""⌘Z takes back the last change on the board (docs/design/board-undo.md). Fixture F2, the pinned clock (Saturday 8 Aug 2026).
+
+Each scenario makes the change the way a person does, presses the keys (or the notice's Undo) and reads the database, the
+board and the field. A change you can see is undone in place and nothing is said; the words of the ones that leave your view
+are in `test_field_notice.py`, the movement in `test_board_undo_motion.py`."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import psycopg
+from playwright.sync_api import Page, expect
+
+from verticals.core import goals as core_goals
+from tests.ui.conftest import UiSession, activate_column
+from tests.ui.views import switch_view
+from tests.ui.undo_helpers import GRIP, column_ids, expect_no_notice, family, goal, keys, wait_for, writes
+
+TICK = '[data-goal-id="SYNCOL01"] > .goal-card__row label.checkbox'
+TICKED = '[data-goal-id="SYNCOL01"] > .goal-card__row input.checkbox__input'
+ORD01_ROW = '[data-goal-id="SYNORD01"] > .goal-card__row'
+MONTH_BODY = '[data-vertical="month"] .pattern-vertical-board__body'
+
+
+def open_menu(page: Page, vertical: str, goal_id: str) -> None:
+    activate_column(page, vertical)
+    page.click(f'[data-goal-id="{goal_id}"] [data-role=goal-actions-trigger]')
+    page.wait_for_selector('[data-role="goal-context-menu"]', timeout=5000)
+
+
+def board(session: UiSession) -> Page:
+    session.page.wait_for_selector('[data-goal-id="SYNDAY01"]', timeout=10000)
+    return session.page
+
+
+def test_a_tick_is_undone_and_redone_in_place(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        ticked = lambda: goal(conn, "SYNCOL01")[4]  # noqa: E731
+        session.gestures.click(TICK)
+        expect(page.locator(TICKED)).to_be_checked()
+        wait_for(page, ticked, True, "the tick is stored")
+        wait_for(page, lambda: len(writes(session)), 1, "the tick's answer is logged")
+
+        start = len(session.request_log)
+        page.keyboard.press(undo)
+        expect(page.locator(TICKED)).not_to_be_checked()
+        wait_for(page, ticked, False, "the tick is taken back")
+        wait_for(page, lambda: writes(session, start), [("PATCH", "/goals/SYNCOL01", 200)], "one undo is one write")
+        expect_no_notice(page)  # the checkbox is in view: nothing to say
+
+        page.keyboard.press(redo)
+        expect(page.locator(TICKED)).to_be_checked()
+        wait_for(page, ticked, True, "the tick is played again")
+        expect_no_notice(page)
+
+
+def test_a_renamed_title_is_taken_back_and_played_again(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    activate_column(page, "day")
+    page.click('[data-goal-id="SYNCOL06"] > [data-cap=reorder]')
+    title = '[data-goal-id="SYNCOL06"] [data-cap="edit-title"]'
+    page.wait_for_selector(title, timeout=5000)
+    page.click(title)
+    page.fill(f"{title}:is(textarea)", "Renamed for the history")
+    page.press(f"{title}:is(textarea)", "Enter")
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        name = lambda: goal(conn, "SYNCOL06")[5]  # noqa: E731
+        wait_for(page, name, "Renamed for the history", "the title is stored")
+        page.keyboard.press(undo)
+        wait_for(page, name, "Color check orange", "the old title is back")
+        expect(page.locator(f'{title}:not(textarea)')).to_contain_text("Color check orange")
+        page.keyboard.press(redo)
+        wait_for(page, name, "Renamed for the history", "the new title is back")
+
+
+def test_a_drag_between_periods_goes_back_to_its_place(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    expect(page.locator(ORD01_ROW)).to_be_visible()
+    week_before = column_ids(page, "week")
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        where = lambda: goal(conn, "SYNORD01")[1:4]  # noqa: E731
+        assert where() == ("week", "2026-08-05", "2026-W32")
+        session.gestures.drag(ORD01_ROW, MONTH_BODY, source_position=GRIP, target_position=GRIP)
+        page.wait_for_selector('[data-vertical="month"] [data-goal-id="SYNORD01"]', timeout=5000)
+        wait_for(page, lambda: where()[0], "month", "the drop is stored")
+
+        page.keyboard.press(undo)
+        page.wait_for_selector('[data-vertical="week"] [data-goal-id="SYNORD01"]', timeout=5000)
+        wait_for(page, where, ("week", "2026-08-05", "2026-W32"), "the goal is back in its week")
+        assert column_ids(page, "week") == week_before, "the goal is back in its slot, not at the end"
+        assert page.locator('[data-vertical="month"] [data-goal-id="SYNORD01"]').count() == 0
+        expect_no_notice(page)  # both columns are on the screen: it was seen going and coming
+
+        page.keyboard.press(redo)
+        page.wait_for_selector('[data-vertical="month"] [data-goal-id="SYNORD01"]', timeout=5000)
+        wait_for(page, lambda: where()[0], "month", "the drop is played again")
+        expect_no_notice(page)
+
+
+def test_a_leaf_delete_comes_back_with_its_id_and_a_subtree_with_its_subgoals(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        leaf, tree = family(conn, "SYNCOL03"), family(conn, "SYNDAY01")
+        assert len(leaf) == 1 and len(tree) == 4, "SYNDAY01 stands over three subgoals"
+
+        # A goal with nothing under it: a plain DELETE, and Undo brings the same row back.
+        start = len(session.request_log)
+        open_menu(page, "day", "SYNCOL03")
+        page.click('#dropdownPortal [data-action="delete"]')
+        wait_for(page, lambda: family(conn, "SYNCOL03"), [], "the leaf is deleted")
+        wait_for(page, lambda: writes(session, start), [("DELETE", "/goals/SYNCOL03?cascade=false", 204)], "a plain DELETE")
+        page.keyboard.press(undo)
+        wait_for(page, lambda: family(conn, "SYNCOL03"), leaf, "the leaf is back, as it was")
+        page.wait_for_selector('[data-vertical="day"] [data-goal-id="SYNCOL03"]', timeout=5000)
+        expect_no_notice(page)
+
+        # A goal with subgoals goes with them in one write, with no question, and comes back with them.
+        start = len(session.request_log)
+        open_menu(page, "day", "SYNDAY01")
+        page.click('#dropdownPortal [data-action="delete"]')
+        wait_for(page, lambda: family(conn, "SYNDAY01"), [], "the subtree is deleted")
+        wait_for(page, lambda: writes(session, start), [("DELETE", "/goals/SYNDAY01?cascade=true", 204)],
+                 "one cascading write, no 409 first")
+        page.keyboard.press(undo)
+        wait_for(page, lambda: family(conn, "SYNDAY01"), tree, "the goal and its three subgoals are back under their ids")
+        page.wait_for_selector('[data-vertical="day"] [data-goal-id="SYNDAY01"]', timeout=5000)
+        expect_no_notice(page)
+
+        # Redo deletes it again, and says so.
+        page.keyboard.press(redo)
+        wait_for(page, lambda: family(conn, "SYNDAY01"), [], "redo deletes the subtree again")
+        page.keyboard.press(undo)
+        wait_for(page, lambda: family(conn, "SYNDAY01"), tree, "and undo brings it back once more")
+
+
+def test_a_new_change_after_an_undo_ends_what_could_be_played_again(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        ticked = lambda goal_id: goal(conn, goal_id)[4]  # noqa: E731
+        session.gestures.click(TICK)
+        wait_for(page, lambda: ticked("SYNCOL01"), True, "SYNCOL01 ticked")
+        page.keyboard.press(undo)
+        wait_for(page, lambda: ticked("SYNCOL01"), False, "SYNCOL01 taken back")
+        session.gestures.click('[data-goal-id="SYNCOL02"] > .goal-card__row label.checkbox')
+        wait_for(page, lambda: ticked("SYNCOL02"), True, "SYNCOL02 ticked")
+        wait_for(page, lambda: len(writes(session)), 3, "the three writes so far are logged")
+
+        start = len(session.request_log)
+        page.keyboard.press(redo)  # nothing to play: the undone tick was dropped by the new one
+        page.wait_for_timeout(400)
+        assert writes(session, start) == []
+        assert ticked("SYNCOL01") is False and ticked("SYNCOL02") is True
+
+        page.keyboard.press(undo)  # back through what was done since, newest first
+        wait_for(page, lambda: ticked("SYNCOL02"), False, "SYNCOL02 taken back")
+        page.keyboard.press(undo)  # and nothing older is left to take back
+        page.wait_for_timeout(400)
+        assert ticked("SYNCOL01") is False
+
+
+def test_the_history_starts_when_the_app_opens(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, _ = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        session.gestures.click(TICK)
+        wait_for(page, lambda: goal(conn, "SYNCOL01")[4], True, "the tick is stored")
+        page.reload()
+        page.wait_for_selector('[data-goal-id="SYNDAY01"]', timeout=10000)
+        page.keyboard.press(undo)
+        page.wait_for_timeout(400)
+        assert goal(conn, "SYNCOL01")[4] is True, "a reloaded page remembers nothing to take back"
+
+
+def test_under_and_back_out_are_one_step_each(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        parent = lambda: goal(conn, "SYNORD03")[0]  # noqa: E731
+        open_menu(page, "week", "SYNORD03")
+        page.click('#dropdownPortal [data-move="under"]')
+        page.click('[data-role="move-step"] [data-parent-id="SYNSCH01"]')
+        wait_for(page, parent, "SYNSCH01", "the goal is under SYNSCH01")
+        page.keyboard.press(undo)
+        wait_for(page, parent, None, "undo takes it out again")
+        page.keyboard.press(redo)
+        wait_for(page, parent, "SYNSCH01", "redo puts it under again")
+
+
+def test_a_task_ticked_in_the_inbox_is_brought_back_by_undo(ui_f2: UiSession) -> None:
+    """The Inbox is a place the board's changes are made from too: the card leaves it when ticked, which is said, and undo
+    puts it back."""
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        loose = core_goals.create(conn, owner="t1", title="SYN Inbox tick").goal.id
+        done = lambda: goal(conn, loose)[4]  # noqa: E731
+        page.clock.set_fixed_time(datetime.now(timezone.utc))
+        page.reload()
+        switch_view(page, "inbox")
+        card = f'[data-role="inbox-card"][data-goal-id="{loose}"]'
+        expect(page.locator(card)).to_be_visible(timeout=10000)
+
+        page.locator(f"{card} label.goal-affordance").click()
+        expect(page.locator(card)).to_have_count(0)
+        wait_for(page, done, True, "the task is ticked")
+
+        page.keyboard.press(undo)
+        wait_for(page, done, False, "undo opens it again")
+        expect(page.locator(card)).to_be_visible(timeout=5000)
+        expect_no_notice(page)  # it is back in view
+
+        page.keyboard.press(redo)
+        wait_for(page, done, True, "redo ticks it again")
+        expect(page.locator(card)).to_have_count(0)
+
+
+def test_a_repeat_rule_is_taken_back_and_set_again(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    card = '[data-goal-id="SYNCOL04"]'
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        rule = lambda: conn.execute("SELECT repeat_rule FROM goals WHERE id = 'SYNCOL04'").fetchone()[0]  # noqa: E731
+        assert rule() is None
+        session.gestures.click(f'{card} [data-role="goal-actions-trigger"]')
+        session.gestures.click('[data-role="goal-actions-menu"] [data-action="repeat"] button')
+        session.gestures.click('[data-role="repeat-menu"] button[role="menuitem"]:has-text("Daily")')
+        wait_for(page, rule, {"frequency": "daily", "interval": 1}, "the rule is stored")
+        page.wait_for_selector(f'{card} [data-role="repeat-indicator"]', timeout=5000)
+
+        page.keyboard.press(undo)
+        wait_for(page, rule, None, "undo takes the rule away")
+        expect(page.locator(f'{card} [data-role="repeat-indicator"]')).to_have_count(0)
+        page.keyboard.press(redo)
+        wait_for(page, rule, {"frequency": "daily", "interval": 1}, "redo sets it again")
+
+
+def test_a_goal_you_add_is_taken_away_by_undo_and_comes_back_under_its_id_by_redo(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    add = '[data-vertical="day"] [data-cap=create-goal]'
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        made = lambda: conn.execute("SELECT id FROM goals WHERE title = 'SYN undo made'").fetchall()  # noqa: E731
+        activate_column(page, "day")
+        page.click(add)
+        editor = f'{add} [data-role="column-add-editor"]'
+        page.wait_for_selector(editor, timeout=5000)
+        page.fill(editor, "SYN undo made")
+        page.press(editor, "Enter")
+        wait_for(page, lambda: len(made()), 1, "the goal is made")
+        (goal_id,) = made()[0]
+        page.wait_for_selector(f'[data-vertical="day"] [data-goal-id="{goal_id}"]', timeout=5000)
+        expect_no_notice(page)  # it is in view
+
+        page.keyboard.press(undo)
+        wait_for(page, made, [], "undo takes the goal away")
+        expect(page.locator(f'[data-goal-id="{goal_id}"]')).to_have_count(0)
+
+        page.keyboard.press(redo)
+        wait_for(page, made, [(goal_id,)], "Redo brings it back under the same id")
+        page.wait_for_selector(f'[data-vertical="day"] [data-goal-id="{goal_id}"]', timeout=5000)
+        expect_no_notice(page)
+
+
+def test_words_written_in_the_inbox_are_taken_back_and_put_again(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    page.clock.set_fixed_time(datetime.now(timezone.utc))
+    page.reload()
+    switch_view(page, "inbox")
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        made = lambda: conn.execute("SELECT id FROM goals WHERE title = 'SYN written in the Inbox'").fetchall()  # noqa: E731
+        field = '[data-cap="search-input"] textarea'
+        page.locator(field).fill("SYN written in the Inbox")
+        page.locator(field).press("Enter")
+        wait_for(page, lambda: len(made()), 1, "the words are a goal")
+        (goal_id,) = made()[0]
+        card = f'[data-role="inbox-card"][data-goal-id="{goal_id}"]'
+        expect(page.locator(card)).to_be_visible(timeout=5000)
+        page.locator(field).blur()  # the field is the field's own; the keys are the board's
+
+        page.keyboard.press(undo)
+        wait_for(page, made, [], "undo takes the card away")
+        expect(page.locator(card)).to_have_count(0)
+        page.keyboard.press(redo)
+        wait_for(page, made, [(goal_id,)], "redo brings it back under the same id")
+        expect(page.locator(card)).to_be_visible(timeout=5000)
+
+
+def test_several_undos_in_a_row_go_back_through_the_steps_in_order(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, redo = keys(page)
+    ids = ["SYNCOL01", "SYNCOL02", "SYNCOL03"]
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        done = lambda: [goal(conn, i)[4] for i in ids]  # noqa: E731
+        for goal_id in ids:
+            session.gestures.click(f'[data-goal-id="{goal_id}"] > .goal-card__row label.checkbox')
+        wait_for(page, done, [True, True, True], "three ticks are stored")
+        for _ in ids:  # pressed one after the other without waiting: each waits its turn
+            page.keyboard.press(undo)
+        wait_for(page, done, [False, False, False], "three undos take the three ticks back")
+        for _ in ids:
+            page.keyboard.press(redo)
+        wait_for(page, done, [True, True, True], "three redos play them again")
+
+
+def test_the_keys_wait_while_a_goal_is_in_the_hand(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, _ = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        ticked = lambda: goal(conn, "SYNCOL01")[4]  # noqa: E731
+        session.gestures.click(TICK)
+        wait_for(page, ticked, True, "the tick is stored")
+        box = page.locator(ORD01_ROW).bounding_box()
+        assert box is not None
+        page.mouse.move(box["x"] + GRIP["x"], box["y"] + GRIP["y"])
+        page.mouse.down()
+        page.mouse.move(box["x"] + GRIP["x"] + 30, box["y"] + GRIP["y"] + 20, steps=4)
+        expect(page.locator('[data-role="drag-overlay"]')).to_have_count(1)
+        page.keyboard.press(undo)  # a goal is in the hand: it lands first
+        page.wait_for_timeout(400)
+        assert ticked() is True
+        page.keyboard.press("Escape")  # the drag is cancelled, the goal goes back, the hand is empty
+        page.mouse.up()
+        page.wait_for_timeout(600)
+        page.keyboard.press(undo)
+        wait_for(page, ticked, False, "with the hand empty the keys work again")
+
+
+def test_a_step_whose_goal_is_gone_is_told_and_let_go(ui_f2: UiSession) -> None:
+    session = ui_f2
+    session.expects_network_failures = True  # the goal is deleted behind the page's back: its 404 is the subject
+    page = board(session)
+    undo, _ = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        session.gestures.click('[data-goal-id="SYNCOL03"] > .goal-card__row label.checkbox')
+        wait_for(page, lambda: goal(conn, "SYNCOL03")[4], True, "the tick is stored")
+        conn.execute("DELETE FROM goals WHERE id = 'SYNCOL03'")
+        page.keyboard.press(undo)
+        expect(page.locator(".toast-stack .toast__text", has_text="is gone, so this can’t be taken back")).to_have_text(
+            "“Color check green” is gone, so this can’t be taken back.", timeout=5000
+        )
+        page.keyboard.press(undo)  # the step is gone from the history: nothing older is touched
+        page.wait_for_timeout(400)
+        assert goal(conn, "SYNCOL02")[4] is False

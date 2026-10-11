@@ -45,7 +45,7 @@ export async function sayGo(): Promise<void> {
     if (!doc.path.startsWith(`${MORNING_FOLDER}/`)) continue
     for (const link of doc.linked_goals) {
       const goal = store.state.board?.columns.flatMap((c) => c.goals).find((g) => g.id === link.goal_id)
-      if (goal && goal.title === MORNING_TITLE && goal.done_at === null) void store.completeGoal(goal.id, true)
+      if (goal && goal.title === MORNING_TITLE && goal.done_at === null) void store.completeGoal(goal.id, true, false)
     }
   }
 }
