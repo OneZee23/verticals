@@ -5,15 +5,51 @@
 // a click anywhere else, ends it sooner, and the pointer on it holds the time (`lib/fieldNotice.ts`). It lives in its own
 // component so the field (`SearchBar.vue`) is not touched; the field is hidden while the notice is up, by one attribute on
 // the page, so the two never stand in the same place.
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editsText } from '../lib/boardHistory'
 import { dismiss, hold, notice, release } from '../lib/fieldNotice'
+import { cutTitle, glyphs } from '../lib/titleCut'
 import { store } from '../store'
 
 const pill = ref<HTMLElement | null>(null)
+const line = ref<HTMLElement | null>(null)
+/** The titles as the line shows them, by the place of their segment: whole, or cut to fit. */
+const cuts = ref<Record<number, string>>({})
+let fitting = 0
+
+const overflows = (el: HTMLElement): boolean => el.scrollWidth > el.clientWidth
+
+/* A title that does not fit is cut in the text, so the “…” stands right after its last letter, with no space before it and
+   the quote right after it (the browser's ellipsis cuts at a pixel and leaves gaps). The pill is as wide as its words up to
+   its largest, so a line that overflows is one that is cut short: the longest start of the title that does not overflow is
+   found by halving. Everything runs before the next frame, so the whole title is never drawn. */
+async function fit(): Promise<void> {
+  const mine = (fitting += 1)
+  cuts.value = {}
+  await nextTick()
+  if (mine !== fitting || !line.value || !overflows(line.value)) return
+  const titles = notice.segments.flatMap((part, at) => ('quote' in part ? [{ at, text: part.quote, length: glyphs(part.quote).length }] : []))
+  const longest = Math.max(0, ...titles.map((title) => title.length))
+  // Two titles (“into”, “out of”) give up the same share of their length.
+  const cutTo = (keep: number): Record<number, string> =>
+    Object.fromEntries(titles.map((title) => [title.at, cutTitle(title.text, Math.round((title.length * keep) / longest))]))
+  let fits = 0
+  let over = longest
+  while (fits < over - 1) {
+    const middle = Math.ceil((fits + over) / 2)
+    cuts.value = cutTo(middle)
+    await nextTick()
+    if (mine !== fitting || !line.value) return
+    if (overflows(line.value)) over = middle
+    else fits = middle
+  }
+  cuts.value = cutTo(fits)
+}
 
 // `sync`: the field is shown again in the same task as the key that asks for it, or it could not take the focus (see below).
 watch(() => notice.open, (open) => document.documentElement.toggleAttribute('data-field-notice', open), { immediate: true, flush: 'sync' })
+watch(() => notice.seq, () => void fit(), { flush: 'post' })
+const refit = (): void => { if (notice.open) void fit() }
 
 function act(): void {
   const action = notice.action
@@ -47,10 +83,12 @@ function onPointerDown(event: PointerEvent): void {
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('pointerdown', onPointerDown, true)
+  window.addEventListener('resize', refit)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown, true)
   window.removeEventListener('pointerdown', onPointerDown, true)
+  window.removeEventListener('resize', refit)
   document.documentElement.removeAttribute('data-field-notice')
 })
 </script>
@@ -67,10 +105,10 @@ onBeforeUnmount(() => {
       @pointerenter="hold"
       @pointerleave="release"
     >
-      <p class="field-notice__line" data-role="field-notice-line">
+      <p ref="line" class="field-notice__line" data-role="field-notice-line">
         <template v-for="(part, at) in notice.segments" :key="at">
           <span v-if="'text' in part" class="field-notice__text">{{ part.text }}</span>
-          <span v-else class="field-notice__quote"><i>“</i><span class="field-notice__title">{{ part.quote }}</span><i>”</i></span>
+          <span v-else class="field-notice__quote"><i>“</i><span class="field-notice__title">{{ cuts[at] ?? part.quote }}</span><i>”</i></span>
         </template>
       </p>
       <button v-if="notice.action" type="button" class="field-notice__action" data-role="field-notice-action" @click="act">
@@ -103,11 +141,13 @@ onBeforeUnmount(() => {
   color: #fff;
   font: 400 15px/22px var(--font-body);
 }
-.field-notice__line { display: flex; flex: 1 1 auto; min-width: 0; margin: 0; white-space: pre; }
-.field-notice__text { flex: none; }
-.field-notice__quote { display: flex; flex: 0 1 auto; min-width: 0; }
+/* Nothing in the line shrinks: a title too long for it is cut in the text by the component (so the “…” stands right after
+   its last letter), and `overflow` only keeps a line that still does not fit, in a very narrow window, off the button. */
+.field-notice__line { display: flex; flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; white-space: pre; }
+.field-notice__text, .field-notice__quote { flex: none; }
+.field-notice__quote { display: flex; }
 .field-notice__quote > i { flex: none; font-style: normal; }
-.field-notice__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-notice__title { flex: none; white-space: pre; }
 .field-notice__action {
   flex: none;
   height: 40px;
