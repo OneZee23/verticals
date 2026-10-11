@@ -13,8 +13,10 @@ How a run is held in:
   * **A deadline.** Each run happens in its own daemon thread and is abandoned when its time is up, so a stuck name lookup
     cannot hold the timer or the shutdown. No database connection is held while a check runs (the caller's business).
   * **A command is an argv list**, never a shell line, run in the home folder with a cleaned environment (the PATH the app
-    gives its agents, HOME, locale): `VERTICALS_TOKEN` and the database address never reach it. Its output is read up to
-    256 KB and the whole process group is killed at the deadline, on shutdown or when the output runs over.
+    gives its agents, HOME, locale): `VERTICALS_TOKEN` and the database address never reach it. It runs in a process
+    group of its own, which is killed, and waited for, at the deadline, when the output runs over, and on shutdown: the
+    stop reaches the command in a tenth of a second, `run_check` does not return until it is gone, and `kill_live` is the
+    net under that for any group still standing when the app closes.
   * **A file is read only under the home folder**, symlinks resolved first, and only a regular file; its last line only.
   * **An address is asked with GET**, no redirects, no cookies, 1 MB of answer at most.
   * **An MCP check calls one tool**, over streamable HTTP, whose name starts with a reading verb
@@ -48,6 +50,8 @@ MAX_OUTPUT = 256 * 1024     # what a command may print before it is stopped
 MAX_BODY = 1024 * 1024      # what an address may answer with
 RAW = 2000                  # how much of what a check saw goes back to the agent
 GRACE = 2                   # seconds past a check's own timeout before its thread is given up on
+STOP_GRACE = 3.0            # how long a stop waits for a running command's group to be killed and reaped
+POLL = 0.1                  # how often a running command is asked whether the app is closing
 FILE_TAIL = 8192
 
 # Where the app's agents find their programs: `desktop/chat/chat.py::child_env` adds these three after the PATH it was
@@ -142,11 +146,48 @@ def find_exe(name: str, *, home: Path | None = None, path: str | None = None) ->
 # --- a command -------------------------------------------------------------------------------------------------------
 
 
+# The commands running now, by process group: what `kill_live` ends when the app closes. A check's own thread is the first
+# to end its command (it sees the stop within `POLL`); this is the net under it, for a thread that is stuck.
+_LIVE: dict[int, subprocess.Popen] = {}
+_LIVE_LOCK = threading.Lock()
+
+
+def _end(proc: subprocess.Popen) -> None:
+    """Kill a command's whole process group and wait for it: nothing it started in that group outlives it. A command already
+    reaped is not signalled (its pid may be someone else's by now)."""
+    with _LIVE_LOCK:
+        _LIVE.pop(proc.pid, None)
+    if proc.returncode is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if proc.stdout is not None:
+        try:
+            proc.stdout.close()
+        except (OSError, ValueError):
+            pass
+    proc.wait()
+
+
+def kill_live() -> int:
+    """End every command still running, whole groups, and wait for each. The closing app calls it last, so no command
+    outlives it. Returns how many it ended."""
+    with _LIVE_LOCK:
+        running = list(_LIVE.values())
+    for proc in running:
+        _end(proc)
+    return len(running)
+
+
 def run_argv(
     argv: Sequence[str], *, env: Mapping[str, str], cwd: Path, seconds: float, stop: threading.Event,
 ) -> tuple[int | None, str, str | None]:
     """Run a program to the end: its exit code, what it printed, and why it was stopped if it was ("no answer in 20 s",
-    "output over 256 KB", "stopped"). The exit code is None when it was stopped."""
+    "output over 256 KB", "stopped"). The exit code is None when it was stopped. A stop, a deadline and an output over the
+    limit all end the same way: the program's process group is killed and waited for before this returns."""
+    if stop.is_set():
+        return None, "", "stopped"  # the app is closing: nothing new is started
     try:
         proc = subprocess.Popen(
             list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd,
@@ -158,14 +199,8 @@ def run_argv(
         return None, "", f"not allowed to run {argv[0]}"
     except OSError as exc:
         return None, "", f"cannot run {argv[0]}: {exc.strerror or exc}"
-
-    def kill() -> None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        proc.stdout.close()
-        proc.wait()
+    with _LIVE_LOCK:
+        _LIVE[proc.pid] = proc
 
     deadline = time.monotonic() + seconds
     chunks: list[bytes] = []
@@ -174,34 +209,46 @@ def run_argv(
     selector.register(proc.stdout, selectors.EVENT_READ)
     try:
         while True:
-            if stop.is_set():
-                kill()
+            if stop.is_set() or proc.returncode is not None:  # told to stop, or ended under us by `kill_live`
+                _end(proc)
                 return None, "", "stopped"
             left = deadline - time.monotonic()
             if left <= 0:
-                kill()
+                _end(proc)
                 return None, b"".join(chunks).decode("utf-8", "replace"), f"no answer in {num(seconds)} s"
-            if not selector.select(min(left, 0.2)):
+            try:
+                ready = selector.select(min(left, POLL))
+            except (OSError, ValueError):  # its output was closed under us: the command was ended elsewhere
+                _end(proc)
+                return None, "", "stopped"
+            if not ready:
                 continue
             data = os.read(proc.stdout.fileno(), 65536)
             if not data:
                 break
             size += len(data)
             if size > MAX_OUTPUT:
-                kill()
+                _end(proc)
                 return None, b"".join(chunks).decode("utf-8", "replace"), f"output over {MAX_OUTPUT // 1024} KB"
             chunks.append(data)
         proc.stdout.close()
-        try:
-            code = proc.wait(timeout=max(0.2, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            kill()
-            return None, b"".join(chunks).decode("utf-8", "replace"), f"no answer in {num(seconds)} s"
-        return code, b"".join(chunks).decode("utf-8", "replace"), None
+        # Its output is over; it may still be running (it closed its output and carried on). The wait is a poll, so a stop or
+        # the deadline ends it too.
+        while proc.poll() is None:
+            if stop.is_set():
+                _end(proc)
+                return None, "", "stopped"
+            if time.monotonic() >= deadline:
+                _end(proc)
+                return None, b"".join(chunks).decode("utf-8", "replace"), f"no answer in {num(seconds)} s"
+            time.sleep(0.02)
+        return proc.returncode, b"".join(chunks).decode("utf-8", "replace"), None
     finally:
         selector.close()
-        if proc.poll() is None:
-            kill()
+        with _LIVE_LOCK:
+            _LIVE.pop(proc.pid, None)
+        if proc.returncode is None and proc.poll() is None:
+            _end(proc)
 
 
 def _cmd(fields: Mapping[str, Any], *, home: Path, stop: threading.Event, environ: Mapping[str, str]) -> Result:
@@ -423,6 +470,10 @@ def run_check(
     limit = time.monotonic() + _deadline(check)
     while thread.is_alive():
         if stop.is_set():
+            if check.kind in ("cmd", "connections"):
+                # The check's own thread ends its command within `POLL`, the whole group killed and reaped; waiting for it is
+                # what makes "stopped" mean "gone". An address or a lookup cannot be cut short and is simply let go.
+                thread.join(STOP_GRACE)
             return None
         if time.monotonic() >= limit:
             return Result(False, f"no answer in {num(limit - started)} s", ms=int((time.monotonic() - started) * 1000))

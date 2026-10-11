@@ -162,14 +162,17 @@ def _length() -> str:
     return f"{20 + secrets.randbelow(9)}.{secrets.randbelow(10**6):06d}"
 
 
-def test_a_command_is_stopped_at_its_deadline_and_leaves_nothing_running(home: Path) -> None:
+def _running(length: str) -> bool:
+    return subprocess.run(["pgrep", "-f", f"sleep {length}"], capture_output=True).returncode == 0
+
+
+def test_a_command_is_stopped_at_its_deadline_and_is_gone_when_the_call_returns(home: Path) -> None:
     length = _length()
     started = time.monotonic()
     result = run({"kind": "cmd", "argv": ["/bin/sleep", length], "timeout": 0.3}, home=home)
     assert time.monotonic() - started < 2
     assert (result.ok, result.detail) == (False, "no answer in 0.3 s")
-    time.sleep(0.2)
-    assert subprocess.run(["pgrep", "-f", f"sleep {length}"], capture_output=True).returncode == 1, "the process was killed"
+    assert not _running(length), "killed and waited for, not left to die"
 
 
 def test_a_command_that_prints_without_end_is_stopped(home: Path) -> None:
@@ -177,15 +180,44 @@ def test_a_command_that_prints_without_end_is_stopped(home: Path) -> None:
     assert (result.ok, result.detail) == (False, "output over 256 KB")
 
 
-def test_the_app_stopping_ends_a_running_command(home: Path) -> None:
+def test_the_app_stopping_ends_a_running_command_and_is_not_answered_until_it_is_gone(home: Path) -> None:
     length = _length()
     stop = threading.Event()
     threading.Timer(0.3, stop.set).start()
     started = time.monotonic()
     assert run({"kind": "cmd", "argv": ["/bin/sleep", length], "timeout": 30}, home=home, stop=stop) is None
     assert time.monotonic() - started < 2
-    time.sleep(0.2)
-    assert subprocess.run(["pgrep", "-f", f"sleep {length}"], capture_output=True).returncode == 1
+    assert not _running(length), "no waiting afterwards: the stop returns only when the command is gone"
+
+
+def test_a_stop_ends_the_whole_group_and_a_command_that_closed_its_output_and_ran_on(home: Path) -> None:
+    # Two shapes the read loop alone would miss: a child of the command (the group, not just the first process), and a
+    # command that closed its output and kept running (the wait after the output is over).
+    for script in ("/bin/sleep {n} & wait", "exec 1>&- 2>&-; exec /bin/sleep {n}"):
+        length = _length()
+        stop = threading.Event()
+        threading.Timer(0.4, stop.set).start()
+        started = time.monotonic()
+        argv = ["/bin/sh", "-c", script.format(n=length)]
+        assert run({"kind": "cmd", "argv": argv, "timeout": 30}, home=home, stop=stop) is None, script
+        assert time.monotonic() - started < 2, script
+        assert not _running(length), script
+
+
+def test_kill_live_ends_what_is_still_running_when_the_app_closes(home: Path) -> None:
+    length = _length()
+    done: list = []
+    worker = threading.Thread(
+        target=lambda: done.append(run({"kind": "cmd", "argv": ["/bin/sleep", length], "timeout": 30}, home=home)), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 5
+    while not _running(length):
+        assert time.monotonic() < deadline, "the command never started"
+        time.sleep(0.05)
+    assert runner.kill_live() == 1
+    assert not _running(length), "gone when kill_live returns"
+    worker.join(5)
+    assert not worker.is_alive() and done, "and the check that ran it comes back"
 
 
 def test_a_command_is_given_a_clean_environment_in_the_home_folder(home: Path) -> None:

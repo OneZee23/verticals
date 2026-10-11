@@ -131,11 +131,14 @@ class Timer:
         self._wake.set()
 
     def stop(self, timeout: float = 5.0) -> None:
-        """Ask the thread to end and wait for it. A running command is killed, a running lookup is given up on."""
+        """Ask the thread to end and wait for it. A running command's process group is killed and waited for before this
+        returns (the thread does it within a tenth of a second; `kill_live` is the net for a thread that is stuck), a
+        running lookup is given up on."""
         self._stop.set()
         self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout)
+        runner.kill_live()
 
     def _loop(self) -> None:
         delay = self._first

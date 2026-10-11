@@ -270,19 +270,18 @@ def test_a_pass_that_fails_does_not_end_the_timer(db_dsn: str) -> None:
     assert not timer.running
 
 
-def test_stopping_ends_a_command_that_is_running(db: psycopg.Connection, pool, home: Path) -> None:
+def test_stopping_ends_a_command_that_is_running_and_it_is_gone_when_stop_returns(db: psycopg.Connection, pool, home: Path) -> None:
     length = f"{20 + secrets.randbelow(9)}.{secrets.randbelow(10**6):06d}"
+    running = ["pgrep", "-f", f"sleep {length}"]
     doc = _add(db, "slow", {"kind": "cmd", "argv": ["/bin/sleep", length], "timeout": 30})
     source = core.find(db, owner=OWNER, ref=doc)
     core.approve(db, owner=OWNER, doc_id=doc, check_hash=source.check.hash, now=datetime.now(timezone.utc))
     timer = scheduler.Timer(pool, owner=OWNER, tick=3600.0, first_look=0.05)
     timer.start()
-    assert _wait(lambda: (row := core.find(db, owner=OWNER, ref=doc).row) is not None and row.leased_until is not None), "the pass has taken it"
-    time.sleep(0.3)
+    assert _wait(lambda: subprocess.run(running, capture_output=True).returncode == 0), "the pass has started the command"
     started = time.monotonic()
     timer.stop()
-    assert time.monotonic() - started < 2, "the timer does not wait for the command"
+    assert time.monotonic() - started < 2, "the timer does not wait for the command to finish"
+    assert subprocess.run(running, capture_output=True).returncode == 1, "and the command is gone, not going: no waiting afterwards"
     row = core.find(db, owner=OWNER, ref=doc).row
     assert row.checked_at is None and row.failures == 0, "a command cut short by the closing app is no failure"
-    time.sleep(0.3)
-    assert subprocess.run(["pgrep", "-f", f"sleep {length}"], capture_output=True).returncode == 1, "and the command is gone"

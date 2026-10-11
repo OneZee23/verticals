@@ -162,5 +162,9 @@ def test_stopping_the_api_ends_the_timer_and_a_command_it_is_running(f2_dsn: str
         proc.terminate()
         proc.wait(timeout=8)
         assert time.monotonic() - started < 6, "the API ends promptly, the timer with it"
-    time.sleep(0.3)
-    assert subprocess.run(running, capture_output=True).returncode == 1, "and the command with it"
+    # The lifespan kills the command's group and waits for it before it ends, so it is gone as the API is. The poll is for
+    # the machine, not for the app: a few seconds of slack for the process table, never a fixed pause.
+    deadline = time.monotonic() + 5
+    while subprocess.run(running, capture_output=True).returncode == 0:
+        assert time.monotonic() < deadline, "the command outlived the API"
+        time.sleep(0.05)
