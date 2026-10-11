@@ -1,6 +1,8 @@
 // The circle's moving mode and pick-up (docs/design-handoff S5.P3, S5.P4): while spans are open the field names the view
 // ("Weeks") above it; a goal let go over the field waits there beside it, out of its group, until you drag it to its place.
-// On an empty field Backspace picks the last thing and a second takes it off; Tab or a tap picks one too.
+// On an empty field Backspace picks the last thing and a second takes it off; Tab or a tap picks one too. A task carried
+// onto the field in the Inbox waits the same way, with no view's name: `park` and `unpark` are the one way in and out
+// (lib/inboxCarry.ts, docs/design/inbox-carry-stack.md).
 import { reactive, watchEffect } from 'vue'
 import { circle } from './circle'
 import { closeSpans, spanColumns, spans, VIEW_NAMES } from './spans'
@@ -19,10 +21,23 @@ watchEffect(() => {
   else if (circle.job === 'moving') circle.job = 'board'
 })
 
-/** The goal let go over the field waits there (S5.P3.037). */
+/** The goal let go over the field waits there (S5.P3.037), and the field takes the keys: Backspace, Tab, Esc and typing work
+ *  at once, with no click or letter first (docs/design/inbox-carry-stack.md). */
 export function park(id: string): void {
   moving.goalId = id
   moving.picked = null
+  takeTheKeys()
+}
+
+/** Where words are typed: the keys stay with a text field the person is typing in, the field's own included. */
+const TEXT_ENTRY = 'textarea, select, [contenteditable="true"], '
+  + 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
+
+/** The field's text area takes focus as ⌘K gives it, but opens no conversation (`SearchBar.vue`'s `focusField` would). */
+function takeTheKeys(): void {
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.closest(TEXT_ENTRY)) return
+  document.querySelector<HTMLTextAreaElement>('[data-cap="search-input"] textarea')?.focus({ preventScroll: true })
 }
 
 /** The goal leaves the field: back where it was, or into the hand again (S5.P4.008, S5.P3.018). */
