@@ -23,6 +23,10 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:  # the launcher puts this folder on the path; loading this file by its path does the same
+    sys.path.insert(0, str(HERE))
+import agent_sessions  # noqa: E402  (where a session lives, when it moved, how it opens: docs/design/task-sessions.md)
+
 SKILL = HERE.parents[1] / ".agents" / "skills" / "verticals-operator"
 MORNING_SKILL = HERE.parents[1] / ".agents" / "skills" / "verticals-morning-report"
 
@@ -94,6 +98,8 @@ def reads_only(tool):
     first = re.split(r"[-_]|(?<=[a-z])(?=[A-Z])", name)[0].lower()
     return first in READ_VERBS
 MAX_EVENTS = 5000
+WATCH_SECONDS = 2  # how often the files of the sessions of tasks are looked at (a stat each)
+MISSING_SECONDS = 20  # how long a session with no file is left alone before it is searched for again
 HANDOFF_CHARS = 12000
 # Parent-session variables must not leak into the agents (credentials excepted).
 ENV_KEEP = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK",
@@ -777,7 +783,7 @@ class Session:
 
 
 class Chat:
-    def __init__(self, state_dir: Path, mcp_url: str, token: str):
+    def __init__(self, state_dir: Path, mcp_url: str, token: str, watch_every: float | None = None):
         self.state_dir, self.mcp_url, self.token = state_dir, mcp_url, token
         self.log = open_log(state_dir)
         self.log.info("gateway start pid=%d", os.getpid())
@@ -785,6 +791,13 @@ class Chat:
         self.lock = threading.Lock()
         self.store_path = state_dir / "chat-sessions.json"
         self.models, self.probes = {}, {}
+        # What the sessions of tasks look like on disk (docs/design/task-sessions.md): where each file was found, its size and
+        # time at the last look, and the store as it was when its own file last changed.
+        self.files: dict[tuple, Path] = {}
+        self.missing: dict[tuple, float] = {}
+        self.moved: dict[str, tuple[int, float]] = {}
+        self._cached, self._stamp = {}, None
+        self.stopping = threading.Event()
         self.claude_mcp = state_dir / "chat-mcp.json"
         # Owner-only file: the MCP bearer token must not appear in `ps` output.
         self.claude_mcp.unlink(missing_ok=True)
@@ -795,6 +808,9 @@ class Chat:
         # The agents' working directory: empty, writable, outside the app bundle.
         self.workdir = state_dir / "chat-workspace"
         self.workdir.mkdir(exist_ok=True)
+        every = float(os.environ.get("VERTICALS_WATCH_SECONDS", WATCH_SECONDS)) if watch_every is None else watch_every
+        if every > 0:
+            threading.Thread(target=self._watch, args=(every,), daemon=True).start()
 
     # -- persistence: agent session ids and a short transcript per conversation
 
@@ -826,14 +842,173 @@ class Chat:
             del log[:-40]
             self.save(data)
 
+    def entries(self):
+        """The store as a dict, read again only when its file has changed: the watcher asks every few seconds."""
+        try:
+            stat = self.store_path.stat()
+        except OSError:
+            return {}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if stamp != self._stamp:
+            self._cached, self._stamp = self.load(), stamp
+        return self._cached
+
+    # -- sessions of tasks: where each lives, when it moved, whether it went on outside (docs/design/task-sessions.md)
+
+    def stat_of(self, provider, session_id):
+        """(size, modified time) of a session's file, which is all Verticals ever knows of it: nothing in it is read."""
+        key, now = (provider, session_id), time.time()
+        if now - self.missing.get(key, 0) < MISSING_SECONDS:
+            return None
+        path = agent_sessions.session_file(provider, session_id, self.files.get(key))
+        if path is None:
+            self.files.pop(key, None)
+            self.missing[key] = now  # a session that has no file (yet) is not searched for at every look
+            return None
+        self.files[key] = path
+        return agent_sessions.file_stat(path)
+
+    def conversation(self, key, entry, now):
+        """One session of a task as the app lists it: when it last moved is the later of its file's time and Verticals' own
+        last turn in it; it is working while Verticals drives it or while a file that went on outside is still being written."""
+        known = entry.get("provider") in AGENTS and entry.get("sessionId")
+        stat = self.moved.get(key) or (self.stat_of(entry["provider"], entry["sessionId"]) if known else None)
+        turn = entry.get("lastTurnAt") or 0
+        live = self.sessions.get(key)
+        outside = bool(entry.get("outside"))
+        return {"session": key, "provider": entry.get("provider"), "title": (entry.get("goal") or {}).get("title", ""),
+                "lastTurnAt": turn, "agentSession": entry.get("sessionId"), "cwd": entry.get("cwd"),
+                "movedAt": max(turn, stat[1] if stat else 0), "outside": outside,
+                "working": bool(live and live.running) or (outside and bool(stat) and now - stat[1] < agent_sessions.WORKING_SECONDS)}
+
     def goal_conversations(self, goal_id):
-        """A goal's conversations, the latest turn first: Discuss with agent continues the first (docs/design-handoff
-        S3.P1)."""
-        found = [{"session": id, "provider": entry.get("provider"), "title": (entry.get("goal") or {}).get("title", ""),
-                  "lastTurnAt": entry.get("lastTurnAt") or 0}
-                 for id, entry in self.load().items()
+        """A goal's sessions, the one that moved last first: Discuss with agent continues the first (docs/design-handoff S3.P1,
+        docs/design/task-sessions.md), and Open in lists them all."""
+        now = time.time()
+        found = [self.conversation(key, entry, now) for key, entry in self.entries().items()
                  if isinstance(entry, dict) and (entry.get("goal") or {}).get("id") == goal_id]
-        return sorted(found, key=lambda c: c["lastTurnAt"], reverse=True)
+        return sorted(found, key=lambda c: c["movedAt"], reverse=True)
+
+    def sessions_state(self):
+        """What the board needs of every task that has a session: its sessions, whether one works now, and the agent of the
+        newest session that went on outside, whose mark the card shows."""
+        now, goals = time.time(), {}
+        for key, entry in self.entries().items():
+            goal = entry.get("goal") if isinstance(entry, dict) else None
+            if isinstance(goal, dict) and goal.get("id") and entry.get("provider"):
+                goals.setdefault(goal["id"], []).append(self.conversation(key, entry, now))
+        out = {}
+        for goal_id, found in goals.items():
+            found.sort(key=lambda c: c["movedAt"], reverse=True)
+            outside = next((c for c in found if c["outside"]), None)
+            out[goal_id] = {"sessions": found, "working": any(c["working"] for c in found),
+                            "outside": {"provider": outside["provider"], "at": outside["movedAt"]} if outside else None}
+        return {"goals": out}
+
+    def look(self):
+        """One look at the files of the sessions that belong to a task: a stat each, no model, no token. A file that grew while
+        Verticals was not driving its session means the owner went on in Claude or Codex: the session is marked, and the card
+        and the row say so. What Verticals itself writes (a turn running, or just ended) is not that."""
+        now = time.time()
+        for key, entry in list(self.entries().items()):
+            goal = entry.get("goal") if isinstance(entry, dict) else None
+            if not (isinstance(goal, dict) and goal.get("id") and entry.get("sessionId") and entry.get("provider") in AGENTS):
+                continue
+            stat = self.stat_of(entry["provider"], entry["sessionId"])
+            if stat is None:
+                self.moved.pop(key, None)
+                continue
+            self.moved[key] = stat
+            now_seen, seen = {"size": stat[0], "mtime": stat[1]}, entry.get("seen") or {}
+            live = self.sessions.get(key)
+            driven = bool(live and live.running) or now - (entry.get("lastTurnAt") or 0) < agent_sessions.DRIVEN_GRACE
+            if driven or not seen or stat[0] < seen.get("size", 0):
+                # Its own writes, a first sight or a file that was replaced: this is the new reference.
+                if seen != now_seen:
+                    self.update(key, seen=now_seen)
+            elif stat[0] - seen["size"] >= agent_sessions.MIN_GROWTH:
+                self.update(key, seen=now_seen, outside=True)
+                self.log.info("outside provider=%s session=%s", entry["provider"], str(key)[:8])
+
+    def _watch(self, every):
+        while not self.stopping.wait(every):
+            try:
+                self.look()
+            except Exception as e:  # noqa: BLE001 - one bad file must not stop the watch
+                self.log.warning("look_failed %s", clip(e))
+
+    def link_session(self, goal, provider, session=None, cwd=None):
+        """A session begun in Claude or Codex, tied to a task by the agent that is in it (the link tool,
+        verticals/mcp/session.py). Claude Code is never told its own id, so it gives the folder it works in and the session is
+        the one written to in the last minute there. A session already tied to a task keeps it, as a conversation that made a
+        goal does (bind_goal)."""
+        if not isinstance(goal, dict) or not agent_sessions.GOAL_ID.fullmatch(str(goal.get("id") or "")):
+            raise ChatError("Not a task of Verticals")
+        if provider not in AGENTS:
+            raise ChatError("Not an agent Verticals knows: claude or codex")
+        cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) and len(cwd) < 2000 else None
+        if not session:
+            if provider != "claude":
+                raise ChatError("Codex: give your thread id, the CODEX_THREAD_ID of your shell")
+            if not cwd:
+                raise ChatError("Claude Code: give the folder you work in as cwd, or your session id")
+            found = agent_sessions.active_claude_sessions(cwd, time.time())
+            if len(found) != 1:
+                raise ChatError(("%d Claude sessions were written to in that folder in the last minute" % len(found)
+                                 if found else "No Claude session was written to in that folder in the last minute")
+                                + ": give your session id")
+            session = found[0]
+        if not agent_sessions.is_session_id(session):
+            raise ChatError("The session id is not an id")
+        self.missing.pop((provider, session), None)
+        stat = self.stat_of(provider, session)
+        with self.lock:
+            data = self.load()
+            key = next((k for k, e in data.items() if isinstance(e, dict) and e.get("sessionId") == session), None)
+            entry = data.setdefault(key or session, {})
+            if not entry.get("goal"):
+                entry["goal"] = {"id": goal["id"], "title": str(goal.get("title") or "")[:300]}
+            entry.setdefault("provider", provider)
+            entry["sessionId"] = session
+            if cwd and not entry.get("cwd"):
+                entry["cwd"] = cwd
+            if key is None:
+                entry["external"] = True
+            if stat and not entry.get("seen"):
+                entry["seen"] = {"size": stat[0], "mtime": stat[1]}
+            self.save(data)
+            kept = dict(entry["goal"])
+        self.log.info("session_linked provider=%s known=%s", entry["provider"], key is not None)
+        return {"session": key or session, "provider": entry["provider"], "goal": kept, "same": kept["id"] == goal["id"]}
+
+    def open_session(self, key):
+        """Open a session where it lives (docs/design/task-sessions.md): a Codex thread by its link, a Claude session in Terminal
+        with `claude --resume <id>` from its folder, by a script of the app's own that Terminal runs."""
+        entry = self.entries().get(key)
+        if not isinstance(entry, dict) or not entry.get("sessionId") or entry.get("provider") not in AGENTS:
+            raise ChatError("No such session")
+        action = agent_sessions.open_action(entry["provider"], entry["sessionId"], entry.get("cwd"))
+        opener = shutil.which("open", path=child_env()["PATH"])
+        if not opener:
+            raise ChatError("This computer has no way to open it")
+        if action["kind"] == "terminal":
+            folder = self.state_dir / "open"
+            folder.mkdir(mode=0o700, exist_ok=True)
+            script = folder / f"claude-{entry['sessionId']}.command"
+            script.write_text(agent_sessions.terminal_script(action, which("claude")))
+            script.chmod(0o700)
+            argv = [opener, "-a", "Terminal", str(script)]
+        else:
+            argv = [opener, action["url"]]
+        try:
+            done = subprocess.run(argv, cwd=self.workdir, env=child_env(), capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise ChatError(f"Could not open it: {clip(e)}") from e
+        self.log.info("open provider=%s kind=%s code=%d session=%s", entry["provider"], action["kind"], done.returncode, str(key)[:8])
+        if done.returncode:
+            app = "Terminal" if action["kind"] == "terminal" else AGENTS[entry["provider"]]["label"]
+            raise ChatError(f"{app} did not open it" + (f": {clip(done.stderr)}" if done.stderr.strip() else ""))
+        return {"kind": action["kind"]}
 
     def bind_goal(self, s, goal_id, title):
         """A conversation about no goal that makes one becomes that goal's conversation (docs/design/agent-chips.md): Discuss
@@ -1056,6 +1231,7 @@ class Chat:
             s.agent.close()
 
     def shutdown(self):
+        self.stopping.set()
         for s in list(self.sessions.values()):
             if s.agent:
                 s.agent.close()

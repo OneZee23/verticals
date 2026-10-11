@@ -311,6 +311,8 @@ def make_gateway(token, chat):
             if self.command == "GET" and path == "/__chat/goal":
                 goal = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                 return self.send_json({"conversations": chat.goal_conversations(goal)})
+            if self.command == "GET" and path == "/__chat/sessions":
+                return self.send_json(chat.sessions_state())
             if self.command == "GET" and path == "/__chat/probe":
                 try:
                     return self.send_json(chat.probe(parse_qs(urlparse(self.path).query).get("provider", [""])[0]))
@@ -330,6 +332,12 @@ def make_gateway(token, chat):
                     chat.stop(body.get("session"))
                 elif action == "reset":
                     chat.reset(body.get("session"))
+                elif action == "link":
+                    # The link tool of Verticals' MCP server ties a session begun in Claude or Codex to a task (verticals/mcp/session.py).
+                    return self.send_json({"ok": True, **chat.link_session(body.get("goal"), body.get("provider"),
+                                                                           body.get("session"), body.get("cwd"))})
+                elif action == "open":
+                    return self.send_json({"ok": True, **chat.open_session(body.get("session"))})
                 else:
                     return self.deny(404, "not found")
             except (ChatError, ValueError) as e:

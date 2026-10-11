@@ -71,16 +71,19 @@ def session_file(provider: str, session_id: object, known: Path | None = None) -
     return max(found, default=(0.0, None))[1]
 
 
-def moved(provider: str, session_id: object, known: Path | None = None) -> tuple[int, float] | None:
-    """(size in bytes, modified time in seconds) of a session's file, or None when there is no such file. That is all of it."""
-    path = session_file(provider, session_id, known)
-    if path is None:
-        return None
+def file_stat(path: Path) -> tuple[int, float] | None:
+    """(size in bytes, modified time in seconds) of a file, or None when it is gone. That is all of a session Verticals knows."""
     try:
         stat = path.stat()
     except OSError:
         return None
     return stat.st_size, stat.st_mtime
+
+
+def moved(provider: str, session_id: object, known: Path | None = None) -> tuple[int, float] | None:
+    """The `file_stat` of a session's file, or None when there is no such file."""
+    path = session_file(provider, session_id, known)
+    return None if path is None else file_stat(path)
 
 
 def claude_folder(cwd: str) -> str:
