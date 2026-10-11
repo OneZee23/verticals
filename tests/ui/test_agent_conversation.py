@@ -335,11 +335,12 @@ def test_the_next_morning_moves_the_one_task_to_its_day_instead_of_making_anothe
 
 
 @pytest.mark.parametrize("report_day, finishes", [("2026-08-07", False), ("2026-08-08", True)])
-def test_ready_on_a_morning_report_finishes_the_task_only_for_the_day_it_stands_in(
+def test_check_again_on_a_morning_report_finishes_the_task_only_for_the_day_it_stands_in(
     ui_agent: UiSession, report_day: str, finishes: bool,
 ) -> None:
-    """Fix 2: the one task is linked to every morning's report, so "Ready?" on an earlier report leaves it open and on the
-    report of the day the task stands in (the pinned 2026-08-08) it is done."""
+    """Fix 2: the one task is linked to every morning's report, so Check again on an earlier report leaves it open and on the
+    report of the day the task stands in (the pinned 2026-08-08) it is done. (This was "Ready?" before PR #45 put Check
+    again in its place; the rule moved with it into `lib/checkAgain.ts`.)"""
     path = f"reports/morning/{report_day}.md"
     with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
         task = goals.create(conn, owner=F2_OWNER, title="Morning report", vertical="day",
@@ -353,9 +354,8 @@ def test_ready_on_a_morning_report_finishes_the_task_only_for_the_day_it_stands_
     page.locator(f'{BALLOON}[data-who="agent"] a', has_text="the report").click()
     expect(page.locator('.vt-window[data-window="doc"]')).to_have_count(1)
     page.evaluate("id => window.dispatchEvent(new CustomEvent('verticals:doc-edited', { detail: { id } }))", doc)
-    expect(page.locator(CIRCLE)).to_have_attribute("data-state", "go")
-    page.locator(".circle-field__shape").click()
-    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Done: Ready.", timeout=15000)
+    page.locator('[data-role="doc-check-again"]').click()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Changed the words you commented on", timeout=15000)
 
     def done() -> bool:
         with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:

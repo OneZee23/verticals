@@ -5,7 +5,10 @@ permission for one of the writes in ASKS, shaped as the real tool is called, `[m
 by calling `create` and gets the words Verticals' server answers it with, `[slow]` works for a second and a half,
 `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers with the words after it, and
 `[context]` with the app context Verticals sent. Each start appends the arguments it was given to `argv.log` in its
-folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions)."""
+folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions). A message
+that opens with "Check again" (a document's comments and edits handed over, web/src/lib/checkAgain.ts) works for a
+second and a half, which is the time a test has to rewrite the document as the real agent would, then answers in two
+lines."""
 import json
 import re
 import sys
@@ -22,6 +25,8 @@ def read():
     return json.loads(line) if line.strip() else None
 
 
+CHECKED = "Check again"
+
 # `[ask:NAME]`: a write the agent asks permission for. SYNDAY01 is "Draft the outline", a goal of 8 Aug 2026 in F2.
 ASKS = {
     "schedule": ("schedule", {"id": "SYNDAY01", "vertical": "day", "anchor_date": "2026-08-10"}),
@@ -35,6 +40,8 @@ ASKS = {
 
 
 def answer_for(words):
+    if words.startswith(CHECKED):
+        return "Changed the words you commented on.\nLeft the rest as it was."
     if "[say]" in words:
         return words.split("[say]", 1)[1].strip()
     if "[long]" in words:
@@ -91,7 +98,7 @@ for msg in iter(read, None):
         # What the server's `create` tool says (verticals/mcp/tools.py), which tests/mcp pins.
         out({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": f"make-{goal}", "content": [{"type": "text", "text": f"Created {title!r} [{goal}]"}]}]}})
-    if "[slow]" in words:
+    if "[slow]" in words or words.startswith(CHECKED):
         time.sleep(1.5)
     if "[fail]" in words:
         out({"type": "result", "is_error": True, "result": "The fake agent failed on purpose."})

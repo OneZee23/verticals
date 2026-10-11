@@ -13,11 +13,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { KChip } from '@konstantinopolskii/vue'
 import AppIcon from './AppIcon.vue'
+import DocCommentCard from './DocCommentCard.vue'
 import { store } from '../store'
 import { openWindow } from '../lib/windows'
 import type { DocDetail as DocDetailWire } from '../lib/api'
 import { internalLinkOf, renderBodyElement, serializeBodyElement, type InternalLink } from '../lib/bodyMarkdown'
 import { useCommentAnchoring } from '../lib/commentAnchoring'
+import { clearRewritten, lightRewritten, rewritten } from '../lib/docChanges'
 import { onBeforeQuit } from '../lib/beforeQuit'
 import {
   handleBodyBeforeInput,
@@ -33,6 +35,7 @@ import {
 const props = defineProps<{ doc: DocDetailWire; inWindow?: boolean }>()
 
 const revision = ref(props.doc.revision)
+const rootEl = ref<HTMLElement | null>(null)
 
 // --- body: click-to-edit contenteditable, debounced save (mirrors GoalDetail.vue's body) -------
 
@@ -41,15 +44,25 @@ const bodyEl = ref<HTMLElement | null>(null)
 const editingBody = ref(false)
 let bodySaveTimer: number | null = null
 let bodySaveDraft: string | null = null
+/** The save on its way to the API, if any: "Check again" waits for it (lib/checkAgain.ts, `flushPending`). */
+let bodySaving: Promise<void> | null = null
 
 // docs/COMMENTS_SPEC.md WP-B — `DocsView.vue` mounts this component fresh per doc (`:key="doc.id"`,
 // this file's own header comment), so `targetId` can just read `props.doc.id` directly; no reuse-
-// across-switches case the way GoalDetail.vue's inline host has.
+// across-switches case the way GoalDetail.vue's inline host has. A document's comments stand on their words and open
+// over them (`inline`; docs/design/doc-comments-inline.md): DocCommentCard.vue.
 const anchoring = useCommentAnchoring({
   bodyEl,
   editing: editingBody,
   targetType: 'doc',
   targetId: () => props.doc.id,
+  inline: true,
+})
+
+/** A comment is open on its words, or being written on them. */
+const cardOpen = computed(() => {
+  const c = store.state.comments
+  return c.targetType === 'doc' && c.targetId === props.doc.id && (c.cardId !== null || c.pendingAnchor !== null)
 })
 
 function paintBody(): void {
@@ -57,21 +70,34 @@ function paintBody(): void {
     if (bodyEl.value && !editingBody.value) {
       renderBodyElement(bodyEl.value, props.doc.body)
       anchoring.paintHighlights()
+      // What an agent rewrote is lit until you write in the document (lib/checkAgain.ts, lib/docChanges.ts).
+      const lit = rewritten[props.doc.id]
+      if (lit) lightRewritten(bodyEl.value, lit.before)
     }
   })
 }
 paintBody()
+// A new look at the document by the agent starts clean: its earlier light goes out as the next one is made.
+watch(() => rewritten[props.doc.id], (now, was) => { if (!now && was && bodyEl.value) clearRewritten(bodyEl.value) })
 
 async function flushBodySave(): Promise<void> {
   if (bodySaveTimer !== null) {
     window.clearTimeout(bodySaveTimer)
     bodySaveTimer = null
   }
-  if (bodySaveDraft === null) return
+  if (bodySaveDraft === null) {
+    await bodySaving
+    return
+  }
   const body = bodySaveDraft
   bodySaveDraft = null
-  const fresh = await store.saveDoc(props.doc.id, revision.value, { body })
-  if (fresh) revision.value = fresh.revision
+  const saving = (async () => {
+    const fresh = await store.saveDoc(props.doc.id, revision.value, { body })
+    if (fresh) revision.value = fresh.revision
+  })()
+  bodySaving = saving
+  await saving
+  if (bodySaving === saving) bodySaving = null
 }
 
 function queueBodySave(body: string): void {
@@ -83,6 +109,10 @@ function queueBodySave(body: string): void {
 function startBodyEdit(): void {
   editingBody.value = true
   anchoring.clearForEdit()
+  // Writing puts the light out, and a comment open on words that are about to be written over closes.
+  if (bodyEl.value) clearRewritten(bodyEl.value)
+  delete rewritten[props.doc.id]
+  store.closeCard()
   void nextTick(() => {
     if (!bodyEl.value) return
     resetBodyHistory(bodyEl.value)
@@ -128,7 +158,14 @@ onBeforeUnmount(() => void flushBodySave())
 // comment — a fresh mount per doc, never reused across a doc switch), so load-on-mount/close-on-
 // unmount is the whole story; no id-change watcher the way GoalDetail.vue's reused host needs.
 onMounted(() => void store.loadCommentsFor('doc', props.doc.id))
-onBeforeUnmount(() => store.closeCommentsPanel())
+onBeforeUnmount(() => {
+  store.closeCommentsPanel()
+  delete rewritten[props.doc.id]
+})
+
+// An agent's rewrite (Check again, lib/checkAgain.ts) arrives as a newer copy of the document: the next save builds on it,
+// unless words of yours are still waiting out their debounce.
+watch(() => props.doc.revision, (next) => { if (bodySaveDraft === null && next > revision.value) revision.value = next })
 
 // --- title: click-to-edit-in-place, commit on blur/Enter, cancel on Escape ----------------------
 
@@ -188,18 +225,6 @@ function onDelete(): void {
   void store.deleteCurrentDoc()
 }
 
-// --- comments: header icon + badge, same affordance shape as GoalDetailEditor.vue's own ----------
-
-const commentCount = computed(() => store.unresolvedCommentCount('doc', props.doc.id))
-const commentsOpenHere = computed(() => {
-  const c = store.state.comments
-  return c.open && c.targetType === 'doc' && c.targetId === props.doc.id
-})
-function onToggleComments(): void {
-  if (commentsOpenHere.value) store.closeCommentsPanel()
-  else store.openCommentsPanel('doc', props.doc.id)
-}
-
 function onLinkedGoalClick(goalId: string, event?: MouseEvent): void {
   if (props.inWindow) {
     const title = props.doc.linked_goals.find((g) => g.goal_id === goalId)?.title ?? 'Goal'
@@ -225,7 +250,7 @@ watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) p
 </script>
 
 <template>
-  <div class="doc-detail" data-role="doc-detail">
+  <div ref="rootEl" class="doc-detail" data-role="doc-detail">
     <div v-if="!inWindow" class="doc-detail__header">
       <div
         v-if="!editingPath"
@@ -246,17 +271,6 @@ watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) p
         @blur="commitPath"
       >
       <div class="doc-detail__actions">
-        <!-- docs/COMMENTS_SPEC.md WP-B: "same affordance in DocDetail.vue's header." -->
-        <button
-          type="button"
-          class="doc-detail__action doc-detail__comments-trigger"
-          data-cap="open-comments"
-          :aria-expanded="commentsOpenHere"
-          @click="onToggleComments"
-        >
-          <AppIcon name="comment" :size="16" /> Comments
-          <span v-if="commentCount > 0" class="doc-detail__comments-badge" data-role="comments-badge">{{ commentCount }}</span>
-        </button>
         <button type="button" class="doc-detail__action" data-role="doc-history-trigger" @click="store.loadHistory()">
           <AppIcon name="history" :size="16" /> History
         </button>
@@ -314,6 +328,8 @@ watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) p
       @mousedown="anchoring.onBodyMouseDown"
       @mouseup="anchoring.onBodyMouseUp"
     ></div>
+    <!-- A comment on its words, or the field to write one in, stands under them (docs/design/doc-comments-inline.md). -->
+    <DocCommentCard v-if="cardOpen && rootEl && bodyEl" :host="rootEl" :body="bodyEl" :paints="anchoring.paints.value" />
     <!-- docs/COMMENTS_SPEC.md WP-B: selecting body text offers this (GoalDetail.vue's own
          `.goal-detail__comment-selection` — same class, same fixed-position shape, declared once
          in goalDetail.css since the coordinates and styling are identical regardless of which
@@ -341,6 +357,8 @@ watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) p
 
 <style>
 .doc-detail {
+  /* The comment's card is placed in it, so it goes by with the text (DocCommentCard.vue). */
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -395,20 +413,6 @@ watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) p
   cursor: pointer;
 }
 .doc-detail__action:hover { background: var(--color-surface-overlay); color: var(--color-text); }
-.doc-detail__comments-trigger { position: relative; }
-.doc-detail__comments-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: var(--radius-full, 9999px);
-  background: var(--color-text);
-  color: var(--color-bg);
-  font-size: 10px;
-  line-height: 14px;
-}
 .doc-detail__title.doc-detail__title {
   margin: 0;
   padding: 0;
@@ -433,4 +437,24 @@ watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) p
   padding-top: var(--space-2);
   border-top: 0.5px solid var(--color-border-strong);
 }
+
+/* Comments on their words (docs/design/doc-comments-inline.md). An open comment's words are tinted in the colour the pill
+   above the field wears for them; while its card is open they are tinted more. A resolved comment keeps its mark, so the
+   list can still go to its words, but they read as plain text. */
+.doc-detail__body mark.comment-highlight[data-resolved] { background: transparent; cursor: inherit; }
+.doc-detail__body mark.comment-highlight.is-active { background: color-mix(in srgb, var(--color-goal-yellow, #ecce32) 55%, transparent); }
+.doc-detail__body mark.comment-highlight[data-resolved].is-active { background: color-mix(in srgb, var(--color-goal-yellow, #ecce32) 30%, transparent); }
+/* What an agent rewrote: the colour of a goal's green, as the comments' is its yellow. It comes in over a moment, so the
+   change is seen, and stays until you write in the document. */
+.doc-detail__body mark.doc-rewritten {
+  background: color-mix(in srgb, var(--color-goal-green, #92ce14) 32%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  animation: doc-rewritten-in var(--vt-dur-board) var(--vt-ease-large) backwards;
+}
+@keyframes doc-rewritten-in { from { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .doc-detail__body mark.doc-rewritten { animation: none; } }
+/* In a window the text scrolls in the window's body, so the card goes by with the text and past the end of the document's
+   box (DocWindowBody.vue). */
+.doc-window .doc-detail { overflow: visible; }
 </style>

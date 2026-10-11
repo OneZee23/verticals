@@ -9,13 +9,23 @@
  *  way there would be if `lib/comments.ts` imported this back. */
 import { computed, ref, watch, type Ref } from 'vue'
 import { store } from '../store'
-import { applyAnchorHighlights, captureSelectionAnchor, clearHighlights, type AnchorContext } from './commentAnchor'
+import {
+  applyAnchorHighlights, captureSelectionAnchor, clearHighlights, type AnchoredThread, type AnchorContext,
+} from './commentAnchor'
 import type { CommentTargetType } from './comments'
+
+/** The words being commented, marked while the comment is written (`store.state.comments.pendingAnchor`); a thread's id
+ *  is never this. */
+export const DRAFT_ID = 'draft'
 
 export interface CommentAnchoringOptions {
   bodyEl: Ref<HTMLElement | null>
   editing: Ref<boolean>
   targetType: CommentTargetType
+  /** A document's comments stand on their words and open over them (docs/design/doc-comments-inline.md): a selection
+   *  opens the field to write in under it, a press on marked words opens their comment there, and a resolved comment's
+   *  words are plain text again. A goal's comments open the docked panel. */
+  inline?: boolean
   /** A getter, not a plain id — `GoalDetail.vue` keeps ONE instance across goal switches (the
    *  inline-detail host is reused per D226/D248), so the target id changes under this composable's
    *  feet; a getter reads the current one on every call instead of closing over a stale id. */
@@ -25,6 +35,8 @@ export interface CommentAnchoringOptions {
 export function useCommentAnchoring(opts: CommentAnchoringOptions) {
   const pendingSelection = ref<AnchorContext | null>(null)
   const selectionButtonPos = ref<{ x: number; y: number }>({ x: 0, y: 0 })
+  /** Counts the marks painted, so what stands on the words (the comment's card) knows when they were drawn again. */
+  const paints = ref(0)
 
   /** This target's own anchored threads, in the `{id, quote, prefix, suffix}` shape
    *  `applyAnchorHighlights` wants. Empty (not stale data from a previous target) whenever
@@ -33,9 +45,15 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
   const anchoredThreads = computed(() => {
     const c = store.state.comments
     if (c.targetType !== opts.targetType || c.targetId !== opts.targetId()) return []
-    return c.threads
+    const marks: AnchoredThread[] = c.threads
       .filter((t) => t.anchor !== null)
-      .map((t) => ({ id: t.id, quote: t.anchor!.quote, prefix: t.anchor!.prefix, suffix: t.anchor!.suffix }))
+      .map((t) => ({
+        id: t.id, quote: t.anchor!.quote, prefix: t.anchor!.prefix, suffix: t.anchor!.suffix,
+        ...(opts.inline ? { resolved: t.resolved_at !== null } : {}),
+      }))
+    // The words a comment is being written on stay marked while its field is open.
+    if (opts.inline && c.pendingAnchor) marks.push({ id: DRAFT_ID, ...c.pendingAnchor })
+    return marks
   })
 
   /** Called after every markdown (re)render, read-mode only — `bodyMarkdown.ts::renderBodyElement`
@@ -46,6 +64,7 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     const el = opts.bodyEl.value
     if (!el || opts.editing.value) return
     applyAnchorHighlights(el, anchoredThreads.value)
+    paints.value += 1
   }
 
   // A threads change with NO body re-render in between (a reply landed, a resolve toggled) still
@@ -101,6 +120,10 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     if (!id || !anchor) return
     window.getSelection()?.removeAllRanges()
     pendingSelection.value = null
+    if (opts.inline) {
+      store.openComposer(id, anchor)
+      return
+    }
     // `openCommentsPanel` BEFORE `stageAnchor`, not after: `openCommentsPanel` -> `loadCommentsFor`
     // resets `state.comments.pendingAnchor` to null the moment it (re)establishes the current
     // target (`lib/comments.ts::loadCommentsFor`'s own "switching target" branch) — which fires
@@ -127,6 +150,13 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     const threadId = mark.getAttribute('data-thread-id')
     const id = opts.targetId()
     if (!threadId || !id) return false
+    if (opts.inline) {
+      // A resolved comment's words are plain text: a press on them is the press it would be anywhere else in the text.
+      if (mark.hasAttribute('data-resolved')) return false
+      event.preventDefault()
+      if (threadId !== DRAFT_ID) store.toggleCard(threadId)
+      return true
+    }
     event.preventDefault()
     store.openCommentsPanel(opts.targetType, id, threadId)
     return true
@@ -136,6 +166,7 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     pendingSelection,
     selectionButtonPos,
     anchoredThreads,
+    paints,
     paintHighlights,
     clearForEdit,
     onBodyMouseDown,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The windows over the board (docs/design-handoff S3.P2, S3.P3): one in the centre, 720 px, 32 px from the top; the
+// The windows over the board (docs/design-handoff S3.P2, S3.P3): one in the centre, 720 px; a goal or a page a card 32 px
+// from the top, a document full height, half a pixel from the top and the bottom (docs/design/doc-full-height.md); the
 // others at the sides, 200 px of each in view, stepped back to 94%, softer and lit less; beyond the neighbours they wait
 // off the screen in the order they opened. Under the conversation the centre one steps back and blurs down its height.
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -91,26 +92,15 @@ function onWheel(event: WheelEvent): void {
   swiped = -Math.sign(swiped) * 1000
 }
 
-/* A document's head (round 2, frame f2b): its facts, then its versions and its open comments, each opening its own
-   place: history in Documents, the comments' sidebar. */
-type HeadPart = { text: string; act?: 'versions' | 'comments' }
+/* A document's head (round 2, frame f2b): its facts, then its versions, which open history in Documents. Its open comments
+   are counted above the field, once (DocCheck.vue, docs/design/doc-comments-inline.md). */
+type HeadPart = { text: string; act?: 'versions' }
 function headParts(win: VtWindow): HeadPart[] {
   const parts: HeadPart[] = (win.facts ?? []).map((text) => ({ text }))
   if ((win.versions ?? 0) > 1) parts.push({ text: `${win.versions} versions`, act: 'versions' })
-  const comments = store.unresolvedCommentCount('doc', win.target)
-  if (comments > 0) parts.push({ text: `${comments} ${comments === 1 ? 'comment' : 'comments'}`, act: 'comments' })
   return parts
 }
-function commentsOpenFor(win: VtWindow): boolean {
-  const c = store.state.comments
-  return c.open && c.targetType === 'doc' && c.targetId === win.target
-}
-function onHeadAct(win: VtWindow, act: 'versions' | 'comments'): void {
-  if (act === 'comments') {
-    if (commentsOpenFor(win)) store.closeCommentsPanel()
-    else store.openCommentsPanel('doc', win.target)
-    return
-  }
+function onHeadAct(win: VtWindow): void {
   closeWindow(win.key)
   void store.openHistoryOf(win.target)
 }
@@ -143,6 +133,7 @@ function onWindowClick(index: number, event: MouseEvent): void {
           'vt-shadow--back': index === windows.front && agentChat.open,
           'vt-window--front': index === windows.front,
           'vt-window--side': index !== windows.front,
+          'vt-window--full': win.kind === 'doc',
         }"
         :data-window="win.kind"
         :data-key="win.key"
@@ -166,8 +157,7 @@ function onWindowClick(index: number, event: MouseEvent): void {
               <template v-for="(part, i) in headParts(win)" :key="i">
                 <span v-if="i" class="vt-window__sep">·</span>
                 <button v-if="part.act" type="button" class="vt-window__act" :data-role="`doc-${part.act}`"
-                  :aria-expanded="part.act === 'comments' ? commentsOpenFor(win) : undefined"
-                  @click.stop="onHeadAct(win, part.act)">{{ part.text }}</button>
+                  @click.stop="onHeadAct(win)">{{ part.text }}</button>
                 <template v-else>{{ part.text }}</template>
               </template>
             </p>
@@ -210,6 +200,35 @@ function onWindowClick(index: number, event: MouseEvent): void {
   will-change: transform;
 }
 .vt-window.vt-shadow--lit { background: rgb(var(--vt-pale)); }
+/* A document stands full height (docs/design/doc-full-height.md): half a pixel from the top and the bottom, one device
+   pixel on a Retina screen and the room the window's hairline ring needs. Its width and its 24 px corners are any
+   window's. A goal or a page stays a card that hugs what it holds: a sheet is a document, a card is a goal. */
+.vt-window--full {
+  --vt-foot-ramp: 48px;
+  --vt-foot-solid: calc(24px + var(--vt-field-height, 84px) + 12px + var(--vt-tags-lift, 0px));
+  --vt-foot: calc(24px + 84px + 12px + var(--vt-foot-ramp));
+  top: .5px;
+  bottom: .5px;
+  max-height: none;
+}
+.vt-window--full .vt-window__body { flex: 1 1 auto; scroll-padding-bottom: var(--vt-foot); }
+/* The page is its writing area: what a short text leaves of the sheet belongs to the document's body (DocWindowBody.vue),
+   down to the room the field keeps under it, so a press anywhere on the page writes at the end of the text. The scroller
+   and the picture around the text (ProgressiveBlur.vue) hand the room down; none of them may shrink under a long text. */
+.vt-window--full .vt-window__body, .vt-window--full .pblur, .vt-window--full .pblur__live { display: flex; flex-direction: column; }
+.vt-window--full .pblur, .vt-window--full .pblur__live { flex: 1 0 auto; }
+/* The field stands over the foot on a white fade. It is solid as high as the conversation keeps clear of the field
+   (AgentConversation.vue: 24 px under the circle, its height, 12 px over it, and the tags' lift while they are in), then
+   48 px of ramp. The end of a text rests above the fade as it is at rest (--vt-foot, DocWindowBody.vue). The fade lets
+   the pointer through to the text under it. */
+.vt-window--full::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--vt-foot-solid) + var(--vt-foot-ramp));
+  background: linear-gradient(to top, #fff var(--vt-foot-solid), rgb(255 255 255 / 0));
+  pointer-events: none;
+}
 .vt-window--front.vt-shadow--back { transition-duration: var(--vt-dur-step); }
 .vt-window--side { cursor: pointer; }
 .vt-window--side .vt-window__button, .vt-window--side .goal-card-tools { visibility: hidden; }
@@ -218,8 +237,11 @@ function onWindowClick(index: number, event: MouseEvent): void {
 .vt-window__name { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: #000; font: 600 14px/20px var(--font-body);
   text-overflow: ellipsis; white-space: nowrap; }
 /* A document's head, from the frame (round 5's `.dw-bar`): 52 px, the page icon, the facts at 13/20 in grey with its
-   actions in black, the title at 14 px once it has scrolled up, a hairline under it then. */
-.vt-window__head--doc { flex: none; height: 52px; min-height: 0; padding: 0 12px 0 24px; gap: 0; transition: box-shadow var(--vt-dur-fade) linear; }
+   actions in black, the title at 14 px once it has scrolled up, a hairline under it then. The window reaches the top
+   edge, where the desktop app's transparent title bar takes a press for the window itself (Verticals.swift,
+   WebView.mouseDown), so the row stands under the bar by --titlebar-height, as a card's does by its 32 px. */
+.vt-window__head--doc { flex: none; height: calc(52px + var(--titlebar-height)); min-height: 0; padding: var(--titlebar-height) 12px 0 24px; gap: 0;
+  transition: box-shadow var(--vt-dur-fade) linear; }
 .vt-window__head--doc.is-titled { box-shadow: 0 1px 0 rgb(45 48 54 / 10%); }
 .vt-window__icon { flex: none; margin-right: 8px; color: rgb(0 0 0 / 38%); }
 .vt-window__facts { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: rgb(0 0 0 / 50%); font: 400 13px/20px var(--font-body);
