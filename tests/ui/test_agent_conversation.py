@@ -10,6 +10,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 import psycopg
@@ -17,9 +18,12 @@ import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from verticals.core import docs as core_docs
+from verticals.core import goals
+from verticals.core import morning as core_morning
 
 from tests.ui.conftest import (
-    F2_OWNER, REPO_ROOT, TEST_TOKEN, Server, UiSession, _backend, _free_port, _make_ui_session, _shutdown, _wait_http_ok,
+    F2_OWNER, PINNED_CLOCK_ISO, PINNED_DAY, REPO_ROOT, TEST_TOKEN, VIEWPORT, Server, UiSession, _backend, _free_port,
+    _make_ui_session, _shutdown, _wait_http_ok,
 )
 from tests.ui.views import FIELD
 
@@ -48,7 +52,10 @@ def ui_agent(
     browser: Browser, f2_dsn: str, tmp_path: Path, request: pytest.FixtureRequest, web_dist: None,
     ui_reduced_motion: str,
 ) -> Iterator[UiSession]:
-    """F2 served by the desktop gateway, with the conversation's server and a fake agent (docs/design-handoff S2)."""
+    """F2 served by the desktop gateway, with the conversation's server and a fake agent (docs/design-handoff S2). The
+    pinned day's morning report is taken already, as if asked for: a scenario about something else gets no extra turn."""
+    with psycopg.connect(f2_dsn, autocommit=True) as conn:
+        core_morning.take(conn, owner=F2_OWNER, day=date.fromisoformat(PINNED_DAY))
     with _backend(f2_dsn, F2_OWNER, tmp_path) as backend:
         with _agent_gateway(backend, tmp_path) as base_url:
             yield from _make_ui_session(
@@ -140,23 +147,147 @@ def test_an_answer_that_links_a_document_stands_in_the_field_as_its_page(ui_agen
     expect(chip).to_contain_text("SYN report — 8 August 2026")
 
 
-def test_the_morning_report_is_asked_once_its_hour_has_come(ui_agent: UiSession) -> None:
-    """Inbox and Documents redesign, final page: past the morning hour (the pinned clock says 09:00) the app asks the agent
-    for the day's report by itself, once a day. The ask is not your balloon; the answer lands in the field."""
+def test_the_morning_report_is_asked_once_a_day_by_the_server(ui_agent: UiSession) -> None:
+    """Inbox and Documents redesign, final page; the agent's fixes, fix 3: past the morning hour (the pinned clock says
+    09:00) the app asks the agent for the day's report by itself, once a day, and the server decides which ask is the
+    day's: a cleared cache or another browser is told the day is taken. The ask is not your balloon; the answer lands in
+    the field."""
     page = ui_agent.page
     page.wait_for_selector(".goal-card__row")
-    page.evaluate("() => { sessionStorage.setItem('vt-morning-test', 'on'); localStorage.clear() }")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        conn.execute("DELETE FROM idempotency WHERE owner = %s AND client_token LIKE 'morning:%%'", (F2_OWNER,))  # the day is open again
     page.reload()
     expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report for 2026-08-08", timeout=15000)
-    assert page.evaluate("() => !!localStorage.getItem('vt-morning:2026-08-08')")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        taken = [row[0] for row in conn.execute("SELECT client_token FROM idempotency WHERE owner = %s", (F2_OWNER,))]
+        assert taken == [f"morning:{PINNED_DAY}"]
+        # Fix 2: the ask names the one open task, made in the day before the agent was asked.
+        task = _morning_tasks(conn)
+        assert [(row[1], str(row[2]), row[3]) for row in task] == [("day", PINNED_DAY, "app")]
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text(f"(id {task[0][0]})")
     page.locator(".circle-field__shape").click()
     expect(page.locator(f'{BALLOON}[data-who="agent"]')).to_have_count(1)
     expect(page.locator(f'{BALLOON}[data-who="you"]')).to_have_count(0)
     page.keyboard.press("Escape")
-    page.reload()
+    # The same browser with nothing in its storage, and another browser altogether: the day is taken, they ask nothing.
+    page.evaluate("() => { localStorage.clear(); sessionStorage.clear() }")
+    other = ui_agent.context.browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
+    try:
+        second = other.new_page()
+        second.clock.set_fixed_time(PINNED_CLOCK_ISO)
+        second.goto(ui_agent.base_url)
+        page.reload()
+        for window in (page, second):
+            window.wait_for_selector(".goal-card__row")
+        page.wait_for_timeout(1500)
+        for window in (page, second):
+            expect(window.locator('[data-role="circle-answer"]')).to_have_count(0)
+    finally:
+        other.close()
+
+
+def _cli_starts(tmp_path: Path) -> list[list[str]]:
+    """The arguments of every agent the gateway started for a conversation (the fake agent logs them), oldest first."""
+    log = tmp_path / "desktop-state" / "chat-workspace" / "argv.log"
+    starts = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return [args for args in starts if "--append-system-prompt" in args]
+
+
+def _flag(args: list[str], name: str) -> str:
+    return args[args.index(name) + 1]
+
+
+def test_the_morning_turn_gets_its_guide_and_asks_first_whatever_mode_the_chat_is_in(ui_agent: UiSession, tmp_path: Path) -> None:
+    """Fixes 1, 4 and 5 through the real gateway: the morning ask reaches the CLI with the morning guide and the ask-first
+    mode though the chat is set to "Bypass permissions"; an ordinary message in the same chat keeps the owner's mode;
+    and both carry the same instructions on length, titles and the seven columns."""
+    page = ui_agent.page
     page.wait_for_selector(".goal-card__row")
-    page.wait_for_timeout(1500)
-    expect(page.locator('[data-role="circle-answer"]')).to_have_count(0)
+    page.evaluate("() => localStorage.setItem('vt-chat:agent-prefs', JSON.stringify({ claude: { permission: 'bypassPermissions' } }))")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        conn.execute("DELETE FROM idempotency WHERE owner = %s AND client_token LIKE 'morning:%%'", (F2_OWNER,))
+    page.reload()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report", timeout=15000)
+    (morning,) = _cli_starts(tmp_path)
+    assert _flag(morning, "--permission-mode") == "manual" and "--add-dir" not in morning and _flag(morning, "--tools") == ""
+    assert "## This turn: the morning report" in _flag(morning, "--append-system-prompt")
+    page.locator(".circle-field__shape").click()
+    _send(page, "Hello")
+    _answered(page, "Done: Hello")
+    ordinary = _cli_starts(tmp_path)[-1]
+    assert _flag(ordinary, "--permission-mode") == "bypassPermissions"
+    assert "## This turn: the morning report" not in _flag(ordinary, "--append-system-prompt")
+    for args in (morning, ordinary):
+        instructions = _flag(args, "--append-system-prompt")
+        assert "one or two short paragraphs" in instructions and "seven columns" in instructions
+        assert "Report exact IDs" not in instructions
+    # Fix 7: the gateway kept a log of both turns in its data folder, and no word of either is in it.
+    log = (tmp_path / "desktop-state" / "agent.log").read_text()
+    assert "send provider=claude permission=bypassPermissions morning=True" in log
+    assert "send provider=claude permission=bypassPermissions morning=False" in log
+    assert log.count("turn_start") == 2 and log.count("done error=False") == 2 and "agent_start" in log
+    assert "Make my morning report" not in log and "Hello" not in log and "Done:" not in log
+
+
+def _morning_tasks(conn: psycopg.Connection) -> list[tuple]:
+    """The open "Morning report" tasks of the owner: id, scale, day, author."""
+    return conn.execute(
+        "SELECT id, vertical::text, anchor_date, origin::text FROM goals"
+        " WHERE owner = %s AND title = 'Morning report' AND done_at IS NULL ORDER BY created_at", (F2_OWNER,),
+    ).fetchall()
+
+
+def test_the_next_morning_moves_the_one_task_to_its_day_instead_of_making_another(ui_agent: UiSession) -> None:
+    """Fix 2: two mornings in a row ask the agent twice and leave one open "Morning report" task, the same one, in the
+    second day."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        conn.execute("DELETE FROM idempotency WHERE owner = %s AND client_token LIKE 'morning:%%'", (F2_OWNER,))
+    page.reload()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report for 2026-08-08", timeout=15000)
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        (first,) = _morning_tasks(conn)
+    page.clock.set_fixed_time("2026-08-09T09:00:00+03:00")
+    page.reload()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Make my morning report for 2026-08-09", timeout=15000)
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        (second,) = _morning_tasks(conn)
+    assert (second[0], str(second[2])) == (first[0], "2026-08-09")
+
+
+@pytest.mark.parametrize("report_day, finishes", [("2026-08-07", False), ("2026-08-08", True)])
+def test_ready_on_a_morning_report_finishes_the_task_only_for_the_day_it_stands_in(
+    ui_agent: UiSession, report_day: str, finishes: bool,
+) -> None:
+    """Fix 2: the one task is linked to every morning's report, so "Ready?" on an earlier report leaves it open and on the
+    report of the day the task stands in (the pinned 2026-08-08) it is done."""
+    path = f"reports/morning/{report_day}.md"
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        task = goals.create(conn, owner=F2_OWNER, title="Morning report", vertical="day",
+                            anchor_date=date.fromisoformat(PINNED_DAY), origin="app").goal.id
+        doc = core_docs.create(conn, owner=F2_OWNER, path=path, title=f"Morning report — {report_day}").doc.id
+        goals.update(conn, owner=F2_OWNER, id=task, body=f"[Morning report — {report_day}](doc:{path})")
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{task}"]')
+    _send(page, f"[say] Your report: [the report](#doc/{doc}).")
+    page.locator(f'{BALLOON}[data-who="agent"] a', has_text="the report").click()
+    expect(page.locator('.vt-window[data-window="doc"]')).to_have_count(1)
+    page.evaluate("id => window.dispatchEvent(new CustomEvent('verticals:doc-edited', { detail: { id } }))", doc)
+    expect(page.locator(CIRCLE)).to_have_attribute("data-state", "go")
+    page.locator(".circle-field__shape").click()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Done: Ready.", timeout=15000)
+
+    def done() -> bool:
+        with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+            return conn.execute("SELECT done_at FROM goals WHERE id = %s", (task,)).fetchone()[0] is not None
+
+    for attempt in range(25):  # it finishes within a moment, or stays open: wait the longer for the first
+        if done() or (not finishes and attempt > 8):
+            break
+        page.wait_for_timeout(200)
+    assert done() is finishes
 
 
 def test_an_ask_is_the_agents_balloon_with_its_choices(ui_agent: UiSession) -> None:
@@ -170,6 +301,110 @@ def test_an_ask_is_the_agents_balloon_with_its_choices(ui_agent: UiSession) -> N
     ask.get_by_role("button", name="Allow once").click()
     _answered(page, "Done: Change it")
     expect(ask.get_by_role("button", name="Allow once")).to_be_disabled()
+
+
+def _select(page: Page, words: str) -> None:
+    """Select `words` inside the agent's last balloon, the way a drag across them would."""
+    page.evaluate(
+        """words => {
+          const walker = document.createTreeWalker(document.querySelector('[data-balloon][data-who="agent"]'), NodeFilter.SHOW_TEXT)
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const at = node.textContent.indexOf(words)
+            if (at < 0) continue
+            const range = document.createRange()
+            range.setStart(node, at)
+            range.setEnd(node, at + words.length)
+            const selection = getSelection()
+            selection.removeAllRanges()
+            selection.addRange(range)
+            return
+          }
+          throw new Error('not found: ' + words)
+        }""",
+        words,
+    )
+
+
+def test_the_text_you_selected_goes_with_the_next_message_once(ui_agent: UiSession) -> None:
+    """Fix 5: the prompt promises the selected text, so what you select on the page goes with the message you send next,
+    even though the field takes the focus and the selection with it; only that message carries it."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "[say] The plan has three steps: write, test and ship.")
+    _answered(page, "The plan has three steps")
+    _select(page, "write, test and ship")
+    _send(page, "[context]")
+    _answered(page, "Selected text: write, test and ship")
+    _send(page, "[context]")
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).to_contain_text("Today:", timeout=10000)
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).not_to_contain_text("Selected text")
+
+
+def test_a_selection_you_pressed_away_from_is_not_sent(ui_agent: UiSession) -> None:
+    """Fix 5: a press anywhere else but the field lets the selection go, and it goes unsent."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "[say] The plan has three steps: write, test and ship.")
+    _answered(page, "The plan has three steps")
+    _select(page, "write, test and ship")
+    page.locator(BALLOON).first.click()  # your own balloon: a press that is not in the field
+    page.evaluate("() => getSelection().removeAllRanges()")
+    _send(page, "[context]")
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).to_contain_text("Today:", timeout=10000)
+    expect(page.locator(f'{BALLOON}[data-who="agent"]').last).not_to_contain_text("Selected text")
+
+
+CHANGES = '[data-role="agent-ask-changes"]'
+ASK_SAYS = [
+    ("schedule", "Draft the outline · Mon 10 Aug"),   # a day, as the goal cards say it
+    ("week", "Draft the outline · 10–16 Aug"),        # a week, as its column header says it
+    ("clear", "Draft the outline · No date"),
+    ("create", "Plan the review · 10–16 Aug"),
+    ("update", "Draft the outline"),                  # a write with no date says only the goal
+    ("delete", "Draft the outline"),
+    ("unknown", None),                                # a goal this board does not have: no line, and no error
+]
+
+
+def test_an_ask_says_the_goal_and_its_new_date(ui_agent: UiSession) -> None:
+    """Fix 6 (docs/design/agent-fixes.md): the card said only "Allow Claude to use schedule?"; it now says which goal and
+    which date, in the balloon's own type, so you answer about the change and not about a tool."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    for number, (mark, says) in enumerate(ASK_SAYS, start=1):
+        _send(page, f"Change number {number} [ask:{mark}]")
+        asks = page.locator('[data-role="agent-ask"]')
+        expect(asks).to_have_count(number, timeout=10000)
+        card = asks.last
+        expect(card.get_by_role("button", name="Allow once")).to_be_enabled()
+        if says is None:
+            page.wait_for_timeout(600)  # the goal is looked for once, and is not there
+            expect(card.locator(CHANGES)).to_have_count(0)
+        else:
+            expect(card.locator(CHANGES)).to_have_text(says)
+            # the card's own type: the balloon's 15 px / 22 px regular, the question above it the 600 weight
+            expect(card.locator(CHANGES)).to_have_css("font-weight", "400")
+            expect(card.locator('.agent-balloon__ask-title')).to_have_css("font-weight", "600")
+            expect(card.locator(CHANGES)).to_have_css("font-size", "15px")
+        card.get_by_role("button", name="Allow once").click()
+        _answered(page, f"Done: Change number {number}")
+
+
+def test_an_ask_in_the_field_says_it_too(ui_agent: UiSession) -> None:
+    """Fix 6: with the conversation closed the ask stands in the field; it says the same under its question."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "Move it [ask:schedule]")
+    expect(page.locator('[data-role="agent-ask"]')).to_have_count(1, timeout=10000)
+    page.locator('[data-role="out-of-focus"]').click(position={"x": 60, "y": 60})
+    answer = page.locator('[data-role="circle-answer"]')
+    expect(answer).to_contain_text("Allow Claude to use schedule?", timeout=10000)
+    expect(answer.locator('[data-role="circle-ask-changes"]')).to_have_text("Draft the outline · Mon 10 Aug")
+    page.wait_for_timeout(500)
+    box = page.locator(".circle-field__shape").bounding_box()
+    assert box is not None and box["height"] >= 24 * 2 + 22 * 2 + 44, box  # its question and its line, then the buttons
+    answer.get_by_role("button", name="Allow once").click()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Done: Move it", timeout=10000)
 
 
 def test_a_conversation_from_before_opens_with_its_messages(ui_agent: UiSession) -> None:

@@ -59,24 +59,54 @@ class _Session:
     def __init__(self):
         self.asked = []
 
-    def ask(self, agent, key, title, body, options):
+    def ask(self, agent, key, title, body, options, tool=None, tool_input=None):
         self.asked.append(title)
+        self.write = (tool, tool_input)
 
     def emit(self, event):
         pass
 
 
 def _claude(settings):
+    """A Claude agent started the way a message starts it: its settings come through the gateway's own clean."""
     chat = _chat()
     chat.JsonProcess, chat.which = _Proc, lambda provider: "claude"
     session = _Session()
     host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."))
-    return chat.ClaudeAgent(host, session, settings, None), session
+    return chat.ClaudeAgent(host, session, chat.clean_settings(settings), None), session
+
+
+def _system_prompt(agent) -> str:
+    args = agent.proc.args
+    return args[args.index("--append-system-prompt") + 1]
+
+
+def test_an_ask_for_a_verticals_write_carries_the_write_so_the_card_can_say_what_changes() -> None:
+    """Fix 6 (docs/design/agent-fixes.md): the app drew only the tool's name; the ask now carries the write as the agent
+    called it, for web lib/askDetail.ts. A tool of another server or a shell command carries its own name and inputs too."""
+    agent, session = _claude({"permission": "manual"})
+    _tool(agent, "mcp__verticals__schedule", {"id": "SYN00001", "vertical": "day", "anchor_date": "2026-10-12"})
+    assert session.write == ("schedule", {"id": "SYN00001", "vertical": "day", "anchor_date": "2026-10-12"})
+    _tool(agent, "Bash", {"command": "ls"})
+    assert session.write == ("Bash", {"command": "ls"})
+
+
+def _tool(agent, name, tool_input=None):
+    agent.handle({"type": "control_request", "request_id": f"r-{name}",
+                  "request": {"subtype": "can_use_tool", "tool_name": name, "input": tool_input or {}}})
 
 
 def _bash(agent):
-    agent.handle({"type": "control_request", "request_id": "r1",
-                  "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "ls"}}})
+    _tool(agent, "Bash", {"command": "ls"})
+
+
+def _flag(agent, name):
+    args = agent.proc.args
+    return args[args.index(name) + 1]
+
+
+def _decision(agent):
+    return agent.proc.sent[-1]["response"]["response"]["behavior"]
 
 
 def test_verticals_only_is_the_default_and_keeps_claude_to_the_board() -> None:
@@ -105,3 +135,188 @@ def test_the_morning_turn_keeps_its_own_rules_in_any_mode() -> None:
     assert args[args.index("--tools") + 1] == "" and "--add-dir" not in args
     _bash(agent)
     assert not session.asked and agent.proc.sent[-1]["response"]["response"]["behavior"] == "deny"
+
+
+def test_the_settings_clean_lets_the_morning_turns_sources_through() -> None:
+    """Fix 1 (docs/design/agent-fixes.md): the clean dropped `sources`, so no morning turn ever had its own rules."""
+    chat = _chat()
+    assert chat.clean_settings({"sources": "connected"})["sources"] == "connected"
+    for other in ("everything", "", None, True, ["connected"]):
+        assert "sources" not in chat.clean_settings({"sources": other}), other
+    assert "sources" not in chat.clean_settings({})
+
+
+def test_the_morning_guide_reaches_the_agent_the_app_asks() -> None:
+    """Fix 1: the settings the app sends for the morning ask (web lib/morning.ts) give that turn the morning guide, with
+    the report contract; any other turn keeps the board prompt."""
+    agent, _ = _claude({"permission": "manual", "sources": "connected"})
+    prompt = _system_prompt(agent)
+    assert "## This turn: the morning report" in prompt and "## Reference: report contract" in prompt
+    assert "## This turn: the morning report" not in _system_prompt(_claude({"permission": "manual"})[0])
+
+
+def test_codex_gets_the_morning_guide_in_the_same_turn() -> None:
+    """Fix 1: the morning turn is asked of whichever agent is chosen, so Codex gets the guide too, under its own server name."""
+    chat = _chat()
+    morning = chat.codex_instructions(chat.clean_settings({"provider": "codex", "sources": "connected"}))
+    assert "## This turn: the morning report" in morning and 'server "verticals_desktop"' in morning
+    assert "## This turn: the morning report" not in chat.codex_instructions(chat.clean_settings({"provider": "codex"}))
+
+
+def test_the_app_ships_every_skill_the_chat_reads() -> None:
+    """Fix 1: the chat reads the operator skill and, for the morning turn, the morning-report skill from the folder it
+    runs in; the app's bundle copies both, or the guide silently shrinks to the few lines of prompt-morning.md."""
+    spec = importlib.util.spec_from_file_location("verticals_bundle", ROOT / "desktop" / "macos" / "bundle.py")
+    assert spec and spec.loader
+    bundle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    chat = _chat()
+    for skill in (chat.SKILL, chat.MORNING_SKILL):
+        assert skill.name in bundle.SKILLS, skill.name
+        assert (ROOT / ".agents" / "skills" / skill.name / "SKILL.md").is_file()
+
+
+def test_the_morning_turn_asks_first_whatever_mode_the_chat_is_in() -> None:
+    """Fix 4: a chat set to "Bypass permissions" or "Auto" made its own decisions for every tool, so the morning turn,
+    which nobody watches, could send or delete in the owner's other tools. In the morning turn the mode is always the
+    ask-first one, and each tool of another server comes to the gateway to be judged."""
+    for mode in ("manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions", "board"):
+        agent, _ = _claude({"permission": mode, "sources": "connected"})
+        assert _flag(agent, "--permission-mode") == "manual", mode
+        assert _flag(agent, "--tools") == "" and "--add-dir" not in agent.proc.args, mode
+    # Any other turn keeps the mode the owner chose.
+    assert _flag(_claude({"permission": "bypassPermissions"})[0], "--permission-mode") == "bypassPermissions"
+
+
+def test_the_morning_turn_reads_elsewhere_and_writes_in_verticals_only_what_the_report_needs() -> None:
+    """Fix 4: outside Verticals only a tool named for reading runs; in Verticals the report's writes run by themselves
+    and any other write is asked of the owner in the chat."""
+    agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"})
+    allowed = _flag(agent, "--allowedTools").split(",")
+    for tool in ("doc_create", "doc_save", "doc_link", "board", "doc_get"):
+        assert f"mcp__verticals__{tool}" in allowed, tool
+    # The report's task is the server's (core/morning.py): the agent neither makes it nor moves it without asking.
+    for tool in ("create", "schedule", "delete", "update", "reparent", "doc_delete"):
+        assert f"mcp__verticals__{tool}" not in allowed, tool
+    _tool(agent, "mcp__google-calendar__list-events")
+    assert _decision(agent) == "allow"
+    for write in ("mcp__telethon__send_message", "mcp__telethon__mark_read", "mcp__google-calendar__delete-event"):
+        _tool(agent, write)
+        assert _decision(agent) == "deny", write
+    assert not session.asked
+    _tool(agent, "mcp__verticals__delete", {"id": "SYN00001"})
+    assert session.asked == ["Allow Claude to use delete?"]
+
+
+def test_the_morning_turn_of_codex_reads_whatever_mode_the_chat_is_in() -> None:
+    """Fix 4, Codex: its sandbox is read-only in the morning turn (it can reach only Verticals, and its files not at all)."""
+    chat = _chat()
+    for mode in ("full-access", "auto-review", "default", "read-only"):
+        settings = chat.clean_settings({"provider": "codex", "permission": mode, "sources": "connected"})
+        assert chat.codex_mode(settings) == "read-only", mode
+        assert chat.codex_policy(chat.codex_mode(settings), "/work")["sandboxPolicy"]["type"] == "readOnly", mode
+    assert chat.codex_mode(chat.clean_settings({"provider": "codex", "permission": "full-access"})) == "full-access"
+    assert chat.codex_mode(chat.clean_settings({"provider": "codex"})) == "auto-review"
+
+
+def test_the_agents_instructions_agree_with_themselves() -> None:
+    """Fix 5 (docs/design/agent-fixes.md): one length in every turn, goals by title and not by ID, and the board as it is."""
+    prompt = _chat().PROMPT
+    # One length: one or two short paragraphs, and a document for anything longer.
+    assert "one or two short paragraphs" in prompt and "document" in prompt.split("one or two short paragraphs", 1)[1][:200]
+    # Goals by title: nothing tells the agent to report IDs.
+    assert "by title" in prompt and "exact IDs" not in prompt and "Report exact" not in prompt
+    # Seven columns, not a ladder of five rungs.
+    assert "Life → Year → Quarter → Week → Day" not in prompt
+    for column in ("Life", "3 years", "Year", "Quarter", "Month", "Week", "Day", "Inbox"):
+        assert column in prompt.split("The user talks to you", 1)[0], column
+
+
+def test_the_text_the_owner_selected_reaches_the_agent_in_its_context() -> None:
+    """Fix 5: the prompt promises "any text they selected", so the context carries it, cut at 2000 characters."""
+    chat = _chat()
+    context = chat.format_context({"today": "2026-10-11", "selection": "The second paragraph of the plan"})
+    assert "Selected text: The second paragraph of the plan" in context
+    assert len(chat.format_context({"today": "2026-10-11", "selection": "x" * 5000}).split("Selected text: ")[1]) == 2000
+    assert "Selected text" not in chat.format_context({"today": "2026-10-11"})
+
+
+SESSION = "5d2c3c3e-1b1a-4c8e-9e1f-0a6f3e3c9b01"
+
+
+def test_the_gateway_keeps_a_log_of_the_agents_side_with_nothing_private_in_it(scratch_dir) -> None:
+    """Fix 7 (docs/design/agent-fixes.md): what the agent was asked to be and did, in lines a bug report can carry, so it
+    holds event kinds, tool names, flags, durations and exit details, never your words, the agent's, a tool's inputs or
+    results, a title, an ID or the token."""
+    chat = _chat()
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok-secret-0451")
+    try:
+        session = gateway.session(SESSION)
+        session.emit({"t": "user", "text": "private words from the owner", "provider": "claude"})
+        session.emit({"t": "turn_start", "provider": "claude", "model": "model-x", "effort": "medium"})
+        session.emit({"t": "tool", "id": "tool-1", "name": "schedule", "title": "schedule",
+                      "input": {"id": "SYN00001", "title": "private title", "anchor_date": "2031-03-14"}})
+        session.emit({"t": "tool_result", "id": "tool-1", "error": True, "summary": "no goal SYN00001 private title"})
+        session.emit({"t": "text", "text": "private answer words"})
+        session.emit({"t": "permission", "requestId": "r1", "title": "Allow Claude to use schedule?",
+                      "body": "private body", "options": [], "tool": "schedule", "input": {"id": "SYN00001"}})
+        session.emit({"t": "permission_done", "requestId": "r1", "value": "accept"})
+        session.emit({"t": "done", "error": True, "detail": "API Error: overloaded", "ms": 1234, "at": 1.0})
+        session.emit({"t": "exit", "code": 1, "detail": "claude: not logged in"})
+    finally:
+        gateway.shutdown()
+    lines = (scratch_dir / "agent.log").read_text().splitlines()
+    text = "\n".join(lines)
+    assert any("turn_start" in line and "provider=claude" in line and "model=model-x" in line for line in lines), text
+    assert any(line.split(" ", 1)[1].startswith("tool name=schedule") for line in lines) and any("tool_error" in line for line in lines), text
+    assert any("permission tool=schedule" in line for line in lines) and any("permission_done value=accept" in line for line in lines)
+    assert any("done error=True ms=1234" in line and "API Error: overloaded" in line for line in lines), text
+    assert any("exit code=1" in line and "not logged in" in line for line in lines), text
+    assert all(line[:4].isdigit() for line in lines), "every line starts with its time"
+    for private in ("private words", "private answer words", "private title", "private body", "SYN00001", "tok-secret-0451",
+                    "2031-03-14", str(Path.home()), str(scratch_dir)):
+        assert private not in text, private
+
+
+def test_the_log_rotates_and_stays_small(scratch_dir) -> None:
+    chat = _chat()
+    log = chat.open_log(scratch_dir, max_bytes=400, backups=2)
+    for n in range(200):
+        log.info("tool name=schedule number=%d", n)
+    for handler in log.handlers:
+        handler.close()
+    names = sorted(path.name for path in scratch_dir.iterdir() if path.name.startswith("agent.log"))
+    assert names == ["agent.log", "agent.log.1", "agent.log.2"]
+    assert all(path.stat().st_size <= 400 + 80 for path in scratch_dir.iterdir() if path.name.startswith("agent.log"))
+    assert "number=199" in (scratch_dir / "agent.log").read_text()  # the newest lines stay
+
+
+def test_a_log_that_cannot_be_opened_stops_nothing(scratch_dir) -> None:
+    """The log is for bug reports; it never decides whether the chat starts."""
+    chat = _chat()
+    (scratch_dir / "agent.log").mkdir()  # a place nothing can be written to
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok")
+    try:
+        gateway.log.info("tool name=schedule")  # says nothing, and does not fail
+        assert not gateway.log.handlers
+        assert (scratch_dir / "chat-mcp.json").exists()  # the gateway started
+    finally:
+        gateway.shutdown()
+
+
+def test_a_refused_message_is_in_the_log_with_its_reason(scratch_dir) -> None:
+    """The reason a message never went (the CLI missing, an empty message) is exactly what a bug report needs."""
+    chat = _chat()
+    chat.which = lambda provider: None
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok")
+    try:
+        for text in ("   ", "hello"):
+            try:
+                gateway.send(SESSION, text, {}, {"provider": "claude", "permission": "board"})
+            except chat.ChatError:
+                pass
+    finally:
+        gateway.shutdown()
+    log = (scratch_dir / "agent.log").read_text()
+    assert "refused" in log and "Empty message" in log and "Claude Code is not installed" in log
+    assert "hello" not in log

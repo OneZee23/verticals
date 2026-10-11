@@ -31,7 +31,9 @@
   box-sizing: border-box;
   cursor: none;
   pointer-events: auto;
-  transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large);
+  /* The transform is for brushing an answer away (lib/brush.ts): it returns home as the circle forms. */
+  transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large),
+    transform var(--vt-dur-close) var(--vt-ease-large);
 }
 .circle-field[data-state='open'] .circle-field__shape { transition-duration: var(--vt-dur-open); }
 .circle-field[data-state='typing'] .circle-field__shape { transition: none; }
@@ -172,6 +174,15 @@
   -webkit-line-clamp: 3;
   overflow-wrap: anywhere;
 }
+/* What an ask will change, under its question and in the same type (lib/askDetail.ts; docs/design/agent-fixes.md, fix 6). */
+.circle-field__answer-changes {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
 .circle-field__answer-lead {
   display: -webkit-box;
   margin: 0 0 8px;
@@ -223,7 +234,15 @@
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-.circle-field[data-state='answer'] .circle-field__shape { transition-duration: var(--vt-dur-shape); transition-delay: 165ms; cursor: pointer; }
+/* The answer's shape grows after the line stands up (165 ms, then 300). Its transform, last of the three, keeps the close's own
+   timing: brushed away by hand (lib/brush.ts) it returns at once and as fast as the shape shrinks. The browser leaves the touch
+   to the brush. */
+.circle-field[data-state='answer'] .circle-field__shape {
+  transition-duration: var(--vt-dur-shape), var(--vt-dur-shape), var(--vt-dur-close);
+  transition-delay: 165ms, 165ms, 0ms;
+  cursor: pointer;
+  touch-action: none;
+}
 /* The line stands up first (165 ms), then the shape grows around the answer (300 ms), then its words come in (S2.P4.013, .014). */
 .circle-field__answer { animation: circle-field-answer-in 170ms linear 295ms backwards; }
 @keyframes circle-field-answer-in { from { opacity: 0; } }
