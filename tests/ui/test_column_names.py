@@ -10,9 +10,11 @@ Read for every column: the big name is `.t-title`, the small kind above it `.t-c
 
 from __future__ import annotations
 
+import httpx
 from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession, activate_column, expand_column
+from tests.ui.test_moving import SPANS, _centre, _glide, _grab
 
 STRIP = '[data-role="column-strip"]'
 VERTICALS = ("day", "week", "month", "quarter", "year", "decade", "life")
@@ -349,3 +351,31 @@ def test_paging_a_wide_column_keeps_its_long_name(ui_f2: UiSession) -> None:
     _step(page, "week", "period-prev", "2026-W18")
     assert _names(page)["week"] == ("27 Apr–3 May", "Week")
     expect(page.locator(f"{STRIP} > [data-vertical='week']")).to_have_accessible_name("Week, 27 Apr–3 May")
+
+
+def test_the_floating_column_in_the_spans_is_wide_and_says_its_long_name(ui_f2: UiSession) -> None:
+    """Moving a week goal opens the months with the goal's own column floating wide over them (lib/spans.ts): a column
+    drawn wide, though it is not the expanded one, so a week across two months says its last day there."""
+    anchor = "2026-04-30"  # in the week Mon 27 Apr – Sun 3 May
+    response = httpx.post(
+        f"{ui_f2.backend.base_url}/api/goals",
+        json={"title": "SYN names week goal", "vertical": "week", "anchor_date": anchor},
+        headers={"Authorization": f"Bearer {ui_f2.backend.token}"},
+        timeout=10,
+    )
+    assert response.status_code == 201, response.text
+    goal_id = response.json()["id"]
+
+    page = _open(ui_f2, NOW, anchor)
+    assert _names(page)["week"] == ("27 Apr–May", "Week"), "narrow on the board"
+    page.wait_for_selector(f'[data-goal-id="{goal_id}"]')
+    at = _grab(page, goal_id)
+    _glide(page, at, _centre(page, '[data-role="column-dots"][data-dots-vertical="month"]'))
+    expect(page.locator(SPANS)).to_have_count(1, timeout=5000)
+    floating = page.locator('[data-role="spans-floating"] [data-vertical="week"]')
+    expect(floating.locator(".t-title")).to_have_text("27 Apr–3 May")
+    expect(floating.locator(".t-caption")).to_have_text("Week")
+    expect(floating).to_have_accessible_name("Week, 27 Apr–3 May")
+    page.keyboard.press("Escape")
+    page.mouse.up()
+    expect(page.locator(SPANS)).to_have_count(0, timeout=5000)
