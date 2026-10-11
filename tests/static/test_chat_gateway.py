@@ -59,7 +59,7 @@ class _Session:
     def __init__(self):
         self.asked = []
 
-    def ask(self, agent, key, title, body, options):
+    def ask(self, agent, key, title, body, options, tool=None):
         self.asked.append(title)
 
     def emit(self, event):
@@ -228,3 +228,84 @@ def test_the_text_the_owner_selected_reaches_the_agent_in_its_context() -> None:
     assert "Selected text: The second paragraph of the plan" in context
     assert len(chat.format_context({"today": "2026-10-11", "selection": "x" * 5000}).split("Selected text: ")[1]) == 2000
     assert "Selected text" not in chat.format_context({"today": "2026-10-11"})
+
+
+SESSION = "5d2c3c3e-1b1a-4c8e-9e1f-0a6f3e3c9b01"
+
+
+def test_the_gateway_keeps_a_log_of_the_agents_side_with_nothing_private_in_it(scratch_dir) -> None:
+    """Fix 7 (docs/design/agent-fixes.md): what the agent was asked to be and did, in lines a bug report can carry, so it
+    holds event kinds, tool names, flags, durations and exit details, never your words, the agent's, a tool's inputs or
+    results, a title, an ID or the token."""
+    chat = _chat()
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok-secret-0451")
+    try:
+        session = gateway.session(SESSION)
+        session.emit({"t": "user", "text": "private words from the owner", "provider": "claude"})
+        session.emit({"t": "turn_start", "provider": "claude", "model": "model-x", "effort": "medium"})
+        session.emit({"t": "tool", "id": "tool-1", "name": "schedule", "title": "schedule",
+                      "input": {"id": "SYN00001", "title": "private title", "anchor_date": "2031-03-14"}})
+        session.emit({"t": "tool_result", "id": "tool-1", "error": True, "summary": "no goal SYN00001 private title"})
+        session.emit({"t": "text", "text": "private answer words"})
+        session.emit({"t": "permission", "requestId": "r1", "title": "Allow Claude to use schedule?",
+                      "body": "private body", "options": [], "tool": "schedule", "input": {"id": "SYN00001"}})
+        session.emit({"t": "permission_done", "requestId": "r1", "value": "accept"})
+        session.emit({"t": "done", "error": True, "detail": "API Error: overloaded", "ms": 1234, "at": 1.0})
+        session.emit({"t": "exit", "code": 1, "detail": "claude: not logged in"})
+    finally:
+        gateway.shutdown()
+    lines = (scratch_dir / "agent.log").read_text().splitlines()
+    text = "\n".join(lines)
+    assert any("turn_start" in line and "provider=claude" in line and "model=model-x" in line for line in lines), text
+    assert any(line.split(" ", 1)[1].startswith("tool name=schedule") for line in lines) and any("tool_error" in line for line in lines), text
+    assert any("permission tool=schedule" in line for line in lines) and any("permission_done value=accept" in line for line in lines)
+    assert any("done error=True ms=1234" in line and "API Error: overloaded" in line for line in lines), text
+    assert any("exit code=1" in line and "not logged in" in line for line in lines), text
+    assert all(line[:4].isdigit() for line in lines), "every line starts with its time"
+    for private in ("private words", "private answer words", "private title", "private body", "SYN00001", "tok-secret-0451",
+                    "2031-03-14", str(Path.home()), str(scratch_dir)):
+        assert private not in text, private
+
+
+def test_the_log_rotates_and_stays_small(scratch_dir) -> None:
+    chat = _chat()
+    log = chat.open_log(scratch_dir, max_bytes=400, backups=2)
+    for n in range(200):
+        log.info("tool name=schedule number=%d", n)
+    for handler in log.handlers:
+        handler.close()
+    names = sorted(path.name for path in scratch_dir.iterdir() if path.name.startswith("agent.log"))
+    assert names == ["agent.log", "agent.log.1", "agent.log.2"]
+    assert all(path.stat().st_size <= 400 + 80 for path in scratch_dir.iterdir() if path.name.startswith("agent.log"))
+    assert "number=199" in (scratch_dir / "agent.log").read_text()  # the newest lines stay
+
+
+def test_a_log_that_cannot_be_opened_stops_nothing(scratch_dir) -> None:
+    """The log is for bug reports; it never decides whether the chat starts."""
+    chat = _chat()
+    (scratch_dir / "agent.log").mkdir()  # a place nothing can be written to
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok")
+    try:
+        gateway.log.info("tool name=schedule")  # says nothing, and does not fail
+        assert not gateway.log.handlers
+        assert (scratch_dir / "chat-mcp.json").exists()  # the gateway started
+    finally:
+        gateway.shutdown()
+
+
+def test_a_refused_message_is_in_the_log_with_its_reason(scratch_dir) -> None:
+    """The reason a message never went (the CLI missing, an empty message) is exactly what a bug report needs."""
+    chat = _chat()
+    chat.which = lambda provider: None
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok")
+    try:
+        for text in ("   ", "hello"):
+            try:
+                gateway.send(SESSION, text, {}, {"provider": "claude", "permission": "board"})
+            except chat.ChatError:
+                pass
+    finally:
+        gateway.shutdown()
+    log = (scratch_dir / "agent.log").read_text()
+    assert "refused" in log and "Empty message" in log and "Claude Code is not installed" in log
+    assert "hello" not in log

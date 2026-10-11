@@ -9,6 +9,7 @@ it the conversation so far.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ import threading
 import time
 import tomllib
 import uuid
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -172,6 +174,60 @@ def window(label, used, resets=None):
 def usage_state(windows, missing):
     windows = [w for w in windows if w]
     return {"state": "ready", "windows": windows} if windows else {"state": "unavailable", "message": missing}
+
+
+# ---------------------------------------------------------------- the gateway's log
+
+# The agent's side of a bug report (docs/design/agent-fixes.md, fix 7): one small rotating file in the app's data folder,
+# beside api.log and mcp.log. A report may carry its last lines, so a line holds what happened and never what was said:
+# event kinds, tool names, flags, durations and the CLI's own exit details; not your words, the agent's, a tool's inputs
+# or results, a title, an ID or the token.
+LOG_FILE = "agent.log"
+LOG_BYTES = 200_000
+LOG_BACKUPS = 2  # three files at most, about 600 kB all told
+
+
+def open_log(state_dir, max_bytes=LOG_BYTES, backups=LOG_BACKUPS):
+    """The gateway's log. A logger of its own, not in the process-wide tree, so two gateways in one process (the tests) never
+    write each other's lines. A log that cannot be opened (a read-only folder, a full disk) is no reason to stop the chat: the
+    logger then has no handler and says nothing."""
+    log = logging.Logger("verticals.agent")
+    log.setLevel(logging.INFO)
+    try:
+        handler = RotatingFileHandler(Path(state_dir) / LOG_FILE, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
+    except OSError:
+        return log
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%dT%H:%M:%S%z"))
+    log.addHandler(handler)
+    return log
+
+
+def clip(text, limit=300):
+    """One line of a CLI's own words (an error, an exit): whitespace folded, cut at `limit`."""
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[:limit - 1] + "…"
+
+
+def log_line(session, event):
+    """The log's line for an event of a conversation, or None for the many that say nothing the log needs (the agent's
+    words, a tool's result when it went well). Only fields that carry no content are read."""
+    kind = event.get("t")
+    who = f"session={str(session)[:8]}"
+    if kind == "turn_start":
+        return f"turn_start provider={event.get('provider')} model={event.get('model') or '-'} effort={event.get('effort') or '-'} {who}"
+    if kind == "tool":
+        return f"tool name={event.get('name')} {who}"
+    if kind == "tool_result" and event.get("error"):
+        return f"tool_error id={event.get('id')} {who}"
+    if kind == "permission":
+        return f"permission tool={event.get('tool') or '-'} {who}"
+    if kind == "permission_done":
+        return f"permission_done value={event.get('value', event.get('label', '-'))} {who}"
+    if kind == "done":
+        return f"done error={bool(event.get('error'))} ms={event.get('ms')} {who}" + (f" detail={clip(event.get('detail'))}" if event.get("detail") else "")
+    if kind == "exit":
+        return f"exit code={event.get('code')} {who}" + (f" detail={clip(event.get('detail'))}" if event.get("detail") else "")
+    return None
 
 
 # ---------------------------------------------------------------- line-delimited JSON processes
@@ -370,7 +426,7 @@ class ClaudeAgent:
                 return self.decide(rid, "accept" if self.connected and reads_only(tool) else "decline")
             s.ask(self, rid, f"Allow Claude to use {short(tool)}?",
                   "\n\n".join(filter(None, [req.get("decision_reason"), json.dumps(tool_input, indent=2, ensure_ascii=False)])),
-                  [("Allow once", "accept"), ("Decline", "decline")])
+                  [("Allow once", "accept"), ("Decline", "decline")], tool=short(tool))
         elif kind == "control_cancel_request":
             s.resolve(msg.get("request_id"), "Cancelled")
         elif kind == "control_response" and msg.get("response", {}).get("request_id") == "initialize":
@@ -656,6 +712,8 @@ class Session:
             self.events.append((self.seq, event))
             del self.events[:-MAX_EVENTS]
             self.cond.notify_all()
+        if line := log_line(self.id, event):
+            self.chat.log.info(line)
         if event["t"] == "text":
             self.reply += event["text"]
         elif event["t"] == "text_start" and self.reply:
@@ -667,10 +725,11 @@ class Session:
                 self.cond.wait(timeout)
             return [(s, e) for s, e in self.events if s > seq]
 
-    def ask(self, agent, key, title, body, options):
+    def ask(self, agent, key, title, body, options, tool=None):
         self.asks[key] = agent
         self.emit({"t": "permission", "requestId": key, "title": title, "body": body,
-                   "options": [{"label": label, "value": value} for label, value in options]})
+                   "options": [{"label": label, "value": value} for label, value in options],
+                   **({"tool": tool} if tool else {})})
 
     def resolve(self, key, label):
         if key is not None and self.asks.pop(str(key), None):
@@ -706,6 +765,8 @@ class Session:
 class Chat:
     def __init__(self, state_dir: Path, mcp_url: str, token: str):
         self.state_dir, self.mcp_url, self.token = state_dir, mcp_url, token
+        self.log = open_log(state_dir)
+        self.log.info("gateway start pid=%d", os.getpid())
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
         self.store_path = state_dir / "chat-sessions.json"
@@ -879,6 +940,13 @@ class Chat:
     # -- turns
 
     def send(self, id, text, context=None, settings=None, mode="send"):
+        try:
+            self._send(id, text, context, settings, mode)
+        except ChatError as e:
+            self.log.warning("refused %s session=%s", clip(e), str(id)[:8])
+            raise
+
+    def _send(self, id, text, context, settings, mode):
         if not isinstance(text, str) or not text.strip():
             raise ChatError("Empty message")
         s = self.session(id)
@@ -888,6 +956,8 @@ class Chat:
             self.update(id, goal={"id": goal["id"], "title": str(goal.get("title", ""))[:300]})
         if not which(settings["provider"]):
             raise ChatError(f"{AGENTS[settings['provider']]['label']} is not installed.")
+        self.log.info("send provider=%s permission=%s morning=%s chars=%d mode=%s queued=%s session=%s",
+                      settings["provider"], settings["permission"], "sources" in settings, len(text), mode, s.running, str(id)[:8])
         s.emit({"t": "user", "text": text, "provider": settings["provider"], "model": settings.get("model"),
                 "effort": settings.get("effort")})
         self.record(id, "user", text)
@@ -924,6 +994,8 @@ class Chat:
                     "effort": settings.get("effort")})
             if agent is None:
                 s.emit({"t": "activity", "label": "Starting…"})
+                self.log.info("agent_start provider=%s resume=%s handoff=%d session=%s", provider, bool(resume), len(handoff),
+                              str(s.id)[:8])
                 agent = AGENT_CLASSES[provider](self, s, settings, resume)
                 s.agent = agent
                 self.update(s.id, provider=provider, sessionId=agent.session_id)
@@ -933,12 +1005,14 @@ class Chat:
             agent.send(body + text)
         except (ChatError, OSError) as e:
             s.running = False
+            self.log.warning("turn_failed_to_start %s session=%s", clip(e), str(s.id)[:8])
             s.emit({"t": "done", "error": True, "detail": str(e), "ms": 0})
 
     def decide(self, id, request_id, value):
         s = self.session(id)
         agent = s.asks.pop(str(request_id), None)
         if agent is None:
+            self.log.warning("refused permission no longer active session=%s", str(id)[:8])
             raise ChatError("This request is no longer active")
         agent.decide(str(request_id), value)
         s.emit({"t": "permission_done", "requestId": str(request_id), "value": value})
@@ -958,6 +1032,10 @@ class Chat:
         for s in list(self.sessions.values()):
             if s.agent:
                 s.agent.close()
+        self.log.info("gateway stop")
+        for handler in list(self.log.handlers):
+            handler.close()
+            self.log.removeHandler(handler)
 
 
 ClaudeAgent.signature_of = staticmethod(lambda settings: settings)

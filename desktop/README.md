@@ -16,7 +16,10 @@ launcher has its own ports, database, state directory and UI build.
   (the system prompt is this intro plus `.agents/skills/verticals-operator`, read at startup; the morning report's
   turn adds `prompt-morning.md` and `.agents/skills/verticals-morning-report`),
   `ui/assets/` (the agents' and models' marks). The conversation itself is drawn by the app
-  (`web/src/lib/agentChat.ts`, `AgentConversation.vue`).
+  (`web/src/lib/agentChat.ts`, `AgentConversation.vue`). The gateway keeps `agent.log` in the state folder, beside
+  `api.log` and `mcp.log`: a small rotating file (three files of 200 kB at most) of what the agent was asked to be and did,
+  that is, event kinds, tool names, flags, durations and exit details, never your words, the agent's, tool inputs or
+  titles, so a bug report can carry its last lines.
 - `macos/` — `Verticals.swift` (native window, WKWebView), `Updater.swift` (checks, downloads and
   installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
   (self-contained `Verticals.app` + `.dmg`).

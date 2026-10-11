@@ -221,6 +221,12 @@ def test_the_morning_turn_gets_its_guide_and_asks_first_whatever_mode_the_chat_i
         instructions = _flag(args, "--append-system-prompt")
         assert "one or two short paragraphs" in instructions and "seven columns" in instructions
         assert "Report exact IDs" not in instructions
+    # Fix 7: the gateway kept a log of both turns in its data folder, and no word of either is in it.
+    log = (tmp_path / "desktop-state" / "agent.log").read_text()
+    assert "send provider=claude permission=bypassPermissions morning=True" in log
+    assert "send provider=claude permission=bypassPermissions morning=False" in log
+    assert log.count("turn_start") == 2 and log.count("done error=False") == 2 and "agent_start" in log
+    assert "Make my morning report" not in log and "Hello" not in log and "Done:" not in log
 
 
 def _morning_tasks(conn: psycopg.Connection) -> list[tuple]:
