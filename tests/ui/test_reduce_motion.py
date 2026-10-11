@@ -64,6 +64,8 @@ WATCH_PIVOT = """() => {
   };
   frame();
 }"""
+# Whether anything of the celebration on a goal whose steps are all done is moving: its layer or the sweep inside it.
+CELEBRATING = """() => document.getAnimations().some((a) => a.effect?.target?.closest?.('[data-role="completion-animation"]'))"""
 # Every frame, whether a column's periods or their track travel (a transform or translate animation on them).
 WATCH_TRAVEL = """() => {
   window.__travel = [];
@@ -242,3 +244,25 @@ def test_the_agents_line_stands_upright_at_once_when_motion_is_still(
     page.wait_for_timeout(300)
     straightened = page.evaluate("() => window.__pivot")
     assert bool(straightened) is not still, f"the line {'was turned upright' if straightened else 'stood upright at once'}: {straightened[:2]}"
+
+
+@MATRIX
+def test_a_goal_with_all_its_steps_done_says_so_without_a_sweep_when_motion_is_still(
+    ui_f2: UiSession, switch: str | None, still: bool,
+) -> None:
+    """Checking off a goal's last step sweeps rays across the goal for 5 s (lib/completionCelebration.ts). With motion
+    reduced, by the system setting or the app's switch, nothing sweeps; the tick says the step is done."""
+    session = ui_f2
+    page = session.page
+    _answer(session, switch)
+    parent = _create_goal(session, "SYN parent whose steps get done", "week")
+    steps = [_create_goal(session, f"SYN step {n}", "week", parent_id=parent) for n in (1, 2)]
+    page.reload()
+    activate_column(page, "week")
+    for step in steps:
+        box = page.locator(f'[data-goal-id="{step}"] [data-cap="complete"]')
+        box.click()
+        expect(box).to_have_attribute("aria-checked", "true")
+    page.wait_for_timeout(300)
+    celebrating = page.evaluate(CELEBRATING)
+    assert celebrating is not still, f"the goal {'swept' if celebrating else 'stayed still'}"
