@@ -193,16 +193,13 @@
   color: rgb(255 255 255 / 64%);
 }
 .circle-field__answer-measure--lead { width: 376px; }
-/* A message bringing documents (round 11): the first one's page on the left, three lines tall, a stack when there are
-   more; on the right a short title saying what came, then two lines of the message, all from the top. */
-.circle-field__answer--note { inset: 12px 32px 12px 24px; flex-direction: row; align-items: flex-start; justify-content: flex-start; gap: 16px; }
-.circle-field__note-page { position: relative; flex: none; display: block; }
-.circle-field__note-page > .doc-page { border-radius: 3px; box-shadow: none; }
-.circle-field__note-behind { position: absolute; left: 4px; top: 0; width: 50px; height: 67px; border-radius: 3px; background: #d9d9de; }
-.circle-field__note-page > .doc-page { position: relative; }
-.circle-field__note-words { flex: 1; min-width: 0; }
-.circle-field__note-title { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
-.circle-field__note-text { display: -webkit-box; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+/* A message that made or changed something (docs/design/agent-chips.md): the balloon in the field. Two lines of the message,
+   then the chips as the balloon draws them, in the same 376 px; "N more" counts the ones it has no room for. It stands on
+   the field's bottom edge, so while the black grows up around it the words and the chips stay where they will be. */
+.circle-field__answer--chips { inset: auto 32px 24px; justify-content: flex-end; }
+.circle-field__answer--chips .circle-field__answer-words { -webkit-line-clamp: 2; margin-bottom: 14px; }
+.circle-field__answer-chips { flex: none; }
+.circle-field__answer-more { margin: 12px 0 0; font: 400 13px/22px var(--font-body); color: rgb(255 255 255 / 50%); }
 .circle-field__answer-caret {
   display: inline-block;
   width: 2px;
@@ -242,6 +239,9 @@
   transition-delay: 165ms, 165ms, 0ms;
   cursor: pointer;
   touch-action: none;
+  /* What the answer holds can be taller than the black while it grows up around it (chips): the black reveals it, and none of
+     it shows over the board. */
+  overflow: hidden;
 }
 /* The line stands up first (165 ms), then the shape grows around the answer (300 ms), then its words come in (S2.P4.013, .014). */
 .circle-field__answer { animation: circle-field-answer-in 170ms linear 295ms backwards; }

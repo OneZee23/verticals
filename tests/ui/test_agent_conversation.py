@@ -1,7 +1,7 @@
 """The circle and the agent (docs/design-handoff scope 2): the conversation over the board, the step bubble, the answer
-in the circle, the agent's asks, message scroll, the conversation of the goal the agent made, and the field with no
-agent. The agent is `tests/ui/fake_agent/claude` behind the real desktop gateway and chat server; marks in the words
-steer it (`[tool:NAME]`, `[slow]`, `[ask]`, `[long]`, `[make:ID|Title]`)."""
+in the circle, the agent's asks, message scroll, the chips under what the agent made, and the field with no agent. The
+agent is `tests/ui/fake_agent/claude` behind the real desktop gateway and chat server; marks in the words steer it
+(`[tool:NAME]`, `[slow]`, `[ask]`, `[long]`, `[make:ID|Title]`)."""
 
 from __future__ import annotations
 
@@ -68,6 +68,9 @@ CONVERSATION = '[data-role="agent-conversation"]'
 BALLOON = "[data-balloon]"
 CIRCLE = ".circle-field"
 AGENT_BALLOON = f'{BALLOON}[data-who="agent"]'
+ANSWER = '[data-role="circle-answer"]'
+GOAL_CHIP = '[data-role="goal-chip"]'
+DOC_CHIP = '[data-role="doc-chip"]'
 
 
 def _send(page: Page, words: str) -> None:
@@ -151,24 +154,75 @@ def test_an_answer_lands_in_the_circle_and_a_click_sends_it_up(ui_agent: UiSessi
     expect(page.locator('[data-role="circle-answer"]')).to_have_count(0)
 
 
-def test_an_answer_that_links_a_document_stands_in_the_field_as_its_page(ui_agent: UiSession) -> None:
-    """Inbox and Documents redesign, final page: an answer that links a document is a note in the field, the document's
-    page on the left, a short title and the message on the right, a message's 24 px corners; a click opens the
-    conversation, where the document is a chip under the words."""
+def test_an_answer_that_links_a_document_stands_in_the_field_as_its_chip(ui_agent: UiSession) -> None:
+    """docs/design/agent-chips.md: an answer that links a document is the message in the field, a message's 24 px corners,
+    its words and under them the document's chip (its first page, its name, when it was edited); a click on the words
+    opens the conversation, where the same chip stands under the same words."""
     with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
         doc = core_docs.create(conn, owner=F2_OWNER, path="reports/syn-note.md", title="SYN report — 8 August 2026").doc.id
     page = ui_agent.page
     page.wait_for_selector(".goal-card__row")
-    _send(page, f"[say] Your report is ready. [SYN report](#doc/{doc}) [slow]")
+    _send(page, f"[slow] [say] Your report is ready.\n[SYN report — 8 August 2026](#doc/{doc})")
     page.locator('[data-role="out-of-focus"]').click(position={"x": 60, "y": 60})
-    note = page.locator(".circle-field__answer--note")
-    expect(note).to_contain_text("SYN report", timeout=10000)
-    expect(note).to_contain_text("Your report is ready.")
-    expect(note.locator(".doc-page")).to_have_count(1)
-    expect(page.locator(".circle-field__surface")).to_have_css("border-radius", "24px")  # once its corners have settled
-    page.locator(".circle-field__shape").click()
-    chip = page.locator(f'{BALLOON}[data-who="agent"] [data-role="doc-chip"][data-doc-id="{doc}"]')
+    answer = page.locator(ANSWER)
+    expect(answer).to_contain_text("Your report is ready.", timeout=10000)
+    chip = answer.locator(f'{DOC_CHIP}[data-doc-id="{doc}"]')
     expect(chip).to_contain_text("SYN report — 8 August 2026")
+    expect(chip.locator(".doc-page")).to_have_count(1)
+    expect(answer.locator(".circle-field__answer-words")).to_have_text("Your report is ready.")  # the chip says the rest
+    expect(page.locator(".circle-field__surface")).to_have_css("border-radius", "24px")  # once its corners have settled
+    page.locator(".circle-field__answer-words").click()
+    expect(page.locator(f'{BALLOON}[data-who="agent"] {DOC_CHIP}[data-doc-id="{doc}"]')).to_contain_text("SYN report — 8 August 2026")
+
+
+def _is_the_chip(chip, square: str, title: str, line: str) -> None:
+    """A goal chip: the board's own square, the goal's title, and the grey line of where it is and when."""
+    expect(chip.locator(".goal-chip__name")).to_have_text(title)
+    expect(chip.locator('[data-role="goal-chip-when"]')).to_have_text(line)
+    expect(chip.locator('[data-role="goal-chip-square"]')).to_have_css("background-color", square)
+
+
+def test_a_goal_the_agent_links_stands_under_its_words_as_a_chip_in_the_field_and_in_the_conversation(ui_agent: UiSession) -> None:
+    """docs/design/agent-chips.md: the link in the agent's words becomes a chip under them, with the goal's square in the
+    colour the board paints it, its title, and where it is and when ("Today · made just now"). The field's answer and
+    the agent's balloon are the same message with the same chip, and the line that only linked the goal is not said twice."""
+    dsn = ui_agent.backend.dsn
+    value = goal_made(dsn, "SYN value in blue", vertical="life", day="2026-01-01", color="#278dea")
+    goal = goal_made(dsn, "Plan the review", parent=value)
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{goal}"]')
+    board_square = page.locator(f'[data-goal-id="{goal}"] [data-role="checkbox-box"]').first.evaluate("el => getComputedStyle(el).backgroundColor")
+    assert board_square != "rgb(229, 229, 229)", board_square  # the board paints this goal in its value's colour
+    _send(page, f"[slow] [say] Made the task.\n[Plan the review](#goal/{goal})")
+    close_the_conversation(page)
+    expect(page.locator(ANSWER)).to_contain_text("Made the task.", timeout=10000)
+    expect(page.locator(ANSWER).locator(".circle-field__answer-words")).to_have_text("Made the task.")
+    _is_the_chip(page.locator(f'{ANSWER} {GOAL_CHIP}[data-goal-id="{goal}"]'), board_square, "Plan the review", "Today · made just now")
+    page.locator(".circle-field__answer-words").click()
+    expect(page.locator(f'{BALLOON}[data-who="agent"] .agent-balloon__markdown')).to_have_text("Made the task.")
+    _is_the_chip(page.locator(f'{BALLOON}[data-who="agent"] {GOAL_CHIP}[data-goal-id="{goal}"]'), board_square, "Plan the review", "Today · made just now")
+
+
+@pytest.mark.parametrize("where", ["conversation", "field"])
+def test_a_goal_chip_opens_the_goal_as_its_window(ui_agent: UiSession, where: str) -> None:
+    """A chip opens what it names: a goal as its window, as the board opens one, from the balloon and from the field."""
+    goal = goal_made(ui_agent.backend.dsn, "Plan the review")
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{goal}"]')
+    _send(page, f"[slow] [say] Made the task.\n[Plan the review](#goal/{goal})")
+    if where == "field":
+        close_the_conversation(page)
+        chip = page.locator(f'{ANSWER} {GOAL_CHIP}')
+    else:
+        chip = page.locator(f'{BALLOON}[data-who="agent"] {GOAL_CHIP}')
+    expect(chip).to_have_count(1, timeout=10000)
+    expect(page.locator(".vt-window")).to_have_count(0)
+    chip.click()
+    window = page.locator('.vt-window[data-window="goal"]')
+    expect(window).to_have_count(1)
+    expect(window.locator(f'.goal-card[data-goal-id="{goal}"]').first).to_contain_text("Plan the review", timeout=10000)
 
 
 def test_the_morning_report_is_asked_once_a_day_by_the_server(ui_agent: UiSession) -> None:
