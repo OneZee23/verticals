@@ -13,8 +13,9 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.ui.conftest import UiSession
+from tests.ui.conftest import UiSession, activate_column
 from tests.ui.test_carried_motion import SAMPLER, _board, _change, _trace
+from tests.ui.test_nested_sort import GRIP, _create_goal, _move_to_row_once, _press, _row
 
 ATTRIBUTE = "data-reduce-motion"
 SLIDE = '.pattern-vertical-board__column[data-vertical="week"] .period-slide:not([data-state="outgoing"])'
@@ -33,6 +34,21 @@ WATCH_FIELD = """() => {
   }, true);
 }"""
 FIELD_MOVES = """() => window.__fieldRuns.filter((name) => !['opacity', 'color', 'background-color'].includes(name))"""
+# Every frame while a goal is dragged, whether a neighbour slides to make room (a script's translateY animation on a card).
+WATCH_GAP = """() => {
+  window.__gap = [];
+  const frame = () => {
+    for (const a of document.getAnimations()) {
+      const card = a.effect?.target;
+      if (a.constructor !== Animation || !card?.matches?.('.goal-card') || card.closest('.pattern-vertical-board__drag-overlay')) continue;
+      for (const key of a.effect.getKeyframes()) {
+        if (typeof key.transform === 'string' && key.transform.startsWith('translateY')) window.__gap.push(key.transform);
+      }
+    }
+    window.__watching = requestAnimationFrame(frame);
+  };
+  frame();
+}"""
 # Every frame, whether a column's periods or their track travel (a transform or translate animation on them).
 WATCH_TRAVEL = """() => {
   window.__travel = [];
@@ -157,3 +173,38 @@ def test_a_column_pages_without_travel_when_motion_is_still(ui_f2: UiSession, sw
     page.wait_for_timeout(600)
     travelled = page.evaluate("() => window.__travel")
     assert bool(travelled) is not still, f"the column {'slid' if travelled else 'paged without travel'}: {travelled[:3]}"
+
+
+@MATRIX
+def test_a_dragged_goal_opens_its_gap_at_once_when_motion_is_still(
+    ui_f2: UiSession, switch: str | None, still: bool,
+) -> None:
+    """Carrying a goal over a column opens a gap where it would land, and the goals around it make room: they slide into
+    their new places (Column.vue for a column's own goals, GoalCard.vue for a goal's steps). With motion reduced, by the
+    system setting or the app's switch, the gap simply opens."""
+    session = ui_f2
+    page = session.page
+    _answer(session, switch)
+    parent = _create_goal(session, "SYN parent with steps", "week")
+    steps = [_create_goal(session, f"SYN step {n}", "week", parent_id=parent) for n in (1, 2, 3)]
+    page.reload()
+    activate_column(page, "week")
+
+    def carry(source: str, target: str) -> list[str]:
+        """Pick `source` up, take it over `target`, hold it there a moment, put it back; the slides seen on the way."""
+        page.evaluate(WATCH_GAP)
+        _press(page, page.locator(_row(source)), GRIP)
+        _move_to_row_once(page, lambda: page.locator(_row(target)), lambda box: (box["x"] + 50, box["y"] + box["height"] - 4))
+        slid = page.evaluate("() => window.__gap")
+        page.keyboard.press("Escape")
+        page.mouse.up()
+        page.wait_for_timeout(400)
+        return slid
+
+    top = page.evaluate("""() => [...document.querySelectorAll('.pattern-vertical-board__column[data-vertical="week"] [data-role="period-slide"]:not([data-state="outgoing"]) .pattern-vertical-board__body > .card-stack > .goal-card')]
+      .map((card) => card.dataset.goalId).filter((id) => id !== '%s')""" % parent)
+    assert len(top) >= 3, top
+    column_slid = carry(top[0], top[2])
+    nested_slid = carry(steps[0], steps[2])
+    assert bool(column_slid) is not still, f"a column's goals {'made room' if column_slid else 'opened the gap at once'}: {column_slid[:2]}"
+    assert bool(nested_slid) is not still, f"a goal's steps {'made room' if nested_slid else 'opened the gap at once'}: {nested_slid[:2]}"

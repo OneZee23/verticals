@@ -26,6 +26,7 @@ import { useCardFamily } from '../lib/cardFamily'
 import { familyMovingNow } from '../lib/familyMotion'
 import { devGoalLayout } from '../lib/devGoalLayout'
 import { isPrivate } from '../lib/privacy'
+import { reducedMotion } from '../lib/motion'
 import '../kit-ext/carryover-ghost/carryover-ghost.css'
 
 const props = withDefaults(
@@ -416,6 +417,7 @@ const nestedInsertionSlot = computed(() => (
    children list so a nested reorder's neighbours slide instead of jumping — mirrored, not
    reinvented. */
 watch(nestedInsertionSlot, async () => {
+  if (reducedMotion()) return // the gap simply opens (docs/design/column-bounce.md)
   const selector = ':scope > [data-goal-id]'
   const before = new Map(
     [...(childrenListEl.value?.querySelectorAll<HTMLElement>(selector) ?? [])]

@@ -263,6 +263,7 @@ const insertionSlot = computed(() => {
   return dragSlot.value?.insertBeforeId ?? null
 })
 watch(insertionSlot, async () => {
+  if (reducedMotion()) return // the gap simply opens, the goals below stand where they land (docs/design/column-bounce.md)
   const selector = ':scope > [data-role="period-track"] > [data-state]:not([data-state="outgoing"]) [data-goal-id]'
   const before = new Map(
     [...(columnRoot.value?.querySelectorAll<HTMLElement>(selector) ?? [])]
