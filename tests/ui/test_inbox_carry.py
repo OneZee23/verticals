@@ -18,7 +18,7 @@ from verticals.core import goals as core_goals, privacy as core_privacy
 from tests.ui.conftest import UiSession
 from tests.ui.test_agent_conversation import ui_agent  # noqa: F401  (the fixture)
 from tests.ui.test_moving import MONTH_GOAL, _open_weeks
-from tests.ui.views import FIELD, switch_view
+from tests.ui.views import FIELD, switch_view, tick
 
 OWNER = "t1"
 DAY = date(2026, 8, 8)
@@ -320,6 +320,21 @@ def test_a_press_on_the_waiting_card_that_does_not_move_carries_nothing(ui_f2: U
     expect(page.locator(WAITING)).not_to_have_class(re.compile("is-in-hand"))
     page.mouse.up()
     expect(page.locator(HAND)).to_have_count(0)
+
+
+def test_a_carry_that_ends_elsewhere_swallows_no_later_click(ui_f2: UiSession) -> None:
+    """"A press that became a carry is not a click" holds for that click only: the first click on another task, later,
+    opens it."""
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    held = _press(page, f'{TODAY} {CARD}[data-goal-id="{ids["loose"]}"]')
+    _glide(page, held, (900, 120))
+    page.mouse.up()  # let go on the desk: back in its place
+    expect(page.locator(HAND)).to_have_count(0)
+    tick(page)
+    page.locator(f'{TODAY} {CARD}[data-goal-id="{ids["valued"]}"] .inbox-card__words').click()
+    expect(page.locator('[data-role="goal-window"]')).to_have_count(1, timeout=5000)
 
 
 _LOOK = """el => {

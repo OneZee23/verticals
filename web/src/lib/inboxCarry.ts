@@ -22,7 +22,7 @@ export const carry = reactive({
 })
 
 let start: { x: number; y: number; dx: number; dy: number; item: InboxGoal; width: number } | null = null
-/** A press that became a carry is not a click. */
+/** A press that became a carry is not a click. The next press clears it: a carry let go elsewhere swallows no later click. */
 let carried = false
 export const wasCarried = (): boolean => { const was = carried; carried = false; return was }
 
@@ -69,6 +69,7 @@ function onKey(event: KeyboardEvent): void {
 
 export function pressCard(event: PointerEvent, item: InboxGoal): void {
   if (event.button !== 0 || (event.target as HTMLElement).closest('.goal-affordance')) return
+  carried = false
   const card = event.currentTarget as HTMLElement
   const box = card.getBoundingClientRect()
   // In the hand a task is the Inbox's tile, a quarter of the desk, held where it was taken: from the desk, and from the
