@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import httpx
 import psycopg
 from playwright.sync_api import Page, expect
 
@@ -303,3 +304,46 @@ def test_a_documents_head_stands_under_the_desktop_apps_title_bar(ui_f2: UiSessi
     ):
         part = _rect(page, selector)
         assert part["y"] >= 28, f"{selector} reaches into the title bar: top {part['y']}"
+
+
+def test_a_press_below_the_text_starts_writing_at_its_end(ui_f2: UiSession) -> None:
+    """The page is its writing area: what a short text leaves of the sheet belongs to the document's body, down to the room
+    the field keeps under it, so a press anywhere on the page puts the caret at the end of the text and what is typed lands
+    there. The field's own room, where a press may only have missed the circle, writes nothing."""
+    session = ui_f2
+    page = session.page
+    page.set_viewport_size(OWNER_WINDOW)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc_id = _doc(conn, "syn-full/write.md", "SYN Write", "Two lines.\n\nThat is all.")
+    page.reload()
+    switch_view(page, "docs")
+    page.mouse.move(8, 8)
+    open_page(page, doc_id)
+    page.wait_for_timeout(300)
+    win = _rect(page, DOC)
+    body = page.locator(f"{DOC} [data-role='doc-body']")
+    fade = float(page.locator(DOC).evaluate(FADE_HEIGHT))
+
+    # The body runs from the text down to where the fade starts at rest, not as tall as its two lines.
+    box = _rect(page, f"{DOC} [data-role='doc-body']")
+    room = win["bottom"] - fade - box["bottom"]
+    assert 0 <= room <= 30, f"the body stops {room} px from the fade's top, with its two lines at {box['h']} px"
+    expect(body).to_have_css("cursor", "text")  # the I-beam over the blank page says it takes writing
+
+    # A press in the field's room, 40 px from the circle's side, is not a press on the page: nothing starts.
+    circle = _rect(page, ".circle-field__shape")
+    page.mouse.click(circle["x"] - 40, circle["y"] + circle["h"] / 2)
+    page.wait_for_timeout(200)
+    expect(body).to_have_attribute("contenteditable", "false")
+
+    # A press far under the text, in the middle of the blank page, starts writing at the end of the text.
+    page.mouse.click(win["x"] + 300, 450)
+    expect(body).to_have_attribute("contenteditable", "true")
+    page.keyboard.type(" END")
+    expect(body.locator("p").last).to_have_text("That is all. END")
+    expect(body.locator("p").first).to_have_text("Two lines.")
+    page.wait_for_timeout(1500)
+    saved = httpx.get(
+        f"{session.backend.base_url}/api/docs/{doc_id}", headers={"Authorization": f"Bearer {session.backend.token}"}, timeout=10
+    )
+    assert saved.status_code == 200 and saved.json()["body"].rstrip().endswith("That is all. END"), saved.text

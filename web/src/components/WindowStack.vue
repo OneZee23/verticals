@@ -224,6 +224,11 @@ function onWindowClick(index: number, event: MouseEvent): void {
   max-height: none;
 }
 .vt-window--full .vt-window__body { flex: 1 1 auto; scroll-padding-bottom: var(--vt-foot); }
+/* The page is its writing area: what a short text leaves of the sheet belongs to the document's body (DocWindowBody.vue),
+   down to the room the field keeps under it, so a press anywhere on the page writes at the end of the text. The scroller
+   and the picture around the text (ProgressiveBlur.vue) hand the room down; none of them may shrink under a long text. */
+.vt-window--full .vt-window__body, .vt-window--full .pblur, .vt-window--full .pblur__live { display: flex; flex-direction: column; }
+.vt-window--full .pblur, .vt-window--full .pblur__live { flex: 1 0 auto; }
 /* The field stands over the foot on a white fade. It is solid as high as the conversation keeps clear of the field
    (AgentConversation.vue: 24 px under the circle, its height, 12 px over it, and the tags' lift while they are in), then
    48 px of ramp. The end of a text rests above the fade as it is at rest (--vt-foot, DocWindowBody.vue). The fade lets
