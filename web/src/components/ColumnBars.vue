@@ -99,8 +99,12 @@ const noun = computed(() => props.kind.toLowerCase())
 }
 .column-bars__bar--ink { background: #2d3036; }
 .column-bars__button:focus-visible { outline: none; }
-.column-bars__button:focus-visible .column-bars__bar { background: #2d3036; transition: none; }
-.column-bars__button:focus-visible .column-bars__mark { background: rgb(45 48 54 / 8%); }
+/* Pressed, a bar looks as it does in a keyboard's focus: it answers at the press, on a touch screen too, where nothing
+   hovers; the action itself fires on release over the same button. */
+.column-bars__button:focus-visible .column-bars__bar,
+.column-bars__button:active .column-bars__bar { background: #2d3036; transition: none; }
+.column-bars__button:focus-visible .column-bars__mark,
+.column-bars__button:active .column-bars__mark { background: rgb(45 48 54 / 8%); }
 /* Nothing hovers on a touch screen, so the side bars stay in view there; where a pointer can hover they come with it:
    at once, and fade back in 200 ms (none under reduced motion, where the token is 0). Held in view by a keyboard's focus
    (a mouse's leaves the pointer's way alone). */
