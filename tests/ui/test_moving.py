@@ -5,8 +5,10 @@ field, the goal waits there beside "Weeks" and Backspace picks things up. F2, th
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 import psycopg
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession
@@ -49,6 +51,58 @@ def _open_weeks(page: Page, goal_id: str = MONTH_GOAL) -> tuple[float, float]:
     expect(page.locator(SPAN)).not_to_have_count(0)
     page.wait_for_timeout(700)
     return dots
+
+
+@pytest.fixture
+def ui_reduced_motion(request: pytest.FixtureRequest) -> str:
+    """The suite runs with motion off; a test that looks at motion asks for it with `parametrize(..., indirect=True)`."""
+    return getattr(request, "param", "reduce")
+
+
+# The field widens round the card that waits above it. Slowed to three seconds on a straight line, each stage of that is
+# drawn many times, so a test sees every size the card takes on the way (a real widening is a few frames).
+SLOW_WIDENING = ".circle-field__shape { transition-duration: 3s !important; transition-timing-function: linear !important; }"
+_CARD_EVERY_FRAME = """() => {
+  const log = window.__cardFrames = { frames: [], on: true };
+  const shape = document.querySelector('.circle-field__shape');
+  const round = (n) => Math.round(n * 10) / 10;
+  (function frame() {
+    if (!log.on) return;
+    const card = document.querySelector('[data-role="moving-goal"]');
+    if (card) {
+      const box = card.getBoundingClientRect();
+      log.frames.push({ field: round(shape.getBoundingClientRect().width), width: round(box.width), height: round(box.height) });
+    }
+    requestAnimationFrame(frame);
+  })();
+}"""
+_FIELD_HAS_WIDENED = """() => {
+  const shape = document.querySelector('.circle-field__shape');
+  const target = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--moving-field-width'));
+  return Math.abs(shape.getBoundingClientRect().width - target) < 0.5;
+}"""
+
+
+def _frames_while_the_field_widens(page: Page, let_go: Callable[[], None]) -> list[dict[str, float]]:
+    """The waiting card's size in every frame from the let-go to the end of the field's widening. The field is the pill that
+    takes the goal when this is called, so it is only now that the widening is slowed."""
+    page.add_style_tag(content=SLOW_WIDENING)
+    page.evaluate(_CARD_EVERY_FRAME)
+    let_go()
+    expect(page.locator('[data-role="moving-goal"]')).to_have_count(1)
+    page.wait_for_function(_FIELD_HAS_WIDENED, timeout=15000)
+    return page.evaluate("() => { window.__cardFrames.on = false; return window.__cardFrames.frames }")
+
+
+def _assert_the_card_is_what_it_will_be_in_every_frame(frames: list[dict[str, float]]) -> None:
+    """kk-motion's clean middle frames: the card has its rest size from the first frame; the field widens beneath it. A
+    title of one line is never two while the field is still narrow (the card has the room it will have, not the room left)."""
+    fields = [frame["field"] for frame in frames]
+    assert len(frames) > 30 and min(fields) <= 140 and max(fields) >= 290, (len(frames), min(fields), max(fields))
+    rest = frames[-1]
+    assert rest["height"] == 34, rest  # one line: 8 px, an 18 px line, 8 px
+    odd = [frame for frame in frames if abs(frame["width"] - rest["width"]) > 0.5 or abs(frame["height"] - rest["height"]) > 0.5]
+    assert not odd, f"the card is not the one it will be in {len(odd)} of {len(frames)} frames: first {odd[0]}, at rest {rest}"
 
 
 def test_a_drag_shows_dots_in_every_column_but_life(ui_f2: UiSession) -> None:
@@ -269,3 +323,16 @@ def test_tab_escape_and_typing_work_the_moment_the_goal_is_let_go(ui_f2: UiSessi
     page.keyboard.press("Escape")
     expect(page.locator(SPANS)).to_have_count(0)
     expect(page.locator('[data-role="moving-stack"]')).to_have_count(0)
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_the_waiting_goal_is_the_same_card_in_every_frame_while_the_field_widens(ui_f2: UiSession) -> None:
+    """The field is the 120 px pill that takes the goal; let go, it widens round the goal and "Weeks". The goal has the lines
+    it has at rest from the first frame, not the room that is left in a field that has not widened yet."""
+    page = ui_f2.page
+    page.wait_for_selector(f'[data-goal-id="{MONTH_GOAL}"]')
+    dots = _open_weeks(page)
+    _glide(page, dots, _centre(page, ".circle-field__shape"))
+    page.wait_for_function("() => Math.round(document.querySelector('.circle-field__shape').getBoundingClientRect().width) === 120")
+    frames = _frames_while_the_field_widens(page, page.mouse.up)
+    _assert_the_card_is_what_it_will_be_in_every_frame(frames)

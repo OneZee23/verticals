@@ -17,7 +17,10 @@ from playwright.sync_api import Page, expect
 from verticals.core import goals as core_goals, privacy as core_privacy
 from tests.ui.conftest import UiSession
 from tests.ui.test_agent_conversation import ui_agent  # noqa: F401  (the fixture)
-from tests.ui.test_moving import MONTH_GOAL, _open_weeks
+from tests.ui.test_moving import (  # noqa: F401  (ui_reduced_motion is the fixture)
+    MONTH_GOAL, _assert_the_card_is_what_it_will_be_in_every_frame, _frames_while_the_field_widens, _open_weeks,
+    ui_reduced_motion,
+)
 from tests.ui.views import FIELD, switch_view, tick
 
 OWNER = "t1"
@@ -32,12 +35,6 @@ HAND = '[data-role="inbox-carried"]'
 OLD_TILE = '[data-role="inbox-beside"], .inbox-beside'
 MAYBE_TASK = "SYNMAY01"  # F2's first Maybe candidate: an older task, a tile in Earlier's row
 SRC = Path(__file__).resolve().parents[2] / "web" / "src"
-
-
-@pytest.fixture
-def ui_reduced_motion(request: pytest.FixtureRequest) -> str:
-    """The suite runs with motion off; a test that looks at motion asks for it with `parametrize(..., indirect=True)`."""
-    return getattr(request, "param", "reduce")
 
 
 def _written(conn: psycopg.Connection, goal_id: str, ago: str) -> None:
@@ -488,6 +485,20 @@ def test_the_card_arrives_in_the_field_as_on_the_board_with_no_entrance_of_its_o
     assert animations == [], animations
     names = page.evaluate("[...document.styleSheets].flatMap((s) => [...s.cssRules]).filter((r) => r.type === 7).map((r) => r.name)")
     assert not [name for name in names if "beside" in name], names
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_the_waiting_task_is_the_same_card_in_every_frame_while_the_field_widens(ui_f2: UiSession) -> None:
+    """As on the board: the field is the 120 px pill that takes the task; let go, it widens round it. The card has the lines
+    it has at rest from the first frame, not the room that is left in a field that has not widened yet."""
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    held = _press(page, f'{TODAY} {CARD}[data-goal-id="{ids["under"]}"]')
+    _glide(page, held, _centre(page, SHAPE))
+    page.wait_for_function("() => Math.round(document.querySelector('.circle-field__shape').getBoundingClientRect().width) === 120")
+    frames = _frames_while_the_field_widens(page, page.mouse.up)
+    _assert_the_card_is_what_it_will_be_in_every_frame(frames)
 
 
 def test_nothing_of_the_tile_beside_the_field_is_left() -> None:

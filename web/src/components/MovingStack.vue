@@ -78,7 +78,10 @@ function onGoalDown(event: PointerEvent): void {
 
 <style>
 /* "Weeks": 36 px, 18 px corners, black, words 15/20 at 500; the goal is its card at 12 px, lit softly green from under;
-   they stand 8 px apart on one baseline, 4 px in from the field's left (S5.P3.006, .043). */
+   they stand 8 px apart on one baseline, 4 px in from the field's left (S5.P3.006, .043). Its width is the room it has once
+   the field has widened (the field's width is its target, set at once), not the room left in a field that has not yet:
+   the card has the lines it will have in every frame of the widening. At rest the room is the one it always had: the
+   field's width less 8 px, or less 4 px and the buttons when they stand at its left end. */
 .moving-stack {
   position: absolute;
   left: calc(50% - var(--moving-field-width, 300px) / 2 + 4px + var(--moving-tags-shift, 0px));
@@ -86,7 +89,8 @@ function onGoalDown(event: PointerEvent): void {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  max-width: calc(var(--moving-field-width, 300px) - 8px);
+  width: max-content;
+  max-width: calc(var(--moving-field-width, 300px) - max(8px, 4px + var(--moving-tags-shift, 0px)));
   transition: left 200ms var(--vt-ease-large);
   pointer-events: auto;
 }
