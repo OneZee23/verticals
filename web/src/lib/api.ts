@@ -355,8 +355,12 @@ export function getGoal(id: string, prefetch = false): Promise<GoalDetail> {
   )
 }
 
-export function patchGoal(id: string, patch: UpdatePatch, keepalive = false): Promise<GoalCard> {
-  return request<GoalCard>(`/api/goals/${encodeURIComponent(id)}`, {
+/** The answer to a patch. A tick of a repeating goal also names the occurrence it made (`next_occurrence`), so the page can
+ *  take that one back with the tick (docs/design/board-undo.md); a replay, which finds it there, names none. */
+export type PatchedGoal = GoalCard & { next_occurrence?: GoalCard }
+
+export function patchGoal(id: string, patch: UpdatePatch, keepalive = false): Promise<PatchedGoal> {
+  return request<PatchedGoal>(`/api/goals/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
     keepalive,

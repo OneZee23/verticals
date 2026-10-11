@@ -186,8 +186,8 @@ function readAfter(p: HistoryPorts, before: Shot[]): Map<string, Shot> {
 
 /** Runs a write the person started (`run` is the store's own verb) and, once it has finished, records what it changed on
  *  `id`, and with `family` on everything under it that the board carries. A write that failed, or changed nothing, is not a
- *  step. */
-export function track(id: string, run: () => Promise<void>, family = false): Promise<void> {
+ *  step. `extend` adds to the step what only the write knows (the occurrence a tick made, `lib/repeatSteps.ts`). */
+export function track(id: string, run: () => Promise<void>, family = false, extend?: (step: Step) => Step): Promise<void> {
   const p = ports
   if (!p) return run()
   return makeStep(async () => {
@@ -213,7 +213,9 @@ export function track(id: string, run: () => Promise<void>, family = false): Pro
       const there = after.get(shot.id)
       return there && changed(shot, there) ? [{ before: shot, after: there }] : []
     })
-    return pairs.some((pair) => pair.before.id === id) ? editStep(pairs, id) : null
+    if (!pairs.some((pair) => pair.before.id === id)) return null
+    const step = editStep(pairs, id)
+    return extend ? extend(step) : step
   })
 }
 
