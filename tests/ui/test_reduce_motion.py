@@ -14,6 +14,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession, activate_column
+from tests.ui.test_agent_conversation import _answered as _agent_answered, _send, ui_agent  # noqa: F401 (the fixture)
 from tests.ui.test_carried_motion import SAMPLER, _board, _change, _trace
 from tests.ui.test_nested_sort import GRIP, _create_goal, _move_to_row_once, _press, _row
 
@@ -46,6 +47,20 @@ WATCH_GAP = """() => {
       }
     }
     window.__watching = requestAnimationFrame(frame);
+  };
+  frame();
+}"""
+# Every frame while the agent works and answers, whether the line in the circle is turned upright by a script (a plain
+# animation on the pivot; the turning itself is a CSS animation, which this does not count).
+WATCH_PIVOT = """() => {
+  window.__pivot = [];
+  const frame = () => {
+    for (const a of document.getAnimations()) {
+      if (a.constructor === Animation && a.effect?.target?.matches?.('.circle-field__pivot')) {
+        window.__pivot.push(a.effect.getKeyframes().map((key) => key.transform).join(' to '));
+      }
+    }
+    requestAnimationFrame(frame);
   };
   frame();
 }"""
@@ -208,3 +223,22 @@ def test_a_dragged_goal_opens_its_gap_at_once_when_motion_is_still(
     nested_slid = carry(steps[0], steps[2])
     assert bool(column_slid) is not still, f"a column's goals {'made room' if column_slid else 'opened the gap at once'}: {column_slid[:2]}"
     assert bool(nested_slid) is not still, f"a goal's steps {'made room' if nested_slid else 'opened the gap at once'}: {nested_slid[:2]}"
+
+
+@MATRIX
+def test_the_agents_line_stands_upright_at_once_when_motion_is_still(
+    ui_agent: UiSession, switch: str | None, still: bool,
+) -> None:
+    """While the agent works the line in the circle turns; when it answers, it ends upright (SearchBar.vue turns it the
+    rest of the way in 165 ms). With motion reduced it never turns, so there is nothing to turn back."""
+    page = ui_agent.page
+    _answer(ui_agent, switch)
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "Plan the week [tool:schedule] [slow]")
+    expect(page.locator(".circle-field__pivot.is-turning")).to_have_count(1, timeout=5000)
+    page.evaluate(WATCH_PIVOT)
+    _agent_answered(page, "Done: Plan the week")
+    expect(page.locator(".circle-field__pivot.is-turning")).to_have_count(0)
+    page.wait_for_timeout(300)
+    straightened = page.evaluate("() => window.__pivot")
+    assert bool(straightened) is not still, f"the line {'was turned upright' if straightened else 'stood upright at once'}: {straightened[:2]}"
