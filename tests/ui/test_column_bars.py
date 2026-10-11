@@ -223,6 +223,29 @@ def test_a_bar_under_the_pointer_darkens(ui_f2: UiSession) -> None:
         assert [bar["color"] for bar in _bars(page, "week")] == want, cap
 
 
+def test_a_press_marks_the_bar_and_sliding_away_cancels_it(ui_f2: UiSession) -> None:
+    """The look changes at the press, in the mark a keyboard's focus has; the paging waits for the release over the same bar."""
+    page = _open(ui_f2)
+    _hover(page, "week")
+    _wait_bars(page, "week", 5)
+    next_bar = _col(page, "week").locator('[data-cap="period-next"]')
+    box = next_bar.bounding_box()
+    assert box is not None
+    mark = next_bar.locator(".column-bars__mark")
+    centre = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.move(*centre)
+    _frames(page)
+    assert mark.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)", "under the pointer, not pressed"
+    page.mouse.down()
+    _frames(page)
+    assert mark.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(45, 48, 54, 0.08)", "pressed"
+    page.mouse.move(centre[0], 700)
+    page.mouse.up()
+    _frames(page)
+    expect(_col(page, "week")).to_have_attribute("data-period-key", "2026-W32")
+    assert mark.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)", "let go"
+
+
 @pytest.mark.parametrize("vertical", PAGED)
 def test_the_side_bars_page_the_column(ui_f2: UiSession, vertical: str) -> None:
     """The bar at the right steps its column to the next period and the left one to the one before, by the column's own
@@ -388,6 +411,22 @@ def test_a_scrolled_column_pins_its_line_and_names_the_period(ui_f2: UiSession) 
     _wait_line(page, "week", "kind")
 
 
+def test_the_line_moves_nothing_at_rest(ui_f2: UiSession) -> None:
+    """The line holds the room the slide's padding held, so a column at its top stands as it did before it: the kind row 4 px
+    under the column's top, the big name's box 22 under it, and the first goal 88."""
+    _seed(ui_f2, "week", 5)
+    page = _open(ui_f2)
+    column = _col(page, "week")
+    expect(column.locator(".goal-card").first).to_be_visible()
+    placed = column.evaluate(
+        """(col) => {
+          const top = col.getBoundingClientRect().top;
+          const at = (sel) => col.querySelector(sel).getBoundingClientRect().top - top;
+          return { kind: at('.t-caption'), title: at('.t-title'), goal: at('.goal-card') };
+        }""")
+    assert placed == {"kind": 4, "title": 22, "goal": 88}
+
+
 def test_a_wheel_over_the_line_scrolls_the_column(ui_f2: UiSession) -> None:
     """The line is part of the slide that scrolls, as the header is: the pointer on it, scrolled or not, wheels the goals,
     and the line stays."""
@@ -406,23 +445,34 @@ def test_a_wheel_over_the_line_scrolls_the_column(ui_f2: UiSession) -> None:
 
 
 def test_an_opened_goal_is_scrolled_into_view_below_the_line(ui_f2: UiSession) -> None:
-    """A goal that has to scroll to be seen whole stops 16 px under the edge the goals scroll under (lib/columnFit.ts):
-    below the line and its 14 px of fade, not under them."""
+    """A goal opened while its top is behind the line stops 16 px under the edge the goals scroll under (lib/columnFit.ts):
+    below the line and its 14 px of fade, not behind them."""
     _seed(ui_f2, "week", 40)
     page = _open(ui_f2)
-    _scroll(page, "week", 300)
     column = _col(page, "week")
-    low = column.locator(".goal-card[data-row-key]").evaluate_all(
-        """(cards) => { const col = cards[0].closest('[data-vertical]').getBoundingClientRect();
-          const seen = cards.filter((c) => { const r = c.getBoundingClientRect(); return r.top > col.top + 60 && r.bottom < innerHeight - 40; });
-          return seen[seen.length - 1].dataset.goalId; }""")
-    column.locator(f'.goal-card[data-goal-id="{low}"] > .goal-card__row .goal-card__title').first.click()
+    ninth = column.locator(".goal-card[data-row-key]").nth(8)
+    wanted = ninth.get_attribute("data-goal-id")
+    start = ninth.evaluate(
+        """(card) => { const slide = card.closest('.period-slide');
+          return card.getBoundingClientRect().top - slide.getBoundingClientRect().top + slide.scrollTop; }""")
+    _scroll(page, "week", round(start - 20))  # its top stands 20 px under the column's top: its row lies behind the line and its fade
+    box = column.bounding_box()
+    assert box is not None
+    at = (box["x"] + 100, box["y"] + 36)  # on the goal's title, in the fade under the line, which lets the pointer through
+    page.mouse.move(*at)
+    _frames(page, 4)
+    page.mouse.click(*at)
     expect(page.locator(".goal-card--detail-open")).to_have_count(1)
     page.wait_for_function("() => !document.body.dataset.familyMoving")
     _frames(page, 6)
-    top = column.locator(".goal-card--detail-open").evaluate(
-        "(card) => card.getBoundingClientRect().top - card.closest('[data-vertical]').getBoundingClientRect().top")
-    assert top >= 42, f"the opened goal stands {top:.0f} px under the column's top: under the line and its fade"
+    opened = column.locator(".goal-card--detail-open")
+    assert opened.get_attribute("data-goal-id") == wanted, "the click opened the goal it was on"
+    # where it stands as laid out: the hovered card's lift is not where the column put it
+    top = opened.evaluate(
+        """(card) => { const slide = card.closest('.period-slide'); let y = 0;
+          for (let e = card; e && e !== slide; e = e.offsetParent) y += e.offsetTop;
+          return y - slide.scrollTop; }""")
+    assert top >= 42, f"the opened goal stands {top:.0f} px under the column's top: behind the line and its fade"
 
 
 def test_the_line_takes_the_period_once_the_name_is_under_it_and_gives_it_back_sooner(ui_f2: UiSession) -> None:
