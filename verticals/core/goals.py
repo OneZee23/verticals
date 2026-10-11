@@ -95,10 +95,14 @@ class Created:
 @dataclass(frozen=True)
 class Updated:
     """`update`'s call envelope. `open_descendants` is set only when this call set `done=True`
-    (S-19) — `None` otherwise distinguishes "didn't touch completion" from "closed a leaf"."""
+    (S-19) — `None` otherwise distinguishes "didn't touch completion" from "closed a leaf".
+    `spawned` is the next occurrence this call made when it completed a repeating goal
+    (`core/repeat.py`); `None` when it made none, and also when it was already there (a replay),
+    since only what a call made is its own to be taken back (docs/design/board-undo.md)."""
 
     goal: Goal
     open_descendants: int | None
+    spawned: Goal | None = None
 
 
 GoalDetail = ideas_mod.GoalDetail
@@ -620,9 +624,12 @@ def update(
                         f"goal {g.id!r} is not one",
                         field=gated_field,
                     )
+        spawned: dict[str, Goal] = {}
         if done is True:
             for completed in tuple(goals_by_id.values()):
-                repeat_mod.materialize_next(conn, owner=owner, completed=completed)
+                occurrence = repeat_mod.materialize_next(conn, owner=owner, completed=completed)
+                if occurrence is not None and occurrence.created:
+                    spawned[completed.id] = occurrence.goal
         open_descendants: dict[str, int] = {}
         if done is True:
             # One statement for every affected row (S-44: "one UPDATE, one readback", never one
@@ -639,7 +646,9 @@ def update(
             )
 
         by_id = {
-            gid: Updated(goal=g, open_descendants=open_descendants.get(gid) if done is True else None)
+            gid: Updated(
+                goal=g, open_descendants=open_descendants.get(gid) if done is True else None, spawned=spawned.get(gid)
+            )
             for gid, g in goals_by_id.items()
         }
 

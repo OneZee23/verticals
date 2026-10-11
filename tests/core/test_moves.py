@@ -492,6 +492,34 @@ def test_schedule_parent_up_moves_same_group_family_and_leaves_the_rest(
     assert after[parked.id][0] is None
 
 
+def test_schedule_keeps_the_family_in_the_order_the_card_draws_it(f2: psycopg.Connection) -> None:
+    """The subgoals nested in a card travel with it in the order they had, in both directions (docs/design/board-undo.md).
+    They used to be numbered by `path`, whose ids are random letters, so a family move shuffled them among themselves and a
+    move taken back by ⌘Z could not put them back."""
+    anchor = date(2026, 8, 12)
+    parent = goals.create(f2, owner=OWNER, title="order parent", vertical="week", anchor_date=anchor).goal
+    kids = [
+        goals.create(
+            f2, owner=OWNER, title=f"order kid {n}", parent_id=parent.id, vertical="week", anchor_date=anchor
+        ).goal
+        for n in range(4)
+    ]
+    # Drawn order against id order: the kid with the lowest id is drawn last, so the old numbering cannot match by luck.
+    drawn = sorted(kids, key=lambda kid: kid.id, reverse=True)
+    for place, kid in enumerate(drawn):
+        f2.execute("UPDATE goals SET position = %s WHERE id = %s", (40_000 + 1024 * place, kid.id))
+
+    def order() -> list[str]:
+        rows = f2.execute("SELECT id FROM goals WHERE parent_id = %s ORDER BY position", (parent.id,)).fetchall()
+        return [row[0] for row in rows]
+
+    assert order() == [kid.id for kid in drawn]
+    for vertical in ("month", "week"):
+        moved = moves.schedule(f2, owner=OWNER, id=parent.id, vertical=vertical, anchor_date=anchor)
+        assert moved.descendants_clamped == 4
+        assert order() == [kid.id for kid in drawn], f"the family's order after moving to {vertical}"
+
+
 def test_schedule_period_only_move_carries_the_nested_family(
     f2: psycopg.Connection,
 ) -> None:
