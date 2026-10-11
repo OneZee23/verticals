@@ -11,6 +11,7 @@ import { rowLeft, spanRow, spans, spanWidth } from '../lib/spans'
 import { commandFilter } from '../lib/commandFilter'
 import { ghostOf } from '../lib/ghost'
 import { reducedMotion, timing } from '../lib/motion'
+import { escape as leaveMove } from '../lib/moving'
 
 const root = ref<HTMLElement | null>(null)
 const row = ref<HTMLElement | null>(null)
@@ -74,6 +75,19 @@ onBeforeUnmount(() => {
     lifted.animate([{ transform: 'none' }, { transform: `translateX(${dx}px)`, boxShadow: 'none' }], timing(ms, 'large', { fill: 'forwards' }))
   })
 })
+
+/* The mode opened from a column's middle bar has no goal in the hand to cancel (docs/design/column-bars.md): Esc lets go
+   of a pick and then ends it (S5.P4.013, S5.P1.029), as it does from the field, from anywhere on the screen. What has
+   its own Esc keeps it: a drag cancels itself, a goal opened or a window, a menu and the text being typed take it first. */
+function onKeyDown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return
+  if (store.state.drag.id || store.state.drag.pending || store.state.drag.settling || store.state.openGoalId !== null) return
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return
+  if (leaveMove()) event.preventDefault()
+}
+onMounted(() => window.addEventListener('keydown', onKeyDown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
 
 /* One span on or back: the row keeps its place for a frame, then slides by one span (S5.P1.025). */
 watch(() => spans.offset, async (now, was) => {
@@ -144,6 +158,7 @@ watch(() => spans.side, async () => {
         :period-key="floating.periodKey"
         :add-placeholder="floating.addPlaceholder"
         active
+        floating
       />
     </div>
   </div>

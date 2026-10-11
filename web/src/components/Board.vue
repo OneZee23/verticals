@@ -12,7 +12,7 @@ import { KButton, KCardStack } from '@konstantinopolskii/vue'
 import Column from './Column.vue'
 import DragOverlay from './DragOverlay.vue'
 import SpansBoard from './SpansBoard.vue'
-import { spans } from '../lib/spans'
+import { openSpans, spans, type SpanScale } from '../lib/spans'
 import { store, todayIso } from '../store'
 import { AUTOSCROLL_TICK_MS } from '../lib/drag'
 import { wheelIntent } from '../lib/boardWheel'
@@ -117,6 +117,14 @@ function navigateToday() {
   const current = store.state.board?.anchor_date
   if (!current || current === today) return
   void loadPeriod(today, current < today ? 1 : -1)
+}
+
+/** The middle bar of a column's sign opens that column's spans: the mode a dragged goal opens when it rests on the
+ *  column's corner (`lib/spansDrag.ts`), with nothing in the hand. It starts at this period, as the corner's does, and
+ *  floats the next column up (docs/design/column-bars.md). */
+function openMode(vertical: string, periodKey: string | null) {
+  if (spans.vertical) return
+  void openSpans(vertical as SpanScale, vertical, periodKey, todayIso())
 }
 
 // --- drag (AC-220/S-145) ------------------------------------------------------------------------
@@ -265,7 +273,7 @@ onBeforeUnmount(() => document.body.classList.remove('pattern-vertical-board__no
       @mouseenter="previewColumn(column.vertical)"
       @pointermove="previewColumn(column.vertical)"
       @period-step="navigatePeriod"
-      @period-today="navigateToday"
+      @period-mode="openMode"
     />
   </KCardStack>
   <canvas

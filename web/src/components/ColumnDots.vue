@@ -37,10 +37,11 @@ const colours = computed(() => {
 
 <style>
 /* 5 px dots in a 25 px row ending at the column's right padding, on the name's line; held, 9 px, 6 px apart, in the
-   goal's colours with a soft glow (S5.P2.006, .009, .014). */
+   goal's colours with a soft glow (S5.P2.006, .009, .014). They stand over the line pinned at the column's top
+   (z-index 11, ColumnLine.vue), where the period bars stand when nothing is dragged. */
 .column-dots {
   position: absolute;
-  z-index: 3;
+  z-index: 12;
   top: 6px;
   right: 14px;
   display: flex;

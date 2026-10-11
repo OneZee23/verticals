@@ -5,7 +5,7 @@
    measured baseline offset. Using KCardHeading here would double up padding and throw off the
    probe. A7's own commit message says as much: reuse the kit's .t-title/.t-caption utilities
    directly, no new/reused component wrapper. */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fittest, fontEpoch, fontOf } from '../lib/fitName'
 import type { NameForm } from '../types'
 
@@ -18,6 +18,8 @@ const props = withDefaults(defineProps<{
   /** A span's end, after its date (docs/design-handoff S5.P1.014). */
   end?: string
 }>(), { subLabel: '', shorter: () => [], end: '' })
+
+const emit = defineEmits<{ form: [form: NameForm] }>()
 
 /* The name's room is the width of its row, which a column that opens, closes or is resized changes in the frame its
    layout does: the observer reports it before that frame is drawn, and the form that fits is chosen there, never while
@@ -40,6 +42,9 @@ const shown = computed<NameForm>(() => {
   if (all.length === 1 || !titleEl.value || room.value <= 0) return all[0]
   return all[fittest(all.map((form) => form.name), room.value, fontOf(titleEl.value))]
 })
+/* The line pinned at the column's top says the same words once the name has scrolled under it, so it is told which form
+   fits (docs/design/column-bars.md). */
+watch(shown, (form) => emit('form', form), { immediate: true })
 </script>
 
 <template>
