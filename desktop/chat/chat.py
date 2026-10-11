@@ -342,7 +342,7 @@ class ClaudeAgent:
 
     provider = "claude"
 
-    def __init__(self, chat, s, settings, resume_id):
+    def __init__(self, chat, s, settings, resume_id, cwd=None, rebuild_prompt=False):
         self.chat, self.s, self.settings = chat, s, settings
         self.session_id = resume_id or str(uuid.uuid4())
         self.streamed = False
@@ -372,7 +372,11 @@ class ClaudeAgent:
             args += ["--model", settings["model"]]
         if effort and effort != "default":
             args += ["--effort", "xhigh" if effort == "ultracode" else effort]
-        self.proc = JsonProcess(args, chat.workdir, child_env(), self.handle, self.exited)
+        if rebuild_prompt:
+            # A session that began outside Verticals recorded its own system prompt on its first request, and a resume keeps
+            # that one unless told to build it again (code.claude.com/docs/en/cli-reference, "--system-prompt-snapshot").
+            args += ["--system-prompt-snapshot", "off"]
+        self.proc = JsonProcess(args, cwd or chat.workdir, child_env(), self.handle, self.exited)
         self.proc.send({"type": "control_request", "request_id": "initialize", "request": {"subtype": "initialize"}})
 
     def signature(self):
@@ -525,17 +529,18 @@ class CodexAgent:
 
     provider = "codex"
 
-    def __init__(self, chat, s, settings, resume_id):
+    def __init__(self, chat, s, settings, resume_id, cwd=None, rebuild_prompt=False):
         self.chat, self.s, self.settings = chat, s, settings
+        self.cwd = cwd or chat.workdir  # `rebuild_prompt` is Claude's: Codex is given its instructions at every thread/resume
         self.thread_id, self.turn_id = None, None
         self.approvals = {}      # request id -> [(label, response)]
         self.streamed = set()    # agentMessage item ids that got deltas
         env = child_env({"VERTICALS_MCP_URL": chat.mcp_url, "VERTICALS_MCP_TOKEN": chat.token})
-        self.proc = RpcProcess(codex_args(chat), chat.workdir, env, self.notify, self.request, self.exited)
+        self.proc = RpcProcess(codex_args(chat), self.cwd, env, self.notify, self.request, self.exited)
         self.proc.request("initialize", {"clientInfo": {"name": "verticals-desktop", "title": "Verticals", "version": "0.1.0"},
                                          "capabilities": {"experimentalApi": True}})
         self.proc.notify("initialized", {})
-        params = {**codex_policy(codex_mode(settings)), "cwd": str(chat.workdir),
+        params = {**codex_policy(codex_mode(settings)), "cwd": str(self.cwd),
                   "developerInstructions": codex_instructions(settings),
                   "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False},
                   "serviceTier": "fast" if settings.get("fast") else None}
@@ -560,7 +565,7 @@ class CodexAgent:
 
     def send(self, text):
         settings = self.settings = self.s.settings
-        params = {**codex_policy(codex_mode(settings), str(self.chat.workdir)),
+        params = {**codex_policy(codex_mode(settings), str(self.cwd)),
                   "serviceTier": "fast" if settings.get("fast") else None, "threadId": self.thread_id,
                   "input": [{"type": "text", "text": text, "text_elements": []}]}
         if settings.get("model"):
@@ -1179,12 +1184,16 @@ class Chat:
         s.settings = settings
         stored = self.load().get(s.id, {})
         provider = settings["provider"]
-        handoff = ""
+        handoff, fresh = "", False
         try:
             agent = s.agent
             changed_provider = agent is not None and agent.provider != provider or \
                 (agent is None and stored.get("provider") not in (None, provider))
-            if agent and (agent.provider != provider or agent.signature() != AGENT_CLASSES[provider].signature_of(settings)):
+            # A session that went on in Claude or Codex has said things this process never heard: its agent is started again
+            # from the session's own file, so what it knows is what the session holds (docs/design/task-sessions.md).
+            went_on = bool(stored.get("outside")) and not changed_provider
+            if agent and (agent.provider != provider or went_on
+                          or agent.signature() != AGENT_CLASSES[provider].signature_of(settings)):
                 s.agent = None
                 agent.close()
                 agent = None
@@ -1198,10 +1207,22 @@ class Chat:
                 s.emit({"t": "activity", "label": "Starting…"})
                 self.log.info("agent_start provider=%s resume=%s handoff=%d session=%s", provider, bool(resume), len(handoff),
                               str(s.id)[:8])
-                agent = AGENT_CLASSES[provider](self, s, settings, resume)
-                s.agent = agent
-                self.update(s.id, provider=provider, sessionId=agent.session_id)
+                # The session lives in the folder it began in; one that began outside Verticals keeps the system prompt it
+                # recorded unless Claude is told to build it again.
+                folder = Path(stored["cwd"]) if resume and stored.get("cwd") and Path(stored["cwd"]).is_dir() else self.workdir
+                agent = AGENT_CLASSES[provider](self, s, settings, resume, cwd=folder,
+                                                rebuild_prompt=bool(resume and stored.get("external")))
+                s.agent, fresh = agent, resume is None
+                self.update(s.id, provider=provider, sessionId=agent.session_id, cwd=str(folder))
+                self.missing.pop((provider, agent.session_id), None)
+            if stored.get("outside"):
+                self.update(s.id, outside=None)  # Verticals drives it again: it is no longer "continued outside"
             body = f"<app_context>\n{format_context(context)}\n</app_context>\n\n"
+            goal = context.get("goal") if isinstance(context, dict) else None
+            if fresh and isinstance(goal, dict) and agent_sessions.GOAL_ID.fullmatch(str(goal.get("id") or "")):
+                # A session begun for a task begins with the task's link (docs/design/task-sessions.md): whoever opens it in
+                # Claude or Codex sees which task it belongs to, and the agent that finds the link there can link it.
+                body = agent_sessions.task_link(goal["id"]) + "\n\n" + body
             if handoff:
                 body += handoff + "\n\n"
             agent.send(body + text)
@@ -1329,7 +1350,8 @@ def format_context(ctx):
             lines.append(f"{label}: {str(ctx[key])[:limit]}")
     goal = ctx.get("goal")
     if isinstance(goal, dict) and isinstance(goal.get("id"), str) and len(goal["id"]) < 100:
-        about = f"This conversation is about the goal \"{str(goal.get('title', ''))[:300]}\" (id {goal['id']}, link #goal/{goal['id']})."
+        about = (f"This conversation is about the goal \"{str(goal.get('title', ''))[:300]}\" (id {goal['id']}, link #goal/{goal['id']}). "
+                 "It is linked to the goal already: don't call session_link.")
         changes = str(ctx.get("changes") or "")[:4000]
         if changes:
             lines.append(f"{about} You know it from the earlier turns; what changed on it since your last turn:\n{changes}")

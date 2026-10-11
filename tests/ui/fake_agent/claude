@@ -5,7 +5,8 @@ permission for one of the writes in ASKS, shaped as the real tool is called, `[m
 by calling `create` and gets the words Verticals' server answers it with, `[slow]` works for a second and a half,
 `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers with the words after it, and
 `[context]` with the app context Verticals sent. Each start appends the arguments it was given to `argv.log` in its
-folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions)."""
+folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions), and every message
+it is sent, whole, to `received.log` beside it."""
 import json
 import re
 import sys
@@ -64,6 +65,8 @@ for msg in iter(read, None):
     if kind != "user":
         continue
     text = "".join(block.get("text", "") for block in msg["message"]["content"] if block.get("type") == "text")
+    with open("received.log", "a") as received_log:  # what the agent was sent, whole, one JSON string a line
+        received_log.write(json.dumps(text) + "\n")
     words = text.split("</app_context>")[-1].strip()
     if "[context]" in words:
         words = "[say] " + text.split("<app_context>")[-1].split("</app_context>")[0].strip()
