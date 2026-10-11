@@ -9,7 +9,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { store } from '../store'
 import { commandFilter } from '../lib/commandFilter'
 import { circle, circleCaption, circleState, circleWords, inboxWriting } from '../lib/circle'
-import { sayGo } from '../lib/go'
 import { carry } from '../lib/inboxCarry'
 import { agentChat, decide, openAsk, stop } from '../lib/agentChat'
 import { plainWords } from '../lib/chatMarkdown'
@@ -43,9 +42,8 @@ const PAD_RIGHT = 84
 const PAD_Y = 24
 const LINE = 36
 const CIRCLE = 84
-/* The open field's caption has 32 px on each side; "Ready?" has 36 (round 8's pill, at least the circle's 136). */
+/* The open field's caption has 32 px on each side. */
 const PAD_CAPTION = 32
-const PAD_ASK = 36
 /* A message bringing documents: the page 50 × 67 (three lines), 24 px in from the left, 16 px to the words; the words
    236 px wide, a short title and two lines of the message; 32 px on the right and 12 above and below (round 11). */
 const NOTE_PAGE = 50
@@ -118,7 +116,6 @@ const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWord
 const stopping = computed(() => state.value === 'working' && circle.pointed)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
-const GO_WORD = 'Ready?'
 const holding = computed(() => carry.over || (state.value === 'moving' && (store.state.drag.id !== null || dots.landing)))
 
 /* Open, the field is as wide as its caption (round 9: "size of the field should align with the text"). */
@@ -129,8 +126,6 @@ const width = computed(() => {
   if (state.value === 'answer' && answerDocs.value.length) return 24 + NOTE_PAGE + behind.value + 16 + NOTE_WORDS + 32
   if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
   if (stopping.value) return 132
-  // "Ready?": the pointed field's pill as wide as its word, the word in its middle (round 8).
-  if (state.value === 'go') return Math.max(136, Math.ceil(PAD_ASK + textWidth(GO_WORD) + PAD_ASK))
   // Typing, it grows around your words and never gets narrower than it was open, so the first key moves nothing.
   if (state.value === 'typing') {
     return Math.min(maxWidth.value, Math.max(openWidth.value, Math.ceil(PAD_LEFT + PAD_RIGHT + textWidth(text.value) + 5)))
@@ -157,7 +152,7 @@ const tagsShown = computed(() => (circle.pointed && wide.value) || circle.focuse
 /* Where the line stands: the mascot's at rest, your hand over the field, your caret once the field has it. */
 const lineMode = computed(() => {
   if (carry.over) return 'mascot'
-  if (state.value === 'answer' || state.value === 'go') return 'hidden'
+  if (state.value === 'answer') return 'hidden'
   if (!wide.value) return 'mascot'
   // Resting open in the Inbox, the field is an invitation to write, not the agent: no line until you write (lib/inbox.ts).
   if (inboxWriting.value && state.value === 'open' && !circle.focused && !hand.value) return 'hidden'
@@ -384,8 +379,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   focusField()
 }
 function onShapeClick(): void {
-  if (state.value === 'go') void sayGo()
-  else if (circleWords.value?.kind === 'answer') reply()
+  if (circleWords.value?.kind === 'answer') reply()
   else if (!circleWords.value) focusField()
 }
 function onResize(): void { room.width = innerWidth }
@@ -477,7 +471,6 @@ onBeforeUnmount(() => {
             <path d="M12 21.5V3M12 3 5 10M12 3l7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <span v-if="state === 'go'" class="circle-field__go" data-role="circle-go" role="button" aria-label="Ready? Hand your edits to the agent">{{ GO_WORD }}</span>
         <div v-if="circleWords" class="circle-field__answer" :class="[`circle-field__answer--${circleWords.kind}`, { 'circle-field__answer--note': answerDocs.length }]" data-role="circle-answer"
           :aria-label="circleWords.kind === 'answer' ? `${answerText}. Press any key to reply` : undefined">
           <template v-if="answerDocs.length">
