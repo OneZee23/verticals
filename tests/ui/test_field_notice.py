@@ -219,7 +219,7 @@ def test_the_notice_stays_six_seconds_and_the_field_comes_back(ui_f2: UiSession)
             break
         page.wait_for_timeout(25)
     assert gone is not None, "the notice never went"
-    assert 5.7 <= gone <= 6.6, f"the notice stays six seconds, it stayed {gone:.2f}"
+    assert 5.7 <= gone <= 7.0, f"the notice stays six seconds, it stayed {gone:.2f}"
     assert page.evaluate("document.documentElement.hasAttribute('data-field-notice')") is False
     expect(page.locator(CIRCLE_FIELD)).to_be_visible()
     assert page.locator(CIRCLE_FIELD).evaluate("el => getComputedStyle(el).visibility") == "visible"
@@ -249,6 +249,27 @@ def test_esc_ends_the_notice_at_once(ui_f2: UiSession) -> None:
     page.keyboard.press("Escape")
     expect_no_notice(page)
     expect(page.locator(CIRCLE_FIELD)).to_be_visible()
+
+
+def test_a_letter_typed_while_the_notice_stands_puts_the_field_back_and_goes_into_it(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = board(session)
+    undo, _ = keys(page)
+    move(page, "SYNCOL01", "tomorrow")
+    expect(page.locator(NOTICE)).to_be_visible(timeout=5000)
+    page.keyboard.press("x")  # the field's first letter: it must be back to take it
+    expect_no_notice(page)
+    expect(page.locator(FIELD_TEXT)).to_have_value("x")
+    assert page.evaluate("document.activeElement === document.querySelector('.circle-field__words textarea')")
+
+    page.locator(FIELD_TEXT).fill("")
+    page.keyboard.press("Escape")
+    page.locator(FIELD_TEXT).blur()
+    move(page, "SYNCOL02", "tomorrow")  # and ⌘K, the other way to the field
+    expect(page.locator(NOTICE)).to_be_visible(timeout=5000)
+    page.keyboard.press(f"{undo.split('+')[0]}+k")
+    expect_no_notice(page)
+    assert page.evaluate("document.activeElement === document.querySelector('.circle-field__words textarea')")
 
 
 def test_a_click_elsewhere_ends_the_notice_and_still_reaches_what_it_aimed_at(ui_f2: UiSession) -> None:

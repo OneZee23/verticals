@@ -12,7 +12,8 @@ import { store } from '../store'
 
 const pill = ref<HTMLElement | null>(null)
 
-watch(() => notice.open, (open) => document.documentElement.toggleAttribute('data-field-notice', open), { immediate: true })
+// `sync`: the field is shown again in the same task as the key that asks for it, or it could not take the focus (see below).
+watch(() => notice.open, (open) => document.documentElement.toggleAttribute('data-field-notice', open), { immediate: true, flush: 'sync' })
 
 function act(): void {
   const action = notice.action
@@ -20,11 +21,20 @@ function act(): void {
   action?.run()
 }
 
+/* A key that asks for the field (a letter, which is its first one, or ⌘K, `SearchBar.vue`) puts the field back first: it is
+   hidden while the notice stands, and a hidden field cannot take the focus. */
+const asksForField = (event: KeyboardEvent): boolean => {
+  const command = event.metaKey || event.ctrlKey
+  if (event.altKey) return false
+  return command ? event.key.toLowerCase() === 'k' : event.key.length === 1 && event.key !== ' '
+}
+
 /* Esc ends it, ahead of the field (which would clear an answer behind it) and of the windows (the smaller thing goes
    first). Inside a text field, and while a goal is in the hand, Esc is theirs. */
 function onKeyDown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !notice.open || event.defaultPrevented) return
-  if (editsText(event.target) || store.state.drag.id || store.state.drag.pending) return
+  if (!notice.open || event.defaultPrevented || editsText(event.target)) return
+  if (asksForField(event) && !store.state.drag.id && !store.state.drag.pending) dismiss()
+  if (event.key !== 'Escape' || store.state.drag.id || store.state.drag.pending) return
   event.preventDefault()
   event.stopImmediatePropagation()
   dismiss()
