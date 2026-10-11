@@ -33,9 +33,10 @@ _READ = f"""() => Object.fromEntries([...document.querySelectorAll('{STRIP} > [d
   col.dataset.vertical,
   [col.querySelector('.t-title')?.textContent.trim(), col.querySelector('.t-caption')?.textContent.trim()],
 ]))"""
-_CUT = f"""() => [...document.querySelectorAll('{STRIP} > [data-vertical]')]
-  .filter((col) => {{ const t = col.querySelector('.t-title'); return t.scrollWidth > t.clientWidth; }})
-  .map((col) => col.dataset.vertical)"""
+_CUT = f"""() => [...document.querySelectorAll('{STRIP} > [data-vertical]')].flatMap((col) => {{
+  const cut = (el, what) => (el && el.scrollWidth > el.clientWidth ? [`${{col.dataset.vertical}} ${{what}}`] : []);
+  return [...cut(col.querySelector('.t-title'), 'name'), ...cut(col.querySelector('.t-caption'), 'kind')];
+}})"""
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ def _names(page: Page) -> dict[str, tuple[str, str]]:
 
 
 def _cut(page: Page) -> list[str]:
-    """The columns whose name is wider than its room, so the ellipsis shows."""
+    """What the ellipsis shows on: "week name" for a column whose name is wider than its room, "week kind" for its kind."""
     return page.evaluate(_CUT)
 
 
@@ -337,7 +338,8 @@ def test_the_year_edge_belongs_to_now_not_to_the_anchor(ui_f2: UiSession) -> Non
 # are 184 px at 1470 px with nothing open, 152 px beside an open column there, 163 px at 1320 px with nothing open and
 # 134 px beside an open column there. The forms' widths, in px: Wednesday 164.5, Wed 64.8; September 157.0, Sep 53.3;
 # 25–31 May 155.3, 25–31 86.8; 21–27 Dec 145.2, 21–27 85.2; 14–20 Sep 149.4, 14–20 90.1; 27 Apr–3 May 199.3,
-# 27 Apr–May 175.2, Apr–May 134.8.
+# 27 Apr–May 175.2, Apr–May 134.8. A kind line has the title's room less the 36 px its row keeps free at the right (148, 116,
+# 127 and 98 px in the four layouts), and "Week · Dec ’27" takes 97.1 of the 98.
 LAYOUTS = (
     # 1470 px, nothing open: 184 px, every name whole (a pair across two months in its second form)
     (1470, None, "2026-10-07", {"day": ("Wednesday", "Day"), "week": ("5–11 Oct", "Week")}),
@@ -350,6 +352,8 @@ LAYOUTS = (
     (1470, "day", "2026-05-27", {"week": ("25–31", "Week · May"), "month": ("May", "Month")}),
     (1470, "day", "2026-04-30", {"week": ("Apr–May", "Week")}),
     (1470, "month", "2026-12-23", {"week": ("21–27 Dec", "Week")}),
+    # a week inside one month, outside the current year, carries its month and the year in the kind line
+    (1470, "day", "2027-05-26", {"week": ("24–30", "Week · May ’27"), "month": ("May", "Month · ’27")}),
     # the desktop app's first window, 1320 px, nothing open: 163 px
     (1320, None, "2026-10-07", {"day": ("Wed", "Day"), "week": ("5–11 Oct", "Week")}),
     (1320, None, "2026-09-15", {"month": ("September", "Month"), "week": ("14–20 Sep", "Week")}),
@@ -360,11 +364,12 @@ LAYOUTS = (
     (1320, "quarter", "2026-05-27", {"week": ("25–31", "Week · May")}),
     (1320, "quarter", "2026-12-23", {"week": ("21–27", "Week · Dec")}),
     (1320, "quarter", "2026-10-07", {"day": ("Wed", "Day")}),
+    (1320, "quarter", "2027-12-23", {"week": ("20–26", "Week · Dec ’27"), "month": ("Dec", "Month · ’27")}),
 )
 
 
 def test_a_name_is_never_cut_where_the_room_is_short(ui_f2: UiSession) -> None:
-    """In every layout above no title shows an ellipsis, and each name takes the form the room allows."""
+    """In every layout above neither a name nor a kind shows an ellipsis, and each name takes the form the room allows."""
     wrong: list[str] = []
     for width, opened, anchor, expected in LAYOUTS:
         page = _open(ui_f2, NOW, anchor, width=width)
@@ -376,7 +381,7 @@ def test_a_name_is_never_cut_where_the_room_is_short(ui_f2: UiSession) -> None:
             if names[vertical] != want:
                 wrong.append(f"{where}: {vertical} {names[vertical]!r} (want {want!r})")
         if cut := _cut(page):
-            wrong.append(f"{where}: cut with an ellipsis: {[(v, names[v][0]) for v in cut]}")
+            wrong.append(f"{where}: cut with an ellipsis: {cut} ({[names[c.split()[0]] for c in cut]})")
     assert not wrong, "\n".join(wrong)
 
 
