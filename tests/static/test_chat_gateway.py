@@ -59,8 +59,9 @@ class _Session:
     def __init__(self):
         self.asked = []
 
-    def ask(self, agent, key, title, body, options, tool=None):
+    def ask(self, agent, key, title, body, options, tool=None, tool_input=None):
         self.asked.append(title)
+        self.write = (tool, tool_input)
 
     def emit(self, event):
         pass
@@ -78,6 +79,16 @@ def _claude(settings):
 def _system_prompt(agent) -> str:
     args = agent.proc.args
     return args[args.index("--append-system-prompt") + 1]
+
+
+def test_an_ask_for_a_verticals_write_carries_the_write_so_the_card_can_say_what_changes() -> None:
+    """Fix 6 (docs/design/agent-fixes.md): the app drew only the tool's name; the ask now carries the write as the agent
+    called it, for web lib/askDetail.ts. A tool of another server or a shell command carries its own name and inputs too."""
+    agent, session = _claude({"permission": "manual"})
+    _tool(agent, "mcp__verticals__schedule", {"id": "SYN00001", "vertical": "day", "anchor_date": "2026-10-12"})
+    assert session.write == ("schedule", {"id": "SYN00001", "vertical": "day", "anchor_date": "2026-10-12"})
+    _tool(agent, "Bash", {"command": "ls"})
+    assert session.write == ("Bash", {"command": "ls"})
 
 
 def _tool(agent, name, tool_input=None):

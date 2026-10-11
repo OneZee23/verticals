@@ -46,6 +46,9 @@ export interface Ask {
   options: { label: string; value: string }[]
   done: boolean
   chosen?: string
+  /** The write the agent asks to make, as it calls it (the gateway sends it for a Claude ask): lib/askDetail.ts draws it. */
+  tool?: string
+  input?: Record<string, unknown>
 }
 export interface Balloon { key: string; who: 'you' | 'agent'; text: string; error?: boolean; ask?: Ask; pending?: boolean }
 
@@ -137,6 +140,7 @@ export const balloons = computed<Balloon[]>(() => {
         balloon.ask = {
           requestId: String(event.requestId), title: String(event.title ?? ''), body: String(event.body ?? ''),
           options: (event.options as Ask['options']) ?? [], done: false,
+          ...(typeof event.tool === 'string' ? { tool: event.tool, input: (event.input as Ask['input']) ?? {} } : {}),
         }
         break
       }

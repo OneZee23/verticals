@@ -354,6 +354,59 @@ def test_a_selection_you_pressed_away_from_is_not_sent(ui_agent: UiSession) -> N
     expect(page.locator(f'{BALLOON}[data-who="agent"]').last).not_to_contain_text("Selected text")
 
 
+CHANGES = '[data-role="agent-ask-changes"]'
+ASK_SAYS = [
+    ("schedule", "Draft the outline · Mon 10 Aug"),   # a day, as the goal cards say it
+    ("week", "Draft the outline · 10–16 Aug"),        # a week, as its column header says it
+    ("clear", "Draft the outline · No date"),
+    ("create", "Plan the review · 10–16 Aug"),
+    ("update", "Draft the outline"),                  # a write with no date says only the goal
+    ("delete", "Draft the outline"),
+    ("unknown", None),                                # a goal this board does not have: no line, and no error
+]
+
+
+def test_an_ask_says_the_goal_and_its_new_date(ui_agent: UiSession) -> None:
+    """Fix 6 (docs/design/agent-fixes.md): the card said only "Allow Claude to use schedule?"; it now says which goal and
+    which date, in the balloon's own type, so you answer about the change and not about a tool."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    for number, (mark, says) in enumerate(ASK_SAYS, start=1):
+        _send(page, f"Change number {number} [ask:{mark}]")
+        asks = page.locator('[data-role="agent-ask"]')
+        expect(asks).to_have_count(number, timeout=10000)
+        card = asks.last
+        expect(card.get_by_role("button", name="Allow once")).to_be_enabled()
+        if says is None:
+            page.wait_for_timeout(600)  # the goal is looked for once, and is not there
+            expect(card.locator(CHANGES)).to_have_count(0)
+        else:
+            expect(card.locator(CHANGES)).to_have_text(says)
+            # the card's own type: the balloon's 15 px / 22 px regular, the question above it the 600 weight
+            expect(card.locator(CHANGES)).to_have_css("font-weight", "400")
+            expect(card.locator('.agent-balloon__ask-title')).to_have_css("font-weight", "600")
+            expect(card.locator(CHANGES)).to_have_css("font-size", "15px")
+        card.get_by_role("button", name="Allow once").click()
+        _answered(page, f"Done: Change number {number}")
+
+
+def test_an_ask_in_the_field_says_it_too(ui_agent: UiSession) -> None:
+    """Fix 6: with the conversation closed the ask stands in the field; it says the same under its question."""
+    page = ui_agent.page
+    page.wait_for_selector(".goal-card__row")
+    _send(page, "Move it [ask:schedule]")
+    expect(page.locator('[data-role="agent-ask"]')).to_have_count(1, timeout=10000)
+    page.locator('[data-role="out-of-focus"]').click(position={"x": 60, "y": 60})
+    answer = page.locator('[data-role="circle-answer"]')
+    expect(answer).to_contain_text("Allow Claude to use schedule?", timeout=10000)
+    expect(answer.locator('[data-role="circle-ask-changes"]')).to_have_text("Draft the outline · Mon 10 Aug")
+    page.wait_for_timeout(500)
+    box = page.locator(".circle-field__shape").bounding_box()
+    assert box is not None and box["height"] >= 24 * 2 + 22 * 2 + 44, box  # its question and its line, then the buttons
+    answer.get_by_role("button", name="Allow once").click()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Done: Move it", timeout=10000)
+
+
 def test_a_conversation_from_before_opens_with_its_messages(ui_agent: UiSession) -> None:
     """S2.P1.031, .040: the conversations stored under `vt-chat:*` are read as they are."""
     page = ui_agent.page

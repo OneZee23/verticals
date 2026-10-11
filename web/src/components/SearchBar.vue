@@ -115,6 +115,8 @@ const answerText = computed(() => {
   return plainWords(answerDocs.value.length ? withoutDocLines(circleWords.value.text) : circleWords.value.text)
 })
 const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(circleWords.value.lead) : ''))
+/* An ask says what it will change under its question: the goal and its date (lib/askDetail.ts). */
+const changesText = computed(() => (circleWords.value?.kind === 'ask' ? circleWords.value.changes : ''))
 const stopping = computed(() => state.value === 'working' && circle.pointed)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
@@ -217,7 +219,7 @@ function moved(): void {
 watch([text, width, height], () => void nextTick(measure))
 
 /* The answer's shape hugs its words: one line as wide as they are, more at the 376 px measure, three at most (S2.P4.040). */
-watch(answerText, async () => {
+watch([answerText, changesText], async () => {
   await nextTick()
   const el = answerMeasure.value
   if (!el) return
@@ -493,13 +495,14 @@ onBeforeUnmount(() => {
           <template v-else>
           <p v-if="leadText" class="circle-field__answer-lead">{{ leadText }}</p>
           <p class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <p v-if="changesText" class="circle-field__answer-changes" data-role="circle-ask-changes">{{ changesText }}</p>
           <div v-if="circleWords.kind === 'ask' && openAsk" class="circle-field__answer-choices">
             <button v-for="option in openAsk.options" :key="option.value" type="button" class="circle-field__answer-choice"
               @click.stop="decide(openAsk.requestId, option.value)">{{ option.label }}</button>
           </div>
           </template>
         </div>
-        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}</p>
+        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}<template v-if="changesText"><br>{{ changesText }}</template></p>
         <p ref="leadMeasure" class="circle-field__answer-measure circle-field__answer-measure--lead" aria-hidden="true">{{ leadText }}</p>
         <button v-if="stopping" type="button" class="circle-field__stop" aria-label="Stop the agent" @click.stop="stop()">
           <span aria-hidden="true"></span>

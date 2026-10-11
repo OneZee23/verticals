@@ -172,6 +172,15 @@
   -webkit-line-clamp: 3;
   overflow-wrap: anywhere;
 }
+/* What an ask will change, under its question and in the same type (lib/askDetail.ts; docs/design/agent-fixes.md, fix 6). */
+.circle-field__answer-changes {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
 .circle-field__answer-lead {
   display: -webkit-box;
   margin: 0 0 8px;

@@ -426,7 +426,7 @@ class ClaudeAgent:
                 return self.decide(rid, "accept" if self.connected and reads_only(tool) else "decline")
             s.ask(self, rid, f"Allow Claude to use {short(tool)}?",
                   "\n\n".join(filter(None, [req.get("decision_reason"), json.dumps(tool_input, indent=2, ensure_ascii=False)])),
-                  [("Allow once", "accept"), ("Decline", "decline")], tool=short(tool))
+                  [("Allow once", "accept"), ("Decline", "decline")], tool=short(tool), tool_input=tool_input)
         elif kind == "control_cancel_request":
             s.resolve(msg.get("request_id"), "Cancelled")
         elif kind == "control_response" and msg.get("response", {}).get("request_id") == "initialize":
@@ -725,11 +725,13 @@ class Session:
                 self.cond.wait(timeout)
             return [(s, e) for s, e in self.events if s > seq]
 
-    def ask(self, agent, key, title, body, options, tool=None):
+    def ask(self, agent, key, title, body, options, tool=None, tool_input=None):
+        """`tool` and `tool_input` are the write the agent wants to make, as it calls it: the app draws what will change from
+        them (web lib/askDetail.ts, docs/design/agent-fixes.md, fix 6), where `body` is only stored."""
         self.asks[key] = agent
         self.emit({"t": "permission", "requestId": key, "title": title, "body": body,
                    "options": [{"label": label, "value": value} for label, value in options],
-                   **({"tool": tool} if tool else {})})
+                   **({"tool": tool, "input": tool_input or {}} if tool else {})})
 
     def resolve(self, key, label):
         if key is not None and self.asks.pop(str(key), None):
