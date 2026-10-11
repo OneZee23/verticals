@@ -18,7 +18,6 @@ import { inboxWriting } from '../lib/circle'
 import { docShelves, earlier, inbox, inboxView, loadInbox, recentDocs, shelves, today, TODAY_SHOWN } from '../lib/inbox'
 import { desk, loadDesk } from '../lib/docsDesk'
 import { carry } from '../lib/inboxCarry'
-import { moving } from '../lib/moving'
 
 /* A row holds the newest; "Show all" holds everything. */
 const ROW = 24
@@ -35,8 +34,6 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener('verticals:doc-edited', onDocEdited))
 // Every board load follows a write somewhere (yours, the agent's, a live event): the Inbox reads again with it.
 watch(() => store.state.board, () => void loadInbox())
-// The task beside the field goes when the move ends: placed, sent with your words, or taken off (lib/moving.ts).
-watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.beside = null })
 </script>
 
 <template>
@@ -89,16 +86,8 @@ watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.b
     </p>
 
     <Teleport to="body">
-      <div v-if="carry.item" class="inbox-carried" :style="{ left: `${carry.x}px`, top: `${carry.y}px`, width: `${carry.width}px` }">
+      <div v-if="carry.item" class="inbox-carried" data-role="inbox-carried" :style="{ left: `${carry.x}px`, top: `${carry.y}px`, width: `${carry.width}px` }">
         <InboxTile :item="carry.item" />
-      </div>
-      <div
-        v-if="carry.beside && moving.goalId === carry.beside.id"
-        class="inbox-beside"
-        data-role="inbox-beside"
-        :style="{ width: `${carry.width}px`, left: `calc(50% - var(--moving-field-width, 300px) / 2 - 12px - ${carry.width}px)` }"
-      >
-        <InboxTile :item="carry.beside" />
       </div>
     </Teleport>
   </div>
@@ -146,14 +135,8 @@ watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.b
   .inbox-desk__row > * { width: calc((100% - 16px) / 2); }
   .inbox-desk__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-/* The task in the hand, and the task waiting beside the field: on the field's line, 12 px to its left, at the tile's size. */
+/* The task in the hand, at the tile's size; let go over the field it waits there as a card (MovingStack.vue). */
 .inbox-carried { position: fixed; z-index: 290; pointer-events: none; transform: rotate(-1deg) scale(1.02); }  /* under the field (300), which takes it */
 .inbox-carried .inbox-tile { background: #fff; box-shadow: 0 0 0 .5px rgb(16 18 32 / 6%), 0 24px 60px -10px rgb(16 18 32 / 30%); }
-.inbox-beside { position: fixed; z-index: 299; bottom: 24px; max-width: calc(50vw - 160px);
-  transition: left 300ms var(--vt-ease-large); animation: inbox-beside-in 300ms var(--vt-ease-large) both; }
-.inbox-beside .inbox-tile { background: #fff;
-  box-shadow: 0 0 0 .5px rgb(16 18 32 / 5%), 0 1px 3px rgb(16 18 32 / 4%), 0 8px 22px -12px rgb(16 18 32 / 14%); }
-@keyframes inbox-beside-in { from { opacity: 0; transform: translateX(40px) scale(.96); } }
-@media (prefers-reduced-motion: reduce) { .inbox-beside { transition: none; animation: none; } }
 .inbox-desk__empty { margin: 6px 0 0; font: 400 15px/22px var(--font-body, Commissioner, system-ui, sans-serif); color: rgb(45 48 54 / 52%); }
 </style>

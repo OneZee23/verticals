@@ -1,6 +1,8 @@
 // The circle's moving mode and pick-up (docs/design-handoff S5.P3, S5.P4): while spans are open the field names the view
 // ("Weeks") above it; a goal let go over the field waits there beside it, out of its group, until you drag it to its place.
-// On an empty field Backspace picks the last thing and a second takes it off; Tab or a tap picks one too.
+// On an empty field Backspace picks the last thing and a second takes it off; Tab or a tap picks one too. A task carried
+// onto the field in the Inbox waits the same way, with no view's name: `park` and `unpark` are the one way in and out
+// (lib/inboxCarry.ts, docs/design/inbox-carry-stack.md).
 import { reactive, watchEffect } from 'vue'
 import { circle } from './circle'
 import { closeSpans, spanColumns, spans, VIEW_NAMES } from './spans'
