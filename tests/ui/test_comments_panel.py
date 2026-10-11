@@ -6,9 +6,9 @@ trip, an anchored quote showing a highlight and clicking through it, a reply rou
 collapsing a thread, and the doc-side mirror of the whole-card round trip.
 
 A DOCUMENT's comments left the panel (docs/design/doc-comments-inline.md): they stand on their words and open over them,
-their count stands above the field. `test_doc_comments_inline.py` is their suite; the two document cases here keep the old
-names and check the same things the panel's did (a comment round trip in Documents; the window counting its comments) where
-they are now.
+their count stands above the field. `test_doc_comments_inline.py` and `test_doc_check_again.py` are their suites; the two
+document cases here keep the old names and check the same things the panel's did (a comment round trip in Documents; the
+window counting its comments) where they are now.
 
 WP-B2 turned the panel from a block rendered inline inside the card/doc it comments on into a
 single viewport-docked overlay (`App.vue`'s own mount) — every test that opens the panel now also
