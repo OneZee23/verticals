@@ -169,3 +169,21 @@ def test_a_link_inside_a_sentence_stays_a_link_and_the_goal_is_a_chip_too(ui_age
     message = page.locator(f"{AGENT_BALLOON} .agent-balloon__markdown")
     expect(message.locator("a[data-app-link]")).to_have_text("Plan the review")
     expect(page.locator(f"{AGENT_BALLOON} {GOAL_CHIP}")).to_have_count(1)
+
+
+def test_an_answer_of_links_alone_is_its_chips_and_a_reader_who_cannot_see_it_is_told_their_names(ui_agent: UiSession) -> None:
+    goal = goal_made(ui_agent.backend.dsn, "Plan the review")
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{goal}"]')
+    _send(page, f"[slow] [say] [Plan the review](#goal/{goal})")
+    close_the_conversation(page)
+    answer = page.locator(ANSWER)
+    expect(answer.locator(GOAL_CHIP)).to_have_count(1, timeout=10000)
+    expect(answer.locator(".circle-field__answer-words")).to_have_count(0)
+    expect(answer).to_have_attribute("aria-label", "Plan the review. Press any key to reply")
+    # No words above it: 24 px to the chip from the black's top and from its bottom.
+    page.wait_for_function(
+        """() => { const shape = document.querySelector('.circle-field__shape').getBoundingClientRect()
+          const chip = document.querySelector('[data-role="circle-answer"] [data-role="goal-chip"]').getBoundingClientRect()
+          return Math.abs(chip.top - shape.top - 24) <= 1 && Math.abs(shape.bottom - chip.bottom - 24) <= 1 }""")

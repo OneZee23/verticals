@@ -109,6 +109,8 @@ const answerText = computed(() => {
   if (!circleWords.value) return ''
   return plainWords(answerChips.value.length ? withoutChipLines(circleWords.value.text) : circleWords.value.text)
 })
+/* What the answer says to one who does not see it: its words, or the names of what it made when it has none. */
+const answerSays = computed(() => answerText.value || answerChips.value.map((chip) => chip.label).join(', '))
 const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(withoutChipLines(circleWords.value.lead)) : ''))
 /* The chips' height is theirs to say (a title takes one line or two): measured, with the first guess until they are drawn. */
 const chipsBox = ref<HTMLElement | null>(null)
@@ -506,7 +508,7 @@ onBeforeUnmount(() => {
         </button>
         <span v-if="state === 'go'" class="circle-field__go" data-role="circle-go" role="button" aria-label="Ready? Hand your edits to the agent">{{ GO_WORD }}</span>
         <div v-if="circleWords" class="circle-field__answer" :class="[`circle-field__answer--${circleWords.kind}`, { 'circle-field__answer--chips': answerChips.length }]" data-role="circle-answer"
-          :aria-label="circleWords.kind === 'answer' ? `${answerText}. Press any key to reply` : undefined">
+          :aria-label="circleWords.kind === 'answer' ? `${answerSays}. Press any key to reply` : undefined">
           <p v-if="leadText" class="circle-field__answer-lead">{{ leadText }}</p>
           <p v-if="answerText || !answerChips.length" class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
           <p v-if="changesText" class="circle-field__answer-changes" data-role="circle-ask-changes">{{ changesText }}</p>
