@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "chat"))
 from chat import Chat, ChatError  # noqa: E402
+from report_facts import collect as report_facts  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent          # desktop/
 APP = ROOT.parent                               # repository root (or its mirror inside the app)
@@ -390,9 +391,17 @@ def make_gateway(token, chat):
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def report_facts(self):
+            """What a report carries from the app: its version, and the last lines of its logs with every word of the board
+            left out (docs/design/bug-reports.md, desktop/chat/report_facts.py)."""
+            if self.allowed():
+                self.send_json(report_facts(STATE, APP))
+
         def route(self):
             if self.path.startswith("/__chat/"):
                 return self.chat_route()
+            if self.command == "GET" and self.path.split("?", 1)[0] == "/__report/facts":
+                return self.report_facts()
             if self.path.startswith(("/api", "/healthz")):
                 return self.proxy()
             if self.command in ("GET", "HEAD"):
