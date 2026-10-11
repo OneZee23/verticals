@@ -26,6 +26,9 @@ export interface AnchoredThread {
   quote: string
   prefix: string
   suffix: string
+  /** A document's resolved comment keeps its mark, so its words can still be gone to, but its words are plain text
+   *  again (`data-resolved`, docs/design/doc-comments-inline.md). */
+  resolved?: boolean
 }
 
 /** Captures `{quote, prefix, suffix}` from `selection`, scoped to `container` — null when there
@@ -82,7 +85,7 @@ export function locateAnchor(text: string, quote: string, prefix: string, suffix
   return best ? best.index : null
 }
 
-interface FlatTextNode {
+export interface FlatTextNode {
   node: Text
   start: number
   end: number
@@ -107,8 +110,8 @@ function flattenTextNodes(container: HTMLElement): { text: string; nodes: FlatTe
   return { text, nodes }
 }
 
-/** Wraps the flattened-text range `[start, end)` in one `<mark class="comment-highlight">` PER
- *  TEXT NODE it spans, rather than one `Range.surroundContents()` — the kit's own documented rule
+/** Wraps the flattened-text range `[start, end)` in one mark (made by `make`) PER TEXT NODE it spans, rather than one
+ *  `Range.surroundContents()` — the kit's own documented rule
  *  for a selection crossing element boundaries ("wraps ... as one <span class="highlight"> per
  *  text node, never one span across block boundaries", design-system/docs/integration/comment.md)
  *  and, independently, the only way to avoid `surroundContents`' own restriction against a range
@@ -116,8 +119,9 @@ function flattenTextNodes(container: HTMLElement): { text: string; nodes: FlatTe
  *  on the single-range approach). `node.splitText` inserts its return value as the next DOM
  *  sibling in place, so the two splits below (tail first, then head) leave the untouched-before
  *  and untouched-after portions of each node exactly where they were — only the matched slice
- *  gets pulled out and wrapped. */
-function wrapRange(nodes: FlatTextNode[], start: number, end: number, threadId: string): void {
+ *  gets pulled out and wrapped. Several ranges over one list of nodes are wrapped last range first: a split shortens
+ *  its node to the part before it, so the offsets of the ranges before it hold (`docChanges.ts` does). */
+export function wrapRange(nodes: FlatTextNode[], start: number, end: number, make: () => HTMLElement): void {
   for (const entry of nodes) {
     if (entry.end <= start || entry.start >= end) continue
     const localStart = Math.max(0, start - entry.start)
@@ -125,12 +129,18 @@ function wrapRange(nodes: FlatTextNode[], start: number, end: number, threadId: 
     if (localStart >= localEnd) continue
     if (localEnd < entry.node.length) entry.node.splitText(localEnd) // leaves the tail as a sibling
     const target = localStart > 0 ? entry.node.splitText(localStart) : entry.node
-    const mark = entry.node.ownerDocument.createElement('mark')
-    mark.className = HIGHLIGHT_CLASS
-    mark.dataset.threadId = threadId
+    const mark = make()
     target.replaceWith(mark)
     mark.append(target)
   }
+}
+
+function commentMark(doc: Document, thread: AnchoredThread): HTMLElement {
+  const mark = doc.createElement('mark')
+  mark.className = HIGHLIGHT_CLASS
+  mark.dataset.threadId = thread.id
+  if (thread.resolved) mark.dataset.resolved = 'true'
+  return mark
 }
 
 /** Removes every highlight mark this module has previously added, folding its text back into the
@@ -161,6 +171,6 @@ export function applyAnchorHighlights(container: HTMLElement, threads: AnchoredT
     const { text, nodes } = flattenTextNodes(container)
     const start = locateAnchor(text, thread.quote, thread.prefix, thread.suffix)
     if (start === null) continue
-    wrapRange(nodes, start, start + thread.quote.length, thread.id)
+    wrapRange(nodes, start, start + thread.quote.length, () => commentMark(container.ownerDocument, thread))
   }
 }

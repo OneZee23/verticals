@@ -8,7 +8,10 @@ declare global {
 
 const flushes = new Set<Flush>()
 
-window.verticalsBeforeQuit = () => Promise.all([...flushes].map((flush) => flush()))
+/** Waits for every save still in its debounce, or in flight, to reach the API. */
+export const flushPending = (): Promise<unknown> => Promise.all([...flushes].map((flush) => flush()))
+
+window.verticalsBeforeQuit = flushPending
 
 /** Registers a pending-save flush for the app's quit; returns the unregister. */
 export function onBeforeQuit(flush: Flush): () => void {

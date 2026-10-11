@@ -40,6 +40,13 @@ export interface CommentsState {
    *  this clears itself (`CommentsPanel.vue`'s own watcher) so a second click on the same highlight
    *  still re-triggers the scroll. */
   focusThreadId: string | null
+  /** A document's comment open on its words (docs/design/doc-comments-inline.md): the thread whose card stands under
+   *  them, or null. A document has no docked panel; a goal's comments still use it. */
+  cardId: string | null
+  /** A document's comments as a list over the field, opened by the count above it. */
+  listOpen: boolean
+  /** Counts the asks to go to a comment's words, so a comment asked for twice is gone to twice. */
+  goToSeq: number
 }
 
 export function createInitialCommentsState(): CommentsState {
@@ -51,6 +58,9 @@ export function createInitialCommentsState(): CommentsState {
     loading: false,
     pendingAnchor: null,
     focusThreadId: null,
+    cardId: null,
+    listOpen: false,
+    goToSeq: 0,
   }
 }
 
@@ -71,6 +81,8 @@ export function createCommentsPanel(state: { comments: CommentsState }, deps: De
       state.comments.threads = []
       state.comments.pendingAnchor = null
       state.comments.focusThreadId = null
+      state.comments.cardId = null
+      state.comments.listOpen = false
     }
     state.comments.loading = true
     try {
@@ -104,6 +116,43 @@ export function createCommentsPanel(state: { comments: CommentsState }, deps: De
     state.comments.open = false
     state.comments.pendingAnchor = null
     state.comments.focusThreadId = null
+    state.comments.cardId = null
+    state.comments.listOpen = false
+  }
+
+  /** A document's comment opens on its words, and the window goes to them (`goToSeq`); the list over the field goes. */
+  function openCard(threadId: string): void {
+    state.comments.cardId = threadId
+    state.comments.pendingAnchor = null
+    state.comments.listOpen = false
+    state.comments.goToSeq += 1
+  }
+
+  function closeCard(): void {
+    state.comments.cardId = null
+    state.comments.pendingAnchor = null
+  }
+
+  /** A press on marked words: their comment opens, or closes when it is the one open. */
+  function toggleCard(threadId: string): void {
+    if (state.comments.cardId === threadId) closeCard()
+    else openCard(threadId)
+  }
+
+  /** The count above the field opens the list; one thing is open at a time, so the card goes. */
+  function setCommentList(open: boolean): void {
+    state.comments.listOpen = open
+    if (open) closeCard()
+  }
+
+  /** Selected words get a comment of their own: the field to write it in opens under them. Load first, then stage, as
+   *  `useCommentAnchoring.commitSelectionToComment` does for a goal: the load's first, synchronous half resets a staged
+   *  anchor when the target is new. */
+  function openComposer(docId: string, anchor: CommentAnchor): void {
+    void loadCommentsFor('doc', docId)
+    state.comments.pendingAnchor = anchor
+    state.comments.cardId = null
+    state.comments.listOpen = false
   }
 
   function stageAnchor(anchor: CommentAnchor): void {
@@ -187,6 +236,11 @@ export function createCommentsPanel(state: { comments: CommentsState }, deps: De
     loadCommentsFor,
     openCommentsPanel,
     closeCommentsPanel,
+    openCard,
+    closeCard,
+    toggleCard,
+    setCommentList,
+    openComposer,
     stageAnchor,
     clearPendingAnchor,
     submitNewThread,
