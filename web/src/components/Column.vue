@@ -18,7 +18,11 @@ import { filterActive } from '../lib/commandFilter'
 const props = withDefaults(
   defineProps<{
     vertical: string
+    /** The column's name, its period (docs/design/column-names.md). */
     title: string
+    /** The name where the column is wide, when the period has a longer one (a week across two months). */
+    wideTitle?: string
+    /** The kind, small above the name. */
     subLabel?: string
     active?: boolean
     deckActive?: boolean
@@ -34,7 +38,7 @@ const props = withDefaults(
     end?: string
   }>(),
   {
-    subLabel: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
+    wideTitle: '', subLabel: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
     periodDirection: 1, periodSwapId: 0, span: false, end: '',
   },
 )
@@ -135,6 +139,7 @@ type SlideState = 'outgoing' | 'incoming' | 'current'
 interface PeriodSlide {
   id: number
   title: string
+  wideTitle: string
   subLabel: string
   goals: GoalCardData[]
   periodKey: string | null
@@ -146,6 +151,7 @@ function snapshot(state: SlideState): PeriodSlide {
   return {
     id: ++slideId,
     title: props.title,
+    wideTitle: props.wideTitle,
     subLabel: props.subLabel,
     goals: [...props.goals],
     periodKey: props.periodKey,
@@ -193,7 +199,7 @@ watch(
       return
     }
     if (props.periodKey === latest.periodKey) {
-      latest = { ...latest, title: props.title, subLabel: props.subLabel, goals: [...props.goals] }
+      latest = { ...latest, title: props.title, wideTitle: props.wideTitle, subLabel: props.subLabel, goals: [...props.goals] }
       if (slides.value.length === 1) slides.value = [latest]
       return
     }
@@ -232,7 +238,7 @@ watch(
 )
 
 watch(
-  () => [props.title, props.subLabel, props.goals, props.periodKey] as const,
+  () => [props.title, props.wideTitle, props.subLabel, props.goals, props.periodKey] as const,
   () => {
     if (slides.value.length !== 1) return
     /* Ordinary writes update the current slide without changing its key. Remounting the whole
@@ -240,6 +246,7 @@ watch(
     latest = {
       ...slides.value[0],
       title: props.title,
+      wideTitle: props.wideTitle,
       subLabel: props.subLabel,
       goals: [...props.goals],
       periodKey: props.periodKey,
@@ -331,7 +338,7 @@ onBeforeUnmount(() => swapAnimation?.cancel())
         <!-- Header click = expand/unfold toggle (KK ruling 2026-08-17). The pager cluster is a
              sibling of the header, so its own clicks never reach this handler. -->
         <ColumnHeader
-          :title="slide.title"
+          :title="active && slide.wideTitle ? slide.wideTitle : slide.title"
           :sub-label="slide.subLabel"
           :end="end"
           :data-cap="span ? undefined : 'column-expand'"

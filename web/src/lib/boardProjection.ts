@@ -137,6 +137,7 @@ export function toColumnData(
   return {
     vertical: verticalKey,
     title: names.name,
+    wideTitle: names.wideName,
     subLabel: names.kind || undefined,
     // COMPACT_BOARD_HANDOFF.md §3 (supersedes the "day is 1.78x, always" rule): `active` now
     // means THE expanded column — the one the user clicked, at most one, none by default. Day

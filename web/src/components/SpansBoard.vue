@@ -137,6 +137,7 @@ watch(() => spans.side, async () => {
       <Column
         :vertical="floating.vertical"
         :title="floating.title"
+        :wide-title="floating.wideTitle"
         :sub-label="floating.subLabel"
         :goals="floating.goals"
         :period-key="floating.periodKey"

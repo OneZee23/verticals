@@ -42,6 +42,8 @@ export interface BoardColumnData {
   vertical: string
   /** The column's name: its period, "October", "5–11 Oct", "Today" (docs/design/column-names.md). */
   title: string
+  /** The name where the column is wide, when the period has a longer one: a week across two months says its last day. */
+  wideTitle?: string
   /** The kind, small above the name: "Month"; the year follows it when the period is outside the current year. */
   subLabel?: string
   active?: boolean
