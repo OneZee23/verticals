@@ -71,6 +71,9 @@ def load_morning_prompt():
 
 
 MORNING_PROMPT = load_morning_prompt()
+# The one value a message's `sources` may take: the morning report's turn (web lib/morning.ts), which gets the morning
+# guide and its own rules. `clean_settings` passes exactly this value on and nothing else (docs/design/agent-fixes.md, fix 1).
+CONNECTED = "connected"
 # The Verticals writes the morning report makes on its own, unattended: its document, its task in Day and their link.
 MORNING_WRITES = ["create", "schedule", "doc_create", "doc_save", "doc_link"]
 # Outside Verticals, the morning report only reads: a tool of another connected server runs when its name starts with a
@@ -281,7 +284,7 @@ class ClaudeAgent:
         claude_settings = {"fastMode": bool(settings.get("fast")), "ultracode": effort == "ultracode"}
         # The morning report's turn (web lib/morning.ts) also reaches the owner's own connected tools, read-only, and
         # makes its document and task in Verticals without asking, whatever the permission mode.
-        self.connected = settings.get("sources") == "connected"
+        self.connected = settings.get("sources") == CONNECTED
         self.full = full_access(settings) and not self.connected
         allowed = READ_TOOLS + (MORNING_WRITES if self.connected else [])
         mode = settings.get("permission") or BOARD_ONLY
@@ -392,6 +395,13 @@ def codex_policy(mode, cwd=None):
     return out
 
 
+def codex_instructions(settings):
+    """What Codex is told at the start of a thread: the board prompt, the morning turn's guide after it, and Verticals
+    under the name Codex knows its server by."""
+    text = PROMPT + ("\n" + MORNING_PROMPT if settings.get("sources") == CONNECTED else "")
+    return text.replace('server "verticals"', 'server "verticals_desktop"')
+
+
 def codex_args(chat):
     """Keep the user's CLI sign-in, but expose only this desktop's MCP server.
 
@@ -451,7 +461,7 @@ class CodexAgent:
                                          "capabilities": {"experimentalApi": True}})
         self.proc.notify("initialized", {})
         params = {**codex_policy(settings.get("permission") or "auto-review"), "cwd": str(chat.workdir),
-                  "developerInstructions": PROMPT.replace('server "verticals"', 'server "verticals_desktop"'),
+                  "developerInstructions": codex_instructions(settings),
                   "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False},
                   "serviceTier": "fast" if settings.get("fast") else None}
         if settings.get("model"):
@@ -950,10 +960,14 @@ def clean_settings(raw):
     efforts = {v for v, _ in agent["efforts"]} | {"default"}
     permissions = {v for v, _, _ in agent["permissions"]}
     model = raw.get("model") if isinstance(raw.get("model"), str) and len(raw["model"]) < 200 else ""
-    return {"provider": provider, "model": model,
-            "effort": raw.get("effort") if raw.get("effort") in efforts else agent["defaultEffort"],
-            "fast": bool(raw.get("fast")),
-            "permission": raw.get("permission") if raw.get("permission") in permissions else agent["defaultPermission"]}
+    cleaned = {"provider": provider, "model": model,
+               "effort": raw.get("effort") if raw.get("effort") in efforts else agent["defaultEffort"],
+               "fast": bool(raw.get("fast")),
+               "permission": raw.get("permission") if raw.get("permission") in permissions else agent["defaultPermission"]}
+    # The morning report's turn is the one that sends `sources`; the gateway gives it its own guide and rules (CONNECTED).
+    if raw.get("sources") == CONNECTED:
+        cleaned["sources"] = CONNECTED
+    return cleaned
 
 
 def codex_usage(raw):

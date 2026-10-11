@@ -67,11 +67,17 @@ class _Session:
 
 
 def _claude(settings):
+    """A Claude agent started the way a message starts it: its settings come through the gateway's own clean."""
     chat = _chat()
     chat.JsonProcess, chat.which = _Proc, lambda provider: "claude"
     session = _Session()
     host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."))
-    return chat.ClaudeAgent(host, session, settings, None), session
+    return chat.ClaudeAgent(host, session, chat.clean_settings(settings), None), session
+
+
+def _system_prompt(agent) -> str:
+    args = agent.proc.args
+    return args[args.index("--append-system-prompt") + 1]
 
 
 def _bash(agent):
@@ -105,3 +111,42 @@ def test_the_morning_turn_keeps_its_own_rules_in_any_mode() -> None:
     assert args[args.index("--tools") + 1] == "" and "--add-dir" not in args
     _bash(agent)
     assert not session.asked and agent.proc.sent[-1]["response"]["response"]["behavior"] == "deny"
+
+
+def test_the_settings_clean_lets_the_morning_turns_sources_through() -> None:
+    """Fix 1 (docs/design/agent-fixes.md): the clean dropped `sources`, so no morning turn ever had its own rules."""
+    chat = _chat()
+    assert chat.clean_settings({"sources": "connected"})["sources"] == "connected"
+    for other in ("everything", "", None, True, ["connected"]):
+        assert "sources" not in chat.clean_settings({"sources": other}), other
+    assert "sources" not in chat.clean_settings({})
+
+
+def test_the_morning_guide_reaches_the_agent_the_app_asks() -> None:
+    """Fix 1: the settings the app sends for the morning ask (web lib/morning.ts) give that turn the morning guide, with
+    the report contract; any other turn keeps the board prompt."""
+    agent, _ = _claude({"permission": "manual", "sources": "connected"})
+    prompt = _system_prompt(agent)
+    assert "## This turn: the morning report" in prompt and "## Reference: report contract" in prompt
+    assert "## This turn: the morning report" not in _system_prompt(_claude({"permission": "manual"})[0])
+
+
+def test_codex_gets_the_morning_guide_in_the_same_turn() -> None:
+    """Fix 1: the morning turn is asked of whichever agent is chosen, so Codex gets the guide too, under its own server name."""
+    chat = _chat()
+    morning = chat.codex_instructions(chat.clean_settings({"provider": "codex", "sources": "connected"}))
+    assert "## This turn: the morning report" in morning and 'server "verticals_desktop"' in morning
+    assert "## This turn: the morning report" not in chat.codex_instructions(chat.clean_settings({"provider": "codex"}))
+
+
+def test_the_app_ships_every_skill_the_chat_reads() -> None:
+    """Fix 1: the chat reads the operator skill and, for the morning turn, the morning-report skill from the folder it
+    runs in; the app's bundle copies both, or the guide silently shrinks to the few lines of prompt-morning.md."""
+    spec = importlib.util.spec_from_file_location("verticals_bundle", ROOT / "desktop" / "macos" / "bundle.py")
+    assert spec and spec.loader
+    bundle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    chat = _chat()
+    for skill in (chat.SKILL, chat.MORNING_SKILL):
+        assert skill.name in bundle.SKILLS, skill.name
+        assert (ROOT / ".agents" / "skills" / skill.name / "SKILL.md").is_file()
