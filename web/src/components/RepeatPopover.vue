@@ -9,7 +9,6 @@ const props = defineProps<{
   id: string
   vertical: string
   repeat: RepeatRule | null
-  hasChildren: boolean
   compact?: boolean
 }>()
 
@@ -106,24 +105,7 @@ function setEnd(event: Event) {
 </script>
 
 <template>
-  <template v-if="hasChildren">
-    <button
-      type="button"
-      :role="props.compact ? undefined : 'menuitem'"
-      :class="props.compact ? 'goal-detail__meta-trigger' : 'dropdown__item goal-actions__item goal-actions__item--why'"
-      data-action="repeat"
-      :aria-label="props.compact ? 'Repeat' : undefined"
-      disabled
-      title="Goals with subgoals cannot be recurrent. Tip: use notes with checkboxes."
-    >
-      <AppIcon name="repeat" :size="props.compact ? 18 : 24" />
-      <span v-if="!props.compact">Repeat</span>
-      <!-- A greyed item says why (the review, 27 Sep 2026): the tooltip alone never showed. -->
-      <small v-if="!props.compact" class="goal-actions__why">Only for goals without subgoals</small>
-    </button>
-  </template>
   <PopoverEngine
-    v-else
     nested
     :fixed-width="200"
     :offset="[3, -8]"

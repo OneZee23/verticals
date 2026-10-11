@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import psycopg
+from playwright.sync_api import expect
 
 from tests.ui.conftest import UiSession
 
@@ -41,38 +42,32 @@ def test_repeat_menu_uses_nested_kit_surface_and_marks_the_card(ui_f2: UiSession
     assert active == ["Daily"], active
 
 
-def test_repeat_refused_on_a_parent_looks_refused(ui_f2: UiSession) -> None:
-    """D91: the app refuses repeat on a goal with subgoals — the user has to be able to SEE that.
-
-    `.dropdown__item:hover` carried no `:disabled` guard and nothing else styled the state, so the
-    refused item highlighted exactly like a live one and said nothing until a native tooltip
-    appeared. Two facts, both read off the rendered surface: it is dimmer than a live sibling, and
-    hovering it paints no background.
-    """
+def test_a_goal_with_steps_repeats_and_ticking_its_box_brings_the_steps_back(ui_f2: UiSession) -> None:
+    """docs/design/goal-menu.md. The app used to refuse Repeat on a goal with subgoals (D91: its menu item greyed, with
+    "Only for goals without subgoals"). SYNDAY01 has three steps: Repeat is live in its menu, and the next time comes
+    back with the same steps in the same order, none ticked."""
     session = ui_f2
-    session.gestures.click('[data-goal-id="SYNDAY01"] > .goal-card__row [data-role="goal-actions-trigger"]')
-    menu = session.page.locator('#dropdownPortal [data-role="goal-actions-menu"]')
-    menu.wait_for(state="visible")
+    page = session.page
+    card = '[data-goal-id="SYNDAY01"]'
+    session.gestures.click(f'{card} > .goal-card__row [data-role="goal-actions-trigger"]')
+    repeat = page.locator('[data-role="goal-actions-menu"] [data-action="repeat"] button')
+    expect(repeat).to_be_enabled()
+    assert page.locator('[data-role="goal-actions-menu"] .goal-actions__why').count() == 0
+    session.gestures.click('[data-role="goal-actions-menu"] [data-action="repeat"] button')
+    with page.expect_response(lambda r: r.request.method == "PATCH" and r.url.endswith("/api/goals/SYNDAY01")):
+        session.gestures.click('[data-role="repeat-menu"] button[role="menuitem"]:has-text("Daily")')
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        (rule,) = conn.execute("SELECT repeat_rule FROM goals WHERE owner = 't1' AND id = 'SYNDAY01'").fetchone()
+    assert rule == {"frequency": "daily", "interval": 1}
 
-    refused = menu.locator('[data-action="repeat"]')
-    assert refused.get_attribute("disabled") is not None, (
-        "SYNDAY01 has subgoals — its repeat action must be disabled"
-    )
-    live = menu.locator('[data-action="delete"]')
-
-    def ink(locator: object) -> str:
-        return locator.evaluate("el => getComputedStyle(el).color")  # type: ignore[attr-defined]
-
-    def paint(locator: object) -> str:
-        return locator.evaluate("el => getComputedStyle(el).backgroundColor")  # type: ignore[attr-defined]
-
-    assert ink(refused) != ink(live), (
-        f"refused and live menu items render the same ink ({ink(refused)}) — nothing tells them apart"
-    )
-
-    refused.hover(force=True)  # a disabled control takes no real pointer events; force the state
-    session.page.wait_for_timeout(100)
-    hovered = paint(refused)
-    assert hovered in ("rgba(0, 0, 0, 0)", "transparent"), (
-        f"hovering the refused item painted {hovered} — it reads as clickable"
-    )
+    with page.expect_response(lambda r: r.request.method == "PATCH" and r.url.endswith("/api/goals/SYNDAY01")):
+        session.gestures.click(f'{card} [data-role="goal-affordance"]')
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        again = conn.execute(
+            "SELECT id, anchor_date FROM goals WHERE owner = 't1' AND repeat_series_id = 'SYNDAY01' AND repeat_index = 1"
+        ).fetchone()
+        assert again is not None and str(again[1]) == "2026-08-09"
+        steps = conn.execute(
+            "SELECT title, done_at FROM goals WHERE owner = 't1' AND parent_id = %s ORDER BY position", (again[0],)
+        ).fetchall()
+    assert steps == [("Collect the sources", None), ("Name the argument", None), ("Cut the first pass", None)]

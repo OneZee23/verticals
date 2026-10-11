@@ -19,13 +19,9 @@ def _affordance(goal_id: str) -> str:
     return f'{_card(goal_id)} [data-role="goal-affordance"]'
 
 
-def _menu_items(session: UiSession) -> list[str]:
-    return session.page.locator(
-        f'{MENU} [data-menu-section="actions"] [role=menuitem]'
-    ).all_text_contents()
-
-
-def test_leaf_click_completes_but_parent_click_opens_unified_menu(ui_f2: UiSession) -> None:
+def test_a_leaf_and_a_goal_with_steps_both_complete_by_their_box(ui_f2: UiSession) -> None:
+    """docs/design/goal-menu.md: a goal completes by its box, as a goal without steps already does. A goal with steps used
+    to open its menu instead (and complete from "Complete" there); its box is a box like any other now."""
     session = ui_f2
     session.page.wait_for_selector(_affordance("SYNCOL01"))
     assert session.page.locator(_affordance("SYNCOL01")).get_attribute("data-affordance") == "leaf"
@@ -36,57 +32,42 @@ def test_leaf_click_completes_but_parent_click_opens_unified_menu(ui_f2: UiSessi
         session.page.click(_affordance("SYNCOL01"))
     session.page.wait_for_selector(f'{_card("SYNCOL01")}.goal-card--done')
 
-    before = len(session.request_log)
     assert session.page.locator(_affordance("SYNDAY01")).get_attribute("data-affordance") == "parent"
-    session.page.click(_affordance("SYNDAY01"))
-    session.page.wait_for_selector(MENU)
-    session.page.wait_for_timeout(100)
-    # The systematic menu (docs/design-handoff S5.P5.007): Discuss (only where an agent is), Comment, Complete, then Move.
-    # Details left it (S5.P5.024): a click on the card opens it.
-    assert _menu_items(session) == ["Comment", "Complete"]
-    assert session.page.locator(f'{MENU} [data-move="inbox"]').count() == 1
-    assert session.page.locator(f'{MENU} [data-menu-item="foil"]').count() == 0
-    assert all(ord(ch) < 128 for text in _menu_items(session) for ch in text)
-    assert not any(
-        row["method"] == "PATCH" and row["url"].endswith("/api/goals/SYNDAY01")
-        for row in session.request_log[before:]
-    ), "parent affordance must not one-click complete"
-
-    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        assert conn.execute(
-            "SELECT done_at FROM goals WHERE id = 'SYNDAY01'"
-        ).fetchone() == (None,)
-
-    with session.page.expect_response(
-        lambda response: response.request.method == "PATCH"
-        and response.url.endswith("/api/goals/SYNDAY01")
-    ):
-        session.page.click(f'{MENU} [data-menu-item="complete"]')
-    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        assert conn.execute(
-            "SELECT done_at IS NOT NULL FROM goals WHERE id = 'SYNDAY01'"
-        ).fetchone() == (True,)
+    for done in (True, False):
+        with session.page.expect_response(
+            lambda response: response.request.method == "PATCH"
+            and response.url.endswith("/api/goals/SYNDAY01")
+        ) as sent:
+            session.page.click(_affordance("SYNDAY01"))
+        assert sent.value.request.post_data_json == {"done": done}
+        with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+            assert conn.execute(
+                "SELECT done_at IS NOT NULL FROM goals WHERE id = 'SYNDAY01'"
+            ).fetchone() == (done,)
+        assert session.page.locator(MENU).count() == 0, "the box completes; it opens no menu"
 
 
-def test_right_click_uses_same_menu_with_the_move_group(ui_f2: UiSession) -> None:
-    """S5.P5.035: one grey "Move" over Tomorrow, Next week and Date, then Under and Inbox."""
+def test_right_click_uses_same_menu_with_the_reschedule_and_move_groups(ui_f2: UiSession) -> None:
+    """S5.P5.035; docs/design/goal-menu.md: one grey "Reschedule" over Tomorrow, Next week and Date, one grey "Move" over
+    Into a goal and To Inbox."""
     session = ui_f2
     card = session.page.locator(_card("SYNCOL03"))
     card.wait_for(state="visible")
     card.click(button="right")
     session.page.wait_for_selector(MENU)
-    assert _menu_items(session) == ["Comment"]
-    assert session.page.locator(f'{MENU} [data-menu-item="complete"]').count() == 0
-    assert session.page.locator(f'{MENU} [data-menu-item="ignore"]').count() == 0
-    assert session.page.locator(f'{MENU} [data-menu-item="details"]').count() == 0
+    for gone in ("comment", "complete", "ignore", "details"):
+        assert session.page.locator(f'{MENU} [data-menu-item="{gone}"]').count() == 0
+    reschedule = session.page.locator(f'{MENU} [data-menu-section="reschedule"]')
+    expect(reschedule.locator(".goal-actions__heading")).to_have_text("Reschedule")
+    assert [t.strip() for t in reschedule.locator("[data-move]").all_inner_texts()] == ["Tomorrow", "Next week", "Date"]
     move = session.page.locator(f'{MENU} [data-menu-section="move"]')
     expect(move.locator(".goal-actions__heading")).to_have_text("Move")
-    assert [t.strip() for t in move.locator("[data-move]").all_inner_texts()] == ["Tomorrow", "Next week", "Date", "Under", "Inbox"]
+    assert [t.strip() for t in move.locator("[data-move]").all_inner_texts()] == ["Into a goal", "To Inbox"]
     assert session.page.locator(f'{MENU} [data-cap="park"]').count() == 0
 
 
 def test_inbox_takes_the_goal_off_its_dates(ui_f2: UiSession) -> None:
-    """S5.P5.004: "Inbox" under Move clears the goal's schedule; it leaves the board for the Inbox."""
+    """S5.P5.004: "To Inbox" under Move clears the goal's schedule; it leaves the board for the Inbox."""
     session = ui_f2
     card = session.page.locator(_card("SYNORD01"))
     card.wait_for(state="visible")
