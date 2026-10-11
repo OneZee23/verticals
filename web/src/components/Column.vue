@@ -14,6 +14,7 @@ import { playSound } from '../lib/sound'
 import type { PeriodDirection } from '../lib/periodNavigation'
 import type { GoalCardData } from '../types'
 import { filterActive } from '../lib/commandFilter'
+import { reducedMotion } from '../lib/motion'
 
 const props = withDefaults(
   defineProps<{
@@ -199,6 +200,13 @@ watch(
     }
     const version = ++swapVersion
     swapAnimation?.cancel()
+    if (reducedMotion()) {
+      // The new period replaces the old at once. Sliding them past each other is travel, and laying them on one another
+      // to cross-fade doubles every title and date mid-frame (docs/design/column-bounce.md).
+      latest = snapshot('current')
+      slides.value = [latest]
+      return
+    }
     const outgoing: PeriodSlide = { ...latest, id: ++slideId, state: 'outgoing' }
     const incoming = snapshot('incoming')
     latest = { ...incoming, state: 'current' }

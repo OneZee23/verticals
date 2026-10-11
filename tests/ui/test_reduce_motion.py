@@ -11,7 +11,7 @@ Chrome checks the real bundle. The Swift half and the bounce under a trackpad ne
 from __future__ import annotations
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession
 from tests.ui.test_carried_motion import SAMPLER, _board, _change, _trace
@@ -33,6 +33,22 @@ WATCH_FIELD = """() => {
   }, true);
 }"""
 FIELD_MOVES = """() => window.__fieldRuns.filter((name) => !['opacity', 'color', 'background-color'].includes(name))"""
+# Every frame, whether a column's periods or their track travel (a transform or translate animation on them).
+WATCH_TRAVEL = """() => {
+  window.__travel = [];
+  const frame = () => {
+    for (const a of document.getAnimations()) {
+      if (!a.effect?.target?.matches?.('[data-role="period-track"], [data-role="period-slide"]')) continue;
+      for (const key of a.effect.getKeyframes()) {
+        for (const property of ['transform', 'translate']) {
+          if (key[property] && key[property] !== 'none') window.__travel.push(`${property} ${key[property]}`);
+        }
+      }
+    }
+    window.__watching = requestAnimationFrame(frame);
+  };
+  frame();
+}"""
 
 
 @pytest.fixture
@@ -68,12 +84,15 @@ def test_a_column_bounces_at_its_ends_on_a_fine_pointer(ui_f2: UiSession) -> Non
     assert page.evaluate(OVERSCROLL) == "contain"
 
 
-@pytest.mark.parametrize("ui_reduced_motion,switch,still", [
+MATRIX = pytest.mark.parametrize("ui_reduced_motion,switch,still", [
     ("no-preference", None, False),  # a browser, motion on
     ("reduce", None, True),  # a browser, the system setting on: the only switch there
     ("no-preference", "on", True),  # the app's switch on, the system setting off
     ("reduce", "off", False),  # the person turned the app's switch off over a system setting that is on
 ], indirect=["ui_reduced_motion"])
+
+
+@MATRIX
 def test_motion_is_still_exactly_when_the_switch_or_the_system_setting_says_so(
     ui_f2: UiSession, switch: str | None, still: bool,
 ) -> None:
@@ -121,3 +140,20 @@ def test_the_switch_acts_on_the_page_that_is_open(ui_f2: UiSession) -> None:
         assert page.evaluate(OVERSCROLL) == ("none" if still else "contain")
     page.evaluate(f"document.documentElement.removeAttribute('{ATTRIBUTE}')")
     assert page.evaluate(LONGEST_TRANSITION, card) > 0.1, "no answer: the system setting, which is off here"
+
+
+@MATRIX
+def test_a_column_pages_without_travel_when_motion_is_still(ui_f2: UiSession, switch: str | None, still: bool) -> None:
+    """Stepping a column to the next period slides its two periods past each other (Column.vue); with motion reduced,
+    by the system setting or the app's switch, nothing travels."""
+    page = ui_f2.page
+    _answer(ui_f2, switch)
+    column = '.pattern-vertical-board__column[data-vertical="week"]'
+    before = page.locator(column).get_attribute("data-period-key")
+    page.locator(column).hover()
+    page.evaluate(WATCH_TRAVEL)
+    page.locator(f'{column} [data-cap="period-next"]').click()
+    expect(page.locator(column)).not_to_have_attribute("data-period-key", before)
+    page.wait_for_timeout(600)
+    travelled = page.evaluate("() => window.__travel")
+    assert bool(travelled) is not still, f"the column {'slid' if travelled else 'paged without travel'}: {travelled[:3]}"
