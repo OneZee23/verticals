@@ -336,3 +336,31 @@ def test_the_waiting_goal_is_the_same_card_in_every_frame_while_the_field_widens
     page.wait_for_function("() => Math.round(document.querySelector('.circle-field__shape').getBoundingClientRect().width) === 120")
     frames = _frames_while_the_field_widens(page, page.mouse.up)
     _assert_the_card_is_what_it_will_be_in_every_frame(frames)
+
+
+def _layout(page: Page) -> dict[str, list[int] | None]:
+    """Where the field, the buttons above it and the waiting card stand, as [x, width, height] in whole pixels."""
+    return page.evaluate("""() => {
+      const box = (selector) => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return [r.x, r.width, r.height].map(Math.round);
+      };
+      return { field: box('.circle-field__shape'), buttons: box('.circle-tags'), card: box('[data-role="moving-goal"]') };
+    }""")
+
+
+def test_the_field_keeps_its_width_for_the_buttons_and_the_goal_when_the_hand_leaves(ui_f2: UiSession) -> None:
+    """The field holds the keys after the let-go, so its buttons stay, and the stack stands right of them (S5.P3.010, .012):
+    the field is as wide as the buttons and the stack need whether the hand is on it or away. The goal keeps its one line."""
+    page = ui_f2.page
+    _park(page)
+    page.mouse.move(*_centre(page, ".circle-field__shape"))
+    page.wait_for_timeout(300)
+    on = _layout(page)
+    assert on["buttons"] is not None and on["card"] is not None and on["card"][2] == 34, on
+    page.mouse.move(40, 300)
+    page.wait_for_timeout(300)
+    expect(page.locator(".circle-tags")).to_have_class(re.compile("is-shown"))  # the field holds the keys: its buttons stay
+    assert _layout(page) == on

@@ -139,7 +139,9 @@ const width = computed(() => {
   }
   if (state.value === 'open') return openWidth.value
   if (holding.value) return 120
-  if (state.value === 'moving') return Math.min(circle.pointed ? 434 : 300, maxWidth.value)
+  // The buttons stand at the stack's left end whenever they are shown, pointed at or holding the keys, and the stack stands
+  // right of them (S5.P3.010, .012): the field is wide enough for both, with the hand on it or away.
+  if (state.value === 'moving') return Math.min(tagsShown.value ? 434 : 300, maxWidth.value)
   return mascot.pong ? 132 : CIRCLE
 })
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))

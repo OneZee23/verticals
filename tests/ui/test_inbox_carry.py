@@ -18,7 +18,7 @@ from verticals.core import goals as core_goals, privacy as core_privacy
 from tests.ui.conftest import UiSession
 from tests.ui.test_agent_conversation import ui_agent  # noqa: F401  (the fixture)
 from tests.ui.test_moving import (  # noqa: F401  (ui_reduced_motion is the fixture)
-    MONTH_GOAL, _assert_the_card_is_what_it_will_be_in_every_frame, _frames_while_the_field_widens, _open_weeks,
+    MONTH_GOAL, _assert_the_card_is_what_it_will_be_in_every_frame, _frames_while_the_field_widens, _layout, _open_weeks,
     ui_reduced_motion,
 )
 from tests.ui.views import FIELD, switch_view, tick
@@ -135,6 +135,23 @@ def test_a_task_let_go_over_the_field_waits_in_it_through_the_moving_stack(ui_f2
     assert card is not None and field is not None and row is not None
     assert card["y"] + card["height"] <= field["y"], (card, field)
     assert abs(card["x"] - (field["x"] + 4 + row["width"] + 8)) <= 1, (card, field, row)
+
+
+def test_the_field_keeps_its_width_for_the_buttons_and_the_task_when_the_hand_leaves(ui_f2: UiSession) -> None:
+    """As on the board: the field holds the keys after the let-go, so its buttons stay and the card stands right of them; the
+    field is as wide as both need whether the hand is on it or away."""
+    page = ui_f2.page
+    ids = _seed(ui_f2)
+    _open_inbox(ui_f2)
+    _carry_and_wait(page, ids["under"])
+    page.mouse.move(*_centre(page, SHAPE))
+    page.wait_for_timeout(300)
+    on = _layout(page)
+    assert on["buttons"] is not None and on["card"] is not None and on["card"][2] == 34, on
+    page.mouse.move(40, 300)
+    page.wait_for_timeout(300)
+    expect(page.locator(".circle-tags")).to_have_class(re.compile("is-shown"))  # the field holds the keys: its buttons stay
+    assert _layout(page) == on
 
 
 def test_an_older_task_from_earlier_waits_the_same_way(ui_f2: UiSession) -> None:
