@@ -7,8 +7,10 @@
 
    Its own component, apart from the field (SearchBar.vue): it stands where the conversation keeps clear of the field, 12 px
    over its top, and rises with it as the field grows or its tags come in (`--vt-field-height`, `--vt-tags-lift`); it
-   is out of the way while the conversation is open, a message is typed or a goal is moved. Nothing stands here with no
-   comment to count and nothing to hand over. */
+   is out of the way while the conversation is open, a message is typed or a goal is moved. The count stays while the
+   document has any comment, so a resolved one can still be reached: with none open it reads "3 resolved", grey and with no
+   dot (the dot is the yellow of marked words, and resolved words are not marked), and its list is the resolved ones. Nothing
+   stands here for a document with no comment at all and nothing to hand over. */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import DocCommentList from './DocCommentList.vue'
 import { store } from '../store'
@@ -16,17 +18,23 @@ import { agentChat } from '../lib/agentChat'
 import { circle } from '../lib/circle'
 import { commandFilter } from '../lib/commandFilter'
 import { checkAgain, checkShown } from '../lib/checkAgain'
-import { followFrontDoc, frontDocId, openThreads } from '../lib/docComments'
+import { docThreads, followFrontDoc, frontDocId, openThreads } from '../lib/docComments'
 
 const count = computed(() => openThreads.value.length)
-const label = computed(() => `${count.value} ${count.value === 1 ? 'comment' : 'comments'}`)
+const resolved = computed(() => docThreads.value.length - count.value)
+/** The document has comments, and none of them is open. */
+const resolvedOnly = computed(() => count.value === 0 && resolved.value > 0)
+const hasThreads = computed(() => docThreads.value.length > 0)
+const label = computed(() => (resolvedOnly.value ? `${resolved.value} resolved` : `${count.value} ${count.value === 1 ? 'comment' : 'comments'}`))
+const name = computed(() => (resolvedOnly.value ? `${resolved.value} resolved ${resolved.value === 1 ? 'comment' : 'comments'}` : undefined))
 const out = computed(() => agentChat.open || !!commandFilter.text || circle.moving)
-const shown = computed(() => !!frontDocId.value && !out.value && (count.value > 0 || checkShown.value))
+const shown = computed(() => !!frontDocId.value && !out.value && (hasThreads.value || checkShown.value))
 const listOpen = computed(() => store.state.comments.listOpen)
 
 const stop = followFrontDoc()
 onBeforeUnmount(stop)
-// With nothing left to count (the last one resolved, the document gone from the front) the list has nothing to stand over.
+// With nothing to stand over (the document gone from the front, or no comment left at all) the list goes; with only resolved
+// comments left it stays, and shows them.
 watch(shown, (now) => { if (!now) store.setCommentList(false) })
 
 function toggle(): void {
@@ -72,14 +80,16 @@ onBeforeUnmount(() => {
     <div class="doc-check__row">
       <TransitionGroup name="doc-check-pill" @before-leave="holdPlace">
         <button
-          v-if="count > 0"
+          v-if="hasThreads"
           key="count"
           type="button"
           class="doc-check__pill doc-check__count"
+          :class="{ 'doc-check__count--resolved': resolvedOnly }"
           data-role="doc-comments-count"
+          :aria-label="name"
           :aria-expanded="listOpen"
           @click="toggle"
-        ><i class="doc-check__dot" aria-hidden="true"></i>{{ label }}</button>
+        ><i v-if="!resolvedOnly" class="doc-check__dot" aria-hidden="true"></i>{{ label }}</button>
         <button
           v-if="checkShown"
           key="check"
@@ -89,7 +99,7 @@ onBeforeUnmount(() => {
           @click="checkAgain"
         >Check again</button>
       </TransitionGroup>
-      <DocCommentList v-if="listOpen && count > 0" />
+      <DocCommentList v-if="listOpen && hasThreads" />
     </div>
   </div>
 </template>
@@ -137,6 +147,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 .5px rgba(var(--vt-ink), .14), 0 8px 20px -10px rgba(var(--vt-ink), .35);
 }
 .doc-check__dot { flex: none; width: 10px; height: 10px; border-radius: 5px; background: var(--color-goal-yellow, #ecce32); }
+/* Only resolved comments: grey words and no dot (60% black, 5.7 to 1 on white). */
+.doc-check__count--resolved { color: rgb(0 0 0 / 60%); }
 .doc-check__again { background: #000; color: #fff; }
 @media (hover: hover) and (pointer: fine) {
   .doc-check__count:hover, .doc-check__count[aria-expanded='true'] { background: #f5f5f7; }
