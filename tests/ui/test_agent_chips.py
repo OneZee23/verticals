@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import psycopg
-from playwright.sync_api import expect
+import pytest
+from playwright.sync_api import Page, expect
 
 from verticals.core import docs as core_docs
 
@@ -95,6 +96,69 @@ def test_a_goal_chip_and_a_document_chip_are_one_form(ui_agent: UiSession) -> No
     assert (when["fontWeight"], when["fontSize"], when["lineHeight"], when["color"]) == ("400", "13px", "22px", "rgba(255, 255, 255, 0.5)")
     boxes = [goal_chip.bounding_box(), doc_chip.bounding_box()]
     assert boxes[0] and boxes[1] and abs(boxes[0]["x"] - boxes[1]["x"]) < 0.5 and boxes[0]["y"] < boxes[1]["y"]
+
+
+COLUMNS = """(scope) => {
+  const root = document.querySelector(scope)
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }
+  const goal = root.querySelector('[data-role="goal-chip"]'), doc = root.querySelector('[data-role="doc-chip"]')
+  return {
+    goal: goal && { chip: box(goal), name: box(goal.querySelector('.goal-chip__name')), column: box(goal.querySelector('.goal-chip__page')),
+                    square: box(goal.querySelector('[data-role="goal-chip-square"]')) },
+    doc: doc && { chip: box(doc), name: box(doc.querySelector('.doc-chip__name')), page: box(doc.querySelector('.doc-chip__page')) },
+  }
+}"""
+
+
+def _the_columns(page: Page, scope: str, *, with_doc: bool) -> None:
+    """One anatomy for every chip, read off one snapshot of the page: the document chip's first page is a 50 px column and
+    its title starts 14 px after it, at 64; the goal chip has that column too, with the board's 16 px square in the middle of
+    it and level with the title's first line, and its title starts at 64 as well."""
+    seen = page.evaluate(COLUMNS, scope)
+    goal = seen["goal"]
+    assert goal, "no goal chip in " + scope
+    near = {"abs": 0.5}
+    assert goal["name"]["x"] - goal["chip"]["x"] == pytest.approx(64, **near), "the goal's title starts at 64, as a document's does"
+    assert goal["column"] and goal["column"]["w"] == pytest.approx(50, **near), "the goal chip has the document chip's 50 px column"
+    assert (goal["square"]["w"], goal["square"]["h"]) == pytest.approx((16, 16), **near)
+    assert goal["square"]["x"] + goal["square"]["w"] / 2 - goal["chip"]["x"] == pytest.approx(25, **near), "the square is in the middle of the column"
+    assert goal["square"]["y"] + goal["square"]["h"] / 2 == pytest.approx(goal["name"]["y"] + 11, **near), "level with the title's first line"
+    if with_doc:
+        doc = seen["doc"]
+        assert doc, "no document chip in " + scope
+        assert doc["page"]["w"] == pytest.approx(50, **near)
+        assert doc["name"]["x"] - doc["chip"]["x"] == pytest.approx(64, **near)
+        assert goal["name"]["x"] == pytest.approx(doc["name"]["x"], **near), "stacked, the two titles start at one x"
+
+
+def test_a_goal_chips_title_starts_where_a_document_chips_title_starts(ui_agent: UiSession) -> None:
+    """One anatomy for every chip (the owner's "consistent and universal"): the goal chip takes the document chip's columns,
+    always, in the field's answer and in the conversation, and a goal chip alone too."""
+    with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
+        doc = core_docs.create(conn, owner=F2_OWNER, path="reports/syn-columns.md", title="SYN columns report").doc.id
+    title = "SYN a goal whose title is long enough to take a second line beside its square"
+    goal = goal_made(ui_agent.backend.dsn, title)
+    page = ui_agent.page
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{goal}"]')
+    # The field's answer: the goal chip above the document chip.
+    _send(page, f"[slow] [say] Made both.\n[{title}](#goal/{goal})\n[SYN columns report](#doc/{doc})")
+    close_the_conversation(page)
+    answer = page.locator(ANSWER)
+    expect(answer.locator(GOAL_CHIP)).to_have_count(1, timeout=10000)
+    expect(answer.locator(DOC_CHIP)).to_have_count(1)
+    _the_columns(page, ANSWER, with_doc=True)
+    # The same message in the open conversation.
+    page.locator(".circle-field__answer-words").click()
+    expect(page.locator(f"{AGENT_BALLOON} {GOAL_CHIP}")).to_have_count(1)
+    _the_columns(page, AGENT_BALLOON, with_doc=True)
+    # A goal chip alone in the field keeps the column: nothing makes it a different chip.
+    close_the_conversation(page)
+    _send(page, f"[slow] [say] [{title}](#goal/{goal})")
+    close_the_conversation(page)
+    expect(answer.locator(GOAL_CHIP)).to_have_count(1, timeout=10000)
+    expect(answer.locator(DOC_CHIP)).to_have_count(0)
+    _the_columns(page, ANSWER, with_doc=False)
 
 
 def test_a_chip_follows_its_goal_when_it_is_renamed_and_moved(ui_agent: UiSession) -> None:
