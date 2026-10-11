@@ -105,10 +105,11 @@ def _within(value: float, fields: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _words(fields: Mapping[str, Any], value: float | None, plain: str) -> str:
-    """The line an answer says: the check's own sentence (`say`, with {v} for the number) when it has one."""
+def _words(fields: Mapping[str, Any], value: float | None, plain: str, problem: str | None = None) -> str:
+    """The line an answer says: the check's own sentence (`say`, with {v} for the number) when it has one, and when the
+    number is outside its limits, which limit, so a failing line never hides why it fails."""
     if value is not None and "say" in fields:
-        return fields["say"].replace("{v}", num(value))
+        return fields["say"].replace("{v}", num(value)) + (f", {problem}" if problem else "")
     return plain
 
 
@@ -229,7 +230,7 @@ def _cmd(fields: Mapping[str, Any], *, home: Path, stop: threading.Event, enviro
         return Result(False, f"{shown(digits, 30)!r} is not a number", raw=raw)
     problem = _within(value, fields)
     plain = f"{num(value)} from {shown(found.group(0).strip(), 40)!r}" + (f", {problem}" if problem else "")
-    return Result(problem is None, _words(fields, value, plain), value=value, raw=raw)
+    return Result(problem is None, _words(fields, value, plain, problem), value=value, raw=raw)
 
 
 # --- a file ----------------------------------------------------------------------------------------------------------
@@ -298,7 +299,7 @@ def _read_data(fields: Mapping[str, Any], data: Any, status_line: str, raw: str)
             return Result(False, f"{fields['value']} is {json.dumps(got, ensure_ascii=False)}, not a number", raw=raw)
         problem = _within(value, fields)
         facts.append(f"{fields['value']}={num(value)}" + (f", {problem}" if problem else ""))
-        return Result(problem is None, _words(fields, value, ", ".join(facts)), value=value, raw=raw)
+        return Result(problem is None, _words(fields, value, ", ".join(facts), problem), value=value, raw=raw)
     return Result(True, ", ".join(facts), raw=raw)
 
 

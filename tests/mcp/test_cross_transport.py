@@ -379,18 +379,24 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # `doc_tree`, `doc_history`, `doc_revision` write nothing, same reasoning.
 # WP-A adds `comments` (`verticals/mcp/comments.py`) — the worklist/scoped-list read, writes
 # nothing, same reasoning as every other read tool in this set.
-_READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "doc_get", "doc_tree", "doc_history", "doc_revision", "comments"}
+# Sources adds `sources`, the list of what the morning report reads from and how each is doing — a read.
+_READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "doc_get", "doc_tree", "doc_history", "doc_revision", "comments", "sources"}
 # WP-33's deliberate single-surface write (docs/EVIDENCE.md §6/§9, verticals/mcp/evidence.py's
 # module note): evidence is written by the agent over MCP only — the UI reads evidence off the
 # board payload (`board_to_json`'s `evidence` map, already on HTTP) and never writes it, so
 # there is no HTTP write route and no F5 capability row (F5's `ui_selector` column has nothing
 # to name). A second entry here without a spec section like §6 backing it should be treated as
 # suspicious — this set exists for capabilities that are agent tooling, not user capabilities.
-_AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report"}
-# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. None now: the daily
-# carry-over task and the morning report it once wrote are the agent's, made when the owner asks or the morning comes
-# (Inbox and Documents redesign, final page). A new one goes here with its reason.
-_APP_ONLY_ROUTES: set[tuple[str, str]] = set()
+# `source` (docs/design/sources.md) is agent tooling in the same sense: the owner says in a sentence what the report
+# should read and the agent writes the source document and runs its check once beside the raw output; the owner's own
+# hands on a source are the document (the ordinary /api/docs routes) and Approve, which has no tool by design.
+_AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report", "source"}
+# The mirror image on HTTP: a route only the app itself calls. The daily carry-over task and the morning report it once
+# wrote are the agent's now, made when the owner asks or the morning comes (Inbox and Documents redesign, final page), so
+# housekeeping has none left. A new one goes here with its reason.
+# The one there is: the Sources Approve button. The owner approves the exact command or file a source will run, and by
+# design no tool can (docs/design/sources.md: the agent proposes, the owner approves).
+_APP_ONLY_ROUTES: set[tuple[str, str]] = {("POST", "/api/sources/{id}/approve")}
 
 # capabilities.json's `mcp_args` values are placeholders (`"<title>"`, `"<id>"`, ...), not literal
 # values a real caller would send — most placeholders are plain strings and validate as-is against

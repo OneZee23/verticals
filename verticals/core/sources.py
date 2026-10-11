@@ -131,6 +131,8 @@ class View:
     summary: str | None
     error: str | None
     updated_at: datetime
+    failures: int = 0
+    next_check_at: datetime | None = None
     excerpt: str = ""
     body: str | None = None
 
@@ -140,7 +142,7 @@ class View:
             "status": self.status, "why": self.why, "detail": self.detail, "value": self.value, "ms": self.ms,
             "checked_at": _iso(self.checked_at), "since": _iso(self.since), "needs_approval": self.needs_approval,
             "approved": self.approved, "check_hash": self.check_hash, "summary": self.summary, "error": self.error,
-            "updated_at": _iso(self.updated_at),
+            "updated_at": _iso(self.updated_at), "failures": self.failures, "next_check_at": _iso(self.next_check_at),
         }
         if self.excerpt:
             out["excerpt"] = self.excerpt
@@ -228,14 +230,16 @@ def view(source: Source, now: datetime, *, excerpt: bool = False, body: bool = F
         since=row.failing_since if status == RED else None,
         needs_approval=source.waiting, approved=source.approved,
         check_hash=check.hash if check else None, summary=check.summary() if check else None, error=source.error,
-        updated_at=source.updated_at,
+        updated_at=source.updated_at, failures=row.failures if answered else 0,
+        next_check_at=row.next_check_at if answered and not source.waiting else None,
         excerpt=source.body[:EXCERPT] if excerpt else "", body=source.body if body else None,
     )
 
 
-def views(conn: psycopg.Connection, *, owner: str, now: datetime) -> list[View]:
-    """Every source with its state, what needs a look first: red, then waiting, then the rest, then by name."""
-    out = [view(s, now, excerpt=True) for s in sources(conn, owner=owner)]
+def views(conn: psycopg.Connection, *, owner: str, now: datetime, excerpt: bool = True) -> list[View]:
+    """Every source with its state, what needs a look first: red, then waiting, then the rest, then by name. The tiles
+    draw each source's page, so they ask for the excerpt; the agent's list does not need it."""
+    out = [view(s, now, excerpt=excerpt) for s in sources(conn, owner=owner)]
     out.sort(key=lambda v: (_RANK[v.why or v.status], (v.title or v.path).lower(), v.path))
     return out
 

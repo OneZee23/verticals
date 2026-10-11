@@ -1,8 +1,9 @@
-"""The twenty-nine MCP tools (ARCHITECTURE.md §5, docs/E2E.md S-47's original nine, plus WP-33's
+"""The MCP tools (ARCHITECTURE.md §5, docs/E2E.md S-47's original nine, plus WP-33's
 `evidence_update`/`evidence_due` (docs/EVIDENCE.md §6), `park`, `tags`/`tag_mark`, `size_report`,
 `due_ack`, D250 WP-2's eight document tools plus D254's `doc_link`/`doc_unlink`
-(`verticals/mcp/docs.py`), and WP-A's three comment tools (docs/COMMENTS_SPEC.md,
-`verticals/mcp/comments.py`)) — schemas and dispatch. Only the original nine live whole in this
+(`verticals/mcp/docs.py`), WP-A's three comment tools (docs/COMMENTS_SPEC.md,
+`verticals/mcp/comments.py`), `privacy`, and the two for sources (docs/design/sources.md,
+`verticals/mcp/sources.py`)) — schemas and dispatch. Only the original nine live whole in this
 file; every tool added since owns its own family module (schema + handler together) and splices
 into `TOOLS`/`_HANDLERS` below — the same shape WP-33 set when it extracted
 `verticals/mcp/evidence.py` past S-90a's 750-line cap, repeated by every family since rather than
@@ -56,6 +57,7 @@ from verticals.mcp import evidence as mcp_evidence
 from verticals.mcp import park as mcp_park
 from verticals.mcp import privacy as mcp_privacy
 from verticals.mcp import sizes as mcp_sizes
+from verticals.mcp import sources as mcp_sources
 from verticals.mcp import tags as mcp_tags
 from verticals.mcp.shapes import (
     ancestor_dict,
@@ -101,7 +103,7 @@ TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="schedule", description="Set or clear a goal's vertical and anchor date.", input_schema=SCHEDULE_SCHEMA),
     types.Tool(name="reparent", description="Move a goal under a new parent, or detach it to the root.", input_schema=REPARENT_SCHEMA),
     types.Tool(name="delete", description="Remove a goal. Refuses a non-empty subtree unless cascade is true.", input_schema=DELETE_SCHEMA),
-) + mcp_evidence.TOOLS + mcp_park.TOOLS + mcp_tags.TOOLS + mcp_sizes.TOOLS + mcp_due_ack.TOOLS + mcp_docs.TOOLS + mcp_comments.TOOLS + mcp_privacy.TOOLS
+) + mcp_evidence.TOOLS + mcp_park.TOOLS + mcp_tags.TOOLS + mcp_sizes.TOOLS + mcp_due_ack.TOOLS + mcp_docs.TOOLS + mcp_comments.TOOLS + mcp_privacy.TOOLS + mcp_sources.TOOLS
 
 _SCHEMAS: dict[str, dict[str, Any]] = {t.name: t.input_schema for t in TOOLS}
 
@@ -650,6 +652,8 @@ _HANDLERS: dict[str, Any] = {
     "comment_add": mcp_comments.handle_comment_add,
     "comment_resolve": mcp_comments.handle_comment_resolve,
     "privacy": mcp_privacy.handle_privacy,
+    "sources": mcp_sources.handle_sources,
+    "source": mcp_sources.handle_source,
 }
 
 

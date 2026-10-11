@@ -83,7 +83,9 @@ def test_a_field_of_the_answer_is_checked_and_a_number_is_read_from_it(web: str)
     over = run({"kind": "http", "url": f"{web}/ok", "value": "count", "max": 2})
     assert (over.ok, over.value, over.detail) == (False, 3.0, "HTTP 200, count=3, over the limit 2")
     said = run({"kind": "http", "url": f"{web}/ok", "value": "count", "max": 2, "say": "{v} jobs waiting"})
-    assert (said.ok, said.detail) == (False, "3 jobs waiting")
+    assert (said.ok, said.detail) == (False, "3 jobs waiting, over the limit 2")
+    fine = run({"kind": "http", "url": f"{web}/ok", "value": "count", "max": 5, "say": "{v} jobs waiting"})
+    assert (fine.ok, fine.detail) == (True, "3 jobs waiting")
     absent = run({"kind": "http", "url": f"{web}/ok", "value": "missing.path"})
     assert (absent.ok, absent.detail) == (False, "missing.path is null, not a number")
 
@@ -142,7 +144,7 @@ def test_a_command_exits_well_and_a_number_in_its_output_stays_within_limits(hom
     wrong = run({**check, "parse": r"(\d+)%"}, home=home)
     assert (wrong.value, wrong.ok) == (100.0, False)
     said = run({**check, "max": 50, "say": "last exit code {v}"}, home=home)
-    assert said.detail == "last exit code 71"
+    assert said.detail == "last exit code 71, over the limit 50"
 
 
 def test_a_command_that_exits_badly_or_is_missing_says_so(home: Path) -> None:
