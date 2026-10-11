@@ -10,10 +10,10 @@ import math
 
 import psycopg
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
-from tests.ui.conftest import UiSession
-from tests.ui.undo_helpers import GRIP, goal, keys, wait_for
+from tests.ui.conftest import UiSession, activate_column
+from tests.ui.undo_helpers import ACTION, CIRCLE_FIELD, GRIP, NOTICE, expect_no_notice, goal, keys, wait_for
 
 ORD01_ROW = '[data-goal-id="SYNORD01"] > .goal-card__row'
 MONTH_BODY = '[data-vertical="month"] .pattern-vertical-board__body'
@@ -156,3 +156,55 @@ def test_undoing_a_tick_adds_no_glide_of_its_own(ui_f2: UiSession) -> None:
         page.wait_for_timeout(600)
         frames = page.evaluate("window.__undo.stop()")
     assert not any(f["glides"] for f in frames), "a tick has its own motion; undo adds none"
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference", "reduce"], indirect=True)
+def test_the_notice_comes_up_with_the_field_fading_and_goes_the_same_way(ui_f2: UiSession, ui_reduced_motion: str) -> None:
+    session = ui_f2
+    page = board(session)
+    reduced = ui_reduced_motion == "reduce"
+    page.evaluate(PILL)
+    page.evaluate("window.__pill.start()")
+    activate_column(page, "day")
+    page.click('[data-goal-id="SYNCOL01"] [data-role=goal-actions-trigger]')
+    page.click('#dropdownPortal [data-move="tomorrow"]')
+    expect(page.locator(NOTICE)).to_be_visible(timeout=5000)
+    page.wait_for_timeout(600)
+    page.keyboard.press("Escape")
+    expect_no_notice(page)
+    page.wait_for_timeout(300)
+    frames = page.evaluate("window.__pill.stop()")
+
+    shown = [f for f in frames if f["pill"] is not None]
+    came = next(i for i, f in enumerate(shown) if f["pill"]["opacity"] >= 1)
+    coming = shown[: came + 1]
+    assert coming[0]["pill"]["opacity"] < 1, "the pill does not appear at full strength in one frame"
+    assert all(b["pill"]["opacity"] >= a["pill"]["opacity"] - 0.001 for a, b in zip(coming, coming[1:])), "it only gets stronger as it comes"
+    scales = [f["pill"]["scale"] for f in coming]
+    if reduced:
+        assert all(abs(s - 1) < 0.001 for s in scales), "reduced motion: a crossfade, no scale"
+    else:
+        assert 0.94 <= scales[0] <= 0.99 and scales[-1] == 1, f"it comes up from nearly full size, not from nothing: {scales[:3]}"
+        assert all(b >= a - 0.001 for a, b in zip(scales, scales[1:])), "and only grows"
+        assert 100 <= (coming[-1]["t"] - coming[0]["t"]) <= 260, "in about 150 ms"
+    # The field leaves as the pill comes, and is back once the pill has gone.
+    assert min(f["field"] for f in frames) == 0 and frames[-1]["field"] == 1, "the field fades out while the notice stands and comes back"
+    leaving = [f for f in shown if f["t"] > shown[came]["t"] + 400]
+    assert leaving and leaving[-1]["pill"]["opacity"] < 1, "the notice goes with a fade, not at once"
+    assert (leaving[-1]["t"] - leaving[0]["t"]) <= 220, "and a little quicker than it came"
+
+
+def test_undo_in_the_notice_is_reached_with_the_keyboard_too(ui_f2: UiSession) -> None:
+    """Tab reaches Undo while the notice stands, and Enter takes the change back: the notice is not for the pointer only."""
+    session = ui_f2
+    page = board(session)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        activate_column(page, "day")
+        page.click('[data-goal-id="SYNCOL01"] [data-role=goal-actions-trigger]')
+        page.click('#dropdownPortal [data-move="tomorrow"]')
+        expect(page.locator(ACTION)).to_be_visible(timeout=5000)
+        page.locator(ACTION).focus()
+        page.keyboard.press("Enter")
+        wait_for(page, lambda: goal(conn, "SYNCOL01")[2], "2026-08-08", "Enter on Undo takes the move back")
+        expect_no_notice(page)
+        expect(page.locator(CIRCLE_FIELD)).to_be_visible()

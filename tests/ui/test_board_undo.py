@@ -14,7 +14,9 @@ from playwright.sync_api import Page, expect
 from verticals.core import goals as core_goals
 from tests.ui.conftest import UiSession, activate_column
 from tests.ui.views import switch_view
-from tests.ui.undo_helpers import GRIP, column_ids, expect_no_notice, family, goal, keys, wait_for, writes
+from tests.ui.undo_helpers import (
+    ACTION, GRIP, column_ids, expect_no_notice, expect_notice, family, goal, keys, wait_for, writes,
+)
 
 TICK = '[data-goal-id="SYNCOL01"] > .goal-card__row label.checkbox'
 TICKED = '[data-goal-id="SYNCOL01"] > .goal-card__row input.checkbox__input'
@@ -118,7 +120,8 @@ def test_a_leaf_delete_comes_back_with_its_id_and_a_subtree_with_its_subgoals(ui
         page.click('#dropdownPortal [data-action="delete"]')
         wait_for(page, lambda: family(conn, "SYNCOL03"), [], "the leaf is deleted")
         wait_for(page, lambda: writes(session, start), [("DELETE", "/goals/SYNCOL03?cascade=false", 204)], "a plain DELETE")
-        page.keyboard.press(undo)
+        expect_notice(page, "Deleted “Color check green”")
+        page.click(ACTION)
         wait_for(page, lambda: family(conn, "SYNCOL03"), leaf, "the leaf is back, as it was")
         page.wait_for_selector('[data-vertical="day"] [data-goal-id="SYNCOL03"]', timeout=5000)
         expect_no_notice(page)
@@ -130,7 +133,8 @@ def test_a_leaf_delete_comes_back_with_its_id_and_a_subtree_with_its_subgoals(ui
         wait_for(page, lambda: family(conn, "SYNDAY01"), [], "the subtree is deleted")
         wait_for(page, lambda: writes(session, start), [("DELETE", "/goals/SYNDAY01?cascade=true", 204)],
                  "one cascading write, no 409 first")
-        page.keyboard.press(undo)
+        expect_notice(page, "Deleted “Draft the outline” and 3 subgoals")
+        page.click(ACTION)
         wait_for(page, lambda: family(conn, "SYNDAY01"), tree, "the goal and its three subgoals are back under their ids")
         page.wait_for_selector('[data-vertical="day"] [data-goal-id="SYNDAY01"]', timeout=5000)
         expect_no_notice(page)
@@ -138,6 +142,7 @@ def test_a_leaf_delete_comes_back_with_its_id_and_a_subtree_with_its_subgoals(ui
         # Redo deletes it again, and says so.
         page.keyboard.press(redo)
         wait_for(page, lambda: family(conn, "SYNDAY01"), [], "redo deletes the subtree again")
+        expect_notice(page, "Deleted “Draft the outline” and 3 subgoals")
         page.keyboard.press(undo)
         wait_for(page, lambda: family(conn, "SYNDAY01"), tree, "and undo brings it back once more")
 
@@ -217,6 +222,7 @@ def test_a_task_ticked_in_the_inbox_is_brought_back_by_undo(ui_f2: UiSession) ->
         page.locator(f"{card} label.goal-affordance").click()
         expect(page.locator(card)).to_have_count(0)
         wait_for(page, done, True, "the task is ticked")
+        expect_notice(page, "Completed “SYN Inbox tick”")  # it left the Inbox, so it is said
 
         page.keyboard.press(undo)
         wait_for(page, done, False, "undo opens it again")
@@ -270,8 +276,10 @@ def test_a_goal_you_add_is_taken_away_by_undo_and_comes_back_under_its_id_by_red
         page.keyboard.press(undo)
         wait_for(page, made, [], "undo takes the goal away")
         expect(page.locator(f'[data-goal-id="{goal_id}"]')).to_have_count(0)
+        expect_notice(page, "Removed “SYN undo made”")  # it left the view, and Redo is at hand
+        expect(page.locator(ACTION)).to_have_text("Redo")
 
-        page.keyboard.press(redo)
+        page.click(ACTION)
         wait_for(page, made, [(goal_id,)], "Redo brings it back under the same id")
         page.wait_for_selector(f'[data-vertical="day"] [data-goal-id="{goal_id}"]', timeout=5000)
         expect_no_notice(page)

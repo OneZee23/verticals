@@ -7,6 +7,7 @@ import GoalCard from './components/GoalCard.vue'
 import InboxView from './components/InboxView.vue'
 import DocsView from './components/DocsView.vue'
 import SearchBar from './components/SearchBar.vue'
+import FieldNotice from './components/FieldNotice.vue'
 import CommentsPanel from './components/CommentsPanel.vue'
 import DevColorPanel from './components/DevColorPanel.vue'
 import DevDeckPanel from './components/DevDeckPanel.vue'
@@ -267,6 +268,7 @@ onUnmounted(() => {
     <WindowStack />
     <AgentConversation @link="onConversationLink" />
     <AgentStep />
+    <FieldNotice />
     <SearchBar id="verticals-command-bar" ref="searchBar" :agent-available="agentChat.available" @submit="onSubmit">
       <template #agent-tag><AgentTag /></template>
     </SearchBar>
