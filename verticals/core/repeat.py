@@ -7,7 +7,8 @@ partial unique index on `(owner, repeat_series_id, repeat_index)` makes the oper
 under both retries and concurrent completion calls.
 
 A goal with steps repeats too (docs/design/goal-menu.md): the new time is built with every step beneath the one just
-finished, none of them ticked, in the same structure and order. See `_bring_back_steps`.
+finished, none of them ticked, in the same structure and order. See `_bring_back_steps`. The new time and each step copy
+keep their own privacy flag, so a private goal never comes back public.
 """
 
 from __future__ import annotations
@@ -237,8 +238,9 @@ def _step_place(
 def _bring_back_steps(
     conn: psycopg.Connection, *, owner: str, completed: Goal, occurrence: Goal
 ) -> None:
-    """Copy every step beneath `completed` under `occurrence`: unticked, with its notes and tags, under the copy of the
-    step it was under, in the order it stood in. `completed` itself keeps its steps as they were left.
+    """Copy every step beneath `completed` under `occurrence`: unticked, with its notes, tags and its own privacy flag,
+    under the copy of the step it was under, in the order it stood in. `completed` itself keeps its steps as they were
+    left.
 
     A parent is copied before its steps (`depth`), and the steps of one parent in their own order (`position`), each
     taking the tail of its group as it goes, so the new list reads as the old one. The copies are plain steps: a step
@@ -276,6 +278,7 @@ def _bring_back_steps(
                 tags=step.tags,
                 origin=step.origin,
                 position=position,
+                private=step.private,
             )
             if fresh is not None:
                 copies[step.id] = fresh
@@ -334,6 +337,7 @@ def materialize_next(
             repeat_series_id=completed.repeat_series_id,
             repeat_index=next_index,
             repeat_start_date=completed.repeat_start_date,
+            private=completed.private,
         )
         if created is not None:
             _bring_back_steps(conn, owner=owner, completed=completed, occurrence=created)

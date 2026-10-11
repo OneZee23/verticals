@@ -87,6 +87,8 @@ def test_http_a_goal_with_steps_repeats_and_each_new_time_brings_them_back_untic
 
     configured = client.patch(f"/api/goals/{parent['id']}", json={"repeat": {"frequency": "daily"}})
     assert configured.status_code == 200, configured.text
+    for private in (parent, first_step):  # the goal and its first step are private, its second step is not
+        assert client.patch(f"/api/goals/{private['id']}", json={"private": True}).status_code == 200
     for done in (first_step, nested):
         assert client.patch(f"/api/goals/{done['id']}", json={"done": True}).status_code == 200
     completed = client.patch(f"/api/goals/{parent['id']}", json={"done": True})
@@ -100,6 +102,8 @@ def test_http_a_goal_with_steps_repeats_and_each_new_time_brings_them_back_untic
         ).fetchone()
     again = client.get(f"/api/goals/{again_id}").json()
     assert again["anchor_date"] == "2026-08-11"
+    assert again["private"] is True
+    assert [c["private"] for c in again["children"]] == [True, False], "each step copy keeps its own flag"
     assert [(c["title"], c["done_at"]) for c in again["children"]] == [
         ("Check the inbox", None), ("Plan the day", None),
     ], "the same steps, in the same order, none ticked"

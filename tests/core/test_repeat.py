@@ -8,7 +8,7 @@ from datetime import date
 import psycopg
 import pytest
 
-from verticals.core import goals, moves
+from verticals.core import goals, moves, privacy
 from verticals.core.errors import ValidationError
 from verticals.models import Goal
 
@@ -279,3 +279,60 @@ def test_a_dated_step_under_an_undated_one_comes_back_undated_and_completing_sti
     (new_middle,) = goals.children_of(db, owner=OWNER, id=_occurrence(db, review.id, 1))
     (new_deep,) = goals.children_of(db, owner=OWNER, id=new_middle.id)
     assert (new_middle.vertical, new_deep.vertical, new_deep.title) == (None, None, "Deep")
+
+
+def _hidden(db: psycopg.Connection) -> set[str]:
+    """Every goal a private flag covers, the flagged goal's own subtree included (`privacy.view`)."""
+    return set(privacy.view(db, owner=OWNER)["hidden"])
+
+
+def test_a_private_goal_comes_back_private_and_each_step_keeps_its_own_flag(db: psycopg.Connection) -> None:
+    """The new time takes the finished goal's flag, each step copy its own step's, whatever the goal above it says."""
+    review = _scheduled(db, "Private review")
+    secret = _step(db, review.id, "A private step")
+    public = _step(db, review.id, "A public step")
+    _step(db, secret.id, "Public inside the private one")
+    inner_private = _step(db, public.id, "Private inside the public one")
+    for flagged in (review, secret, inner_private):
+        goals.update(db, owner=OWNER, id=flagged.id, private=True)
+    goals.update(db, owner=OWNER, id=review.id, repeat={"frequency": "daily"})
+
+    goals.update(db, owner=OWNER, id=review.id, done=True)
+
+    again = goals.goal(db, owner=OWNER, id=_occurrence(db, review.id, 1)).goal
+    assert again.private is True, "a private goal's next time is private"
+    steps = goals.children_of(db, owner=OWNER, id=again.id)
+    assert [(s.title, s.private) for s in steps] == [("A private step", True), ("A public step", False)]
+    inside = {t.title: t.private for step in steps for t in goals.children_of(db, owner=OWNER, id=step.id)}
+    assert inside == {"Public inside the private one": False, "Private inside the public one": True}
+    hidden = _hidden(db)
+    assert again.id in hidden and {s.id for s in steps} <= hidden, "the whole new time is hidden with privacy mode on"
+    assert goals.goal(db, owner=OWNER, id=review.id).goal.private is True, "the finished time keeps its flag"
+
+
+def test_a_public_goal_comes_back_public_and_a_private_step_stays_private(db: psycopg.Connection) -> None:
+    review = _scheduled(db, "Public review")
+    secret = _step(db, review.id, "A private step")
+    _step(db, review.id, "A public step")
+    goals.update(db, owner=OWNER, id=secret.id, private=True)
+    goals.update(db, owner=OWNER, id=review.id, repeat={"frequency": "daily"})
+
+    goals.update(db, owner=OWNER, id=review.id, done=True)
+
+    again = goals.goal(db, owner=OWNER, id=_occurrence(db, review.id, 1)).goal
+    assert again.private is False
+    steps = {s.title: s for s in goals.children_of(db, owner=OWNER, id=again.id)}
+    assert {title: s.private for title, s in steps.items()} == {"A private step": True, "A public step": False}
+    hidden = _hidden(db)
+    assert steps["A private step"].id in hidden
+    assert again.id not in hidden and steps["A public step"].id not in hidden
+
+
+def test_a_private_goal_without_steps_comes_back_private(db: psycopg.Connection) -> None:
+    first = _scheduled(db, "Private and alone")
+    goals.update(db, owner=OWNER, id=first.id, private=True)
+    goals.update(db, owner=OWNER, id=first.id, repeat={"frequency": "daily"})
+
+    goals.update(db, owner=OWNER, id=first.id, done=True)
+
+    assert goals.goal(db, owner=OWNER, id=_occurrence(db, first.id, 1)).goal.private is True
