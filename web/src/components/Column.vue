@@ -481,7 +481,11 @@ onBeforeUnmount(() => swapAnimation?.cancel())
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-@media (pointer: fine) {
+/* A column scrolled past its top or bottom bounces back, as everything on a Mac does (docs/design/column-bounce.md; a rule
+   for fine pointers took the bounce away on 4 Oct 2026). `contain` keeps the scroll inside the column and leaves the
+   bounce to the system. With motion reduced, by the system or by the app's Reduce Motion switch, the column stops at its
+   ends; the build copies this block for the switch (vite.config.ts). */
+@media (prefers-reduced-motion: reduce) {
   .period-slide { overscroll-behavior: none; }
 }
 .period-slide::-webkit-scrollbar {
