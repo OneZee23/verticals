@@ -139,6 +139,12 @@ body {
   --vt-radius-field: 42px;
   --vt-radius-tag: 14px;
   --vt-radius-balloon: 24px;
+  /* The field under the pointer (docs/design/field-hover.md): the circle widens from 84 to this, its line grows from
+     3 × 24 to this wide and this tall, the buttons above it from 28 to this. */
+  --vt-field-hover-width: 116px;
+  --vt-field-hover-line: 46px;
+  --vt-field-hover-line-width: 5px;
+  --vt-tag-hover: 38px;
 
   --vt-focus-blur: 64px;
   --vt-focus-saturate: 1.4;
