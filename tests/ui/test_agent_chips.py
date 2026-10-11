@@ -187,8 +187,10 @@ def test_a_chip_follows_its_goal_when_it_is_renamed_and_moved(ui_agent: UiSessio
 
 def test_a_private_goals_chip_hides_its_title_as_the_board_does(ui_agent: UiSession) -> None:
     """Privacy mode (shift-cmd-P) hides a private goal's title on the board and in the Inbox, transparent words over a grey
-    bar (lib/privacy.ts). The chip follows the same rule and wears the same look, in the field and in the conversation; the line
-    of where and when stays, and the square. The agent's own words above a chip are out of scope: the app does not read them."""
+    bar (lib/privacy.ts). The chip follows the same rule and the same look, in the field and in the conversation, the bar
+    retuned for the black (the board's #e4e4e4 is quiet on white and would be the loudest mark on a message): white at 18%.
+    The line of where and when stays, and the square. The agent's own words above a chip are out of scope: the app does not
+    read them."""
     dsn = ui_agent.backend.dsn
     secret = goal_made(dsn, "SYN the private plan")
     plain = goal_made(dsn, "SYN the public plan")
@@ -208,7 +210,7 @@ def test_a_private_goals_chip_hides_its_title_as_the_board_does(ui_agent: UiSess
         private_chip, public_chip = (page.locator(f'{scope} {GOAL_CHIP}[data-goal-id="{goal}"]') for goal in (secret, plain))
         words = private_chip.locator(".goal-chip__name")
         expect(words).to_have_css("color", "rgba(0, 0, 0, 0)")
-        expect(words).to_have_css("background-color", "rgb(228, 228, 228)")  # the board's bar, #e4e4e4
+        expect(words).to_have_css("background-color", "rgba(255, 255, 255, 0.18)")  # white at 18%, about rgb(46, 46, 46) on the black
         expect(words).to_have_css("border-radius", "2px")
         # (Marking it private changed it, so it says "changed", as it would for any change.)
         expect(private_chip.locator('[data-role="goal-chip-when"]')).to_have_text(re.compile(r"^Today · (made|changed) just now$"))

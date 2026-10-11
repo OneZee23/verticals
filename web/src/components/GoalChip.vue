@@ -69,9 +69,11 @@ function open(event: Event): void {
   font: 500 15px/22px var(--font-body, Commissioner, system-ui, sans-serif); overflow-wrap: anywhere; }
 .goal-chip__when { display: block; min-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font: 400 13px/22px var(--font-body, Commissioner, system-ui, sans-serif); color: rgb(255 255 255 / 50%); }
-/* Privacy mode: the title goes transparent over the grey bar the board and the Inbox give a hidden title (goalCard.css,
-   InboxTile.vue), the bar as wide as the words, the same on the message's black. Where and when stay: they name nothing. */
-.goal-chip--private .goal-chip__name { width: fit-content; max-width: 100%; color: transparent; background-color: #e4e4e4; border-radius: 2px; }
+/* Privacy mode: the title goes transparent over a bar, as the board and the Inbox hide a title (goalCard.css, InboxTile.vue),
+   the bar as wide as the words, with their 2 px corners. Their #e4e4e4 is a quiet slot because it sits on white; moved onto a
+   message's black it would be the loudest mark there, so the bar is retuned for the dark: white at 18%, quieter than any text.
+   Where and when stay: they name nothing. */
+.goal-chip--private .goal-chip__name { width: fit-content; max-width: 100%; color: transparent; background-color: rgb(255 255 255 / 18%); border-radius: 2px; }
 .goal-chip:focus-visible { outline: 2px solid #007aff; outline-offset: 2px; }
 .goal-chip[aria-disabled='true'] { cursor: default; }
 </style>
