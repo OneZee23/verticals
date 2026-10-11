@@ -63,6 +63,9 @@ EXPECTED_OPERATIONS = {
     # The Inbox and Documents redesign: every goal with no date, and the Documents desk.
     ("GET", "/api/undated"),
     ("GET", "/api/docs/desk"),
+    # Sources (docs/design/sources.md): the list the Inbox draws and the owner's Approve of a command or a file.
+    ("GET", "/api/sources"),
+    ("POST", "/api/sources/{id}/approve"),
 }
 
 # J7's negative space: none of these ever appear in a path string, in either direction of the

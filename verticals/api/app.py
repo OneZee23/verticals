@@ -41,9 +41,11 @@ from verticals.api.routes_docs import router as docs_router
 from verticals.api.routes_events import router as events_router
 from verticals.api.routes_goals import router as goals_router
 from verticals.api.routes_privacy import router as privacy_router
+from verticals.api.routes_sources import router as sources_router
 from verticals.api.routes_tags import router as tags_router
 from verticals.db.pool import open_pool
 from verticals.db.runner import read_version
+from verticals.sources.scheduler import Timer
 
 logger = logging.getLogger("verticals.api")
 
@@ -91,9 +93,17 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.pool = open_pool(
         _with_session_options(cfg.database_url), min_size=cfg.pool_min, max_size=cfg.pool_max
     )
+    # The Sources timer (docs/design/sources.md): a thread of its own that checks every source every hour with no model.
+    # It takes a pool connection only for its short reads and writes, never in a request's way, and ends here, before the
+    # pool closes: its stop flag ends a running command at once.
+    app.state.sources = Timer(
+        app.state.pool, owner=cfg.owner, tick=cfg.sources_tick, connections=cfg.connections
+    )
+    app.state.sources.start()
     try:
         yield
     finally:
+        app.state.sources.stop()
         app.state.pool.close()
 
 
@@ -172,6 +182,7 @@ def create_app(cfg: config.Config) -> FastAPI:
     app.include_router(events_router)
     app.include_router(goals_router)
     app.include_router(privacy_router)
+    app.include_router(sources_router)
     app.include_router(tags_router)
 
     @app.get("/healthz")

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import stat
 import subprocess
@@ -154,13 +155,19 @@ def test_a_command_that_exits_badly_or_is_missing_says_so(home: Path) -> None:
     assert (plain.ok, plain.detail) == (True, "exit code 0")
 
 
+def _length() -> str:
+    """A sleep no other run of these tests has, so `pgrep` finds this process and no other."""
+    return f"{20 + secrets.randbelow(9)}.{secrets.randbelow(10**6):06d}"
+
+
 def test_a_command_is_stopped_at_its_deadline_and_leaves_nothing_running(home: Path) -> None:
+    length = _length()
     started = time.monotonic()
-    result = run({"kind": "cmd", "argv": ["/bin/sleep", "7.31"], "timeout": 0.3}, home=home)
+    result = run({"kind": "cmd", "argv": ["/bin/sleep", length], "timeout": 0.3}, home=home)
     assert time.monotonic() - started < 2
     assert (result.ok, result.detail) == (False, "no answer in 0.3 s")
     time.sleep(0.2)
-    assert subprocess.run(["pgrep", "-f", "sleep 7.31"], capture_output=True).returncode == 1, "the process was killed"
+    assert subprocess.run(["pgrep", "-f", f"sleep {length}"], capture_output=True).returncode == 1, "the process was killed"
 
 
 def test_a_command_that_prints_without_end_is_stopped(home: Path) -> None:
@@ -169,13 +176,14 @@ def test_a_command_that_prints_without_end_is_stopped(home: Path) -> None:
 
 
 def test_the_app_stopping_ends_a_running_command(home: Path) -> None:
+    length = _length()
     stop = threading.Event()
     threading.Timer(0.3, stop.set).start()
     started = time.monotonic()
-    assert run({"kind": "cmd", "argv": ["/bin/sleep", "8.42"], "timeout": 30}, home=home, stop=stop) is None
+    assert run({"kind": "cmd", "argv": ["/bin/sleep", length], "timeout": 30}, home=home, stop=stop) is None
     assert time.monotonic() - started < 2
     time.sleep(0.2)
-    assert subprocess.run(["pgrep", "-f", "sleep 8.42"], capture_output=True).returncode == 1
+    assert subprocess.run(["pgrep", "-f", f"sleep {length}"], capture_output=True).returncode == 1
 
 
 def test_a_command_is_given_a_clean_environment_in_the_home_folder(home: Path) -> None:
