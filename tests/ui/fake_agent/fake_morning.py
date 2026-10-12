@@ -105,23 +105,29 @@ def write_report(scenario, api, words, ctx, tool, *, defects=True):
         rows.append(f"| [{title}](doc:{source['path']}) | {local(start, zone)} – {local(end, zone)} | {read} | "
                     + " | ".join(str(n) for n in places) + " |")
     head = ["| Source | Window | Read | Tasks | Inbox | Done | Put off | Context | Gap |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
-    table = []
+    groups = {}  # heading -> rows, in the order the scenario first names the headings
     for goal in scenario.get("rows", []):
-        name = f"[{goal['title']}](goal:{goal['id']})"
+        # A row with no `id` is a proposal: no task yet, named by its result, linking nothing.
+        name = f"[{goal['title']}](goal:{goal['id']})" if goal.get("id") else goal["title"]
         name = f"**{name}**" if goal.get("bold") else f"– {name}" if goal.get("child") else name
-        table.append(f"| {name} | The purpose. | {goal.get('latest', 'Started.')} | Finish it. | {goal.get('comment', '')} |")
+        groups.setdefault(goal.get("group", "Today"), []).append(
+            f"| {name} | {goal.get('purpose', 'The purpose.')} | {goal.get('latest', 'Started.')} | {goal.get('next', 'Finish it.')}"
+            f" | {goal.get('comment', '')} |")
     closed = []
-    for gid in scenario.get("close", []):
+    for item in scenario.get("close", []):
+        gid, title, why = (item, item, "the sources show it is done.") if isinstance(item, str) else (
+            item["id"], item.get("title", item["id"]), item.get("evidence", "the sources show it is done."))
         tool("update")
         api.call("PATCH", f"/api/goals/{gid}", {"done": True})
         tool("evidence_update")
-        closed.append(f"- [{gid}](goal:{gid}): the sources show it is done.")
+        closed.append(f"- [{title}](goal:{gid}): {why}")
     parts = []
     if unread:
         parts.append("```unread\n" + "\n".join(unread) + "\n```")
     parts.append("Not checked yet: a second agent is reading it against the sources.")
-    if table:
-        parts.append("## Today\n\n| Task | Purpose | Latest | Next action | Your comment |\n| --- | --- | --- | --- | --- |\n" + "\n".join(table))
+    for heading, table in groups.items():
+        parts.append(f"## {heading}\n\n| Task | Purpose | Latest | Next action | Your comment |\n| --- | --- | --- | --- | --- |\n"
+                     + "\n".join(table))
     if closed:
         parts.append("## Closed since the last report\n\n" + "\n".join(closed))
     parts.append(f"## Sources\n\nTimes in {zone}.\n\n" + "\n".join(head + rows))
@@ -139,7 +145,11 @@ def write_report(scenario, api, words, ctx, tool, *, defects=True):
         tool("doc_link")
         goal = api.call("GET", f"/api/goals/{task}")
         api.call("PATCH", f"/api/goals/{task}", {"body": (goal.get("body") or "") + f"[{title}](doc:{path})"})
-    return f"{len(scenario.get('rows', []))} decisions wait in the Inbox and 0 things are for today. [{title}](#doc/{saved['id']})"
+    waiting = sum(1 for g in scenario.get("rows", []) if g.get("group", "Today").startswith("Inbox"))
+    today = sum(1 for g in scenario.get("rows", []) if g.get("group", "Today") == "Today" and not g.get("child"))
+    # Two short lines, the document's link on its own line, as the morning turn's rules ask.
+    return (f"{waiting} {'decision waits' if waiting == 1 else 'decisions wait'} in the Inbox and "
+            f"{today} {'thing is' if today == 1 else 'things are'} for today.\n[{title}](#doc/{saved['id']})")
 
 
 # --- the second agent ------------------------------------------------------------------------------------------------

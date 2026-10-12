@@ -4,8 +4,9 @@ raw sources, a check that fails sends it back for one fixing turn, and the owner
 It sits inside the gateway's own turn machinery (`chat.py`): the writing turn is the turn the app asked for, and every turn after
 it is started the way a message starts one, so each is an answer of its own on the stream (`turn_start`, then `done` with `next`
 saying that the report is not ready yet). The writing turn is one turn, so everything the agent writes on the board in it is one
-answer for the board's undo (docs/design/agent-answer-undo.md); the check writes nothing, and the fixing turn is an answer of its
-own. The owner sees one reply: the words of the last turn that spoke, held back until the check is done, and one final `done`.
+answer, which the answer's own Undo takes back at once (docs/design/agent-answer-undo.md, PR #50); the check writes nothing, and
+the fixing turn is an answer of its own. The owner sees one reply: the words of the last turn that spoke, held back until the
+check is done, and one final `done`.
 
 The second agent is a fresh agent of the same kind at a lower effort. It only reads: the morning turn's tools, nothing it asks is
 put to the owner, and the verdict goes to the server in its own words (`POST /api/morning/check`), which writes it into the report

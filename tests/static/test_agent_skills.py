@@ -56,6 +56,33 @@ def test_morning_report_references_resolve() -> None:
         assert (skill_dir / "references" / name).is_file()
 
 
+def test_the_ten_checks_are_the_same_in_the_skill_the_second_agents_prompt_and_the_fake_agent() -> None:
+    """The second check's keys and names live once, in `verticals/core/morning_check_list.json`. The skill's table, the second
+    agent's prompt and the fake agent of the UI tests must name the same ten, in the same order, or a check goes unasked."""
+    import importlib.util
+
+    listed = json.loads((ROOT / "verticals" / "core" / "morning_check_list.json").read_text(encoding="utf-8"))
+    keys = [item["key"] for item in listed]
+    assert len(keys) == 10 and len(set(keys)) == 10
+
+    table = (SKILLS / "verticals-morning-report" / "references" / "second-check.md").read_text(encoding="utf-8")
+    rows = [[cell.strip() for cell in line.split("|")] for line in table.splitlines() if line.startswith("| `")]
+    assert [row[1].strip("`") for row in rows] == keys
+    assert [row[2] for row in rows] == [item["label"] for item in listed]
+
+    prompt = (ROOT / "desktop" / "chat" / "prompt-check.md").read_text(encoding="utf-8")
+    example = next(line for line in prompt.splitlines() if line.strip().startswith('{"checks"'))
+    assert set(json.loads(example)["checks"]) <= set(keys)
+    assert "ten checks" in prompt
+
+    fake_path = ROOT / "tests" / "ui" / "fake_agent" / "fake_morning.py"
+    spec = importlib.util.spec_from_file_location("fake_morning", fake_path)
+    assert spec is not None and spec.loader is not None
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    assert list(fake.KEYS) == keys
+
+
 def test_vendored_design_system_cannot_reinstall_legacy_skills() -> None:
     with tarfile.open(DESIGN_SYSTEM_ARCHIVE, "r:gz") as archive:
         names = set(archive.getnames())
