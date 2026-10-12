@@ -6,13 +6,15 @@ has an answer open is that answer's: when it is a write, `tools.call_tool` brack
 write changed, each goal as it was and as it was left, is added to the answer here. Nothing is guessed from a diff of the
 board: the record is what the writes did.
 
-When an answer ends the page asks for it (`claim`) and turns it into one ⌘Z step. An answer is handed over once; the page's
-history lives as long as the page, as the person's own steps do. Memory only, from when this process started: no table, and
-the record goes with the process, which is as long as the app's history is meant to reach.
+An answer that changed the board has its own Undo where it shows (the field, its message, docs/design/agent-answer-undo.md), and
+the page asks for the record whenever it needs it (`recent`): an answer is read, not handed over, so a window that opens later
+finds the answers given while it was closed. Whether the answer stands, was taken back or could not be (`state`) is kept with it,
+so a page that opens again shows Redo where it showed Redo. Memory only, from when this process started: no table, and the
+record goes with the process.
 
 Calls with no session, or from a conversation with no answer open, are nobody's: an agent used from Claude Code or Codex
-outside the app is not in this history. No SQL here (`tests/static/test_seam.py`): `core/answers.py` reads the goals, and this
-module only keeps what it says and answers the three routes the gateway and the page use.
+outside the app has no answer to take back. No SQL here (`tests/static/test_seam.py`): `core/answers.py` reads the goals, and this
+module only keeps what it says and answers the four routes the gateway and the page use.
 """
 
 from __future__ import annotations
@@ -37,9 +39,12 @@ WATCHED: dict[str, tuple[str, bool]] = {
     "delete": ("id", True), "due_ack": ("id", False), "size_report": ("goal_id", False), "create": ("", False),
 }
 
-#: How many answers are kept (the oldest handed-over ones go first), and how many writes one answer may record.
+#: How many answers are kept (the oldest ended ones go first), how many the page is handed, and how many writes one answer may
+#: record.
 MAX_ANSWERS = 200
+RECENT = 20
 MAX_WRITES = 5000
+STATES = ("standing", "undone", "spent")
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -88,7 +93,7 @@ class AnswerStore:
             self._open[session] = answer
             self._answers[answer] = {
                 "id": answer, "session": session, "started_at": self._clock(), "ended_at": None,
-                "claimed": False, "writes": [], "truncated": False,
+                "state": "standing", "writes": [], "truncated": False,
             }
             self._trim()
 
@@ -113,14 +118,22 @@ class AnswerStore:
                 return
             found["writes"].append({**write, "seq": len(found["writes"]) + 1, "at": self._clock()})
 
-    def claim(self) -> list[dict[str, Any]]:
-        """The answers that have ended and wrote something, oldest first, each handed over once."""
+    def recent(self, limit: int = RECENT) -> list[dict[str, Any]]:
+        """The answers that have ended and wrote something, oldest first: the last `limit` of them, each as it stands. Reading
+        takes nothing away."""
         with self._lock:
-            ready = [a for a in self._answers.values() if a["ended_at"] is not None and a["writes"] and not a["claimed"]]
+            ready = [a for a in self._answers.values() if a["ended_at"] is not None and a["writes"]]
             ready.sort(key=lambda a: a["ended_at"])
-            for answer in ready:
-                answer["claimed"] = True
-            return [{k: v for k, v in a.items() if k != "claimed"} for a in ready]
+            return json.loads(json.dumps(ready[-max(1, min(limit, MAX_ANSWERS)):]))
+
+    def set_state(self, answer: str, state: str) -> bool:
+        """What became of the answer: it stands, it was taken back (`undone`), or it could not be and is let go (`spent`)."""
+        with self._lock:
+            found = self._answers.get(answer)
+            if found is None or state not in STATES:
+                return False
+            found["state"] = state
+            return True
 
     def snapshot(self, answer: str) -> dict[str, Any] | None:
         """One answer as it stands, ended or not and handed over or not: for tests and for whoever debugs a step."""
@@ -142,14 +155,11 @@ class AnswerStore:
         extra = len(self._answers) - MAX_ANSWERS
         if extra <= 0:
             return
-        for answer in sorted(
-            (a for a in self._answers.values() if a["ended_at"] is not None),
-            key=lambda a: (not a["claimed"], a["ended_at"]),
-        )[:extra]:
+        for answer in sorted((a for a in self._answers.values() if a["ended_at"] is not None), key=lambda a: a["ended_at"])[:extra]:
             del self._answers[answer["id"]]
 
 
-# --- the three routes the gateway and the page use ----------------------------------------------------------------------
+# --- the routes the gateway and the page use ---------------------------------------------------------------------------
 
 
 def _valid(value: object) -> bool:
@@ -158,7 +168,8 @@ def _valid(value: object) -> bool:
 
 class AnswerRoutes:
     """Pure ASGI, in front of the MCP app and behind the bearer check: `POST /answers/open` (`{session, answer}`),
-    `POST /answers/close` (`{answer}`) and `POST /answers/claim`. Anything else goes on to the MCP app untouched."""
+    `POST /answers/close` (`{answer}`), `POST /answers/recent` (`{limit}`, the answers that ended) and `POST /answers/state`
+    (`{answer, state}`). Anything else goes on to the MCP app untouched."""
 
     def __init__(self, app: Callable, store: AnswerStore) -> None:
         self.app = app
@@ -196,6 +207,9 @@ class AnswerRoutes:
         if route == "close" and _valid(body.get("answer")):
             self.store.close(body["answer"])
             return 200, {"ok": True}
-        if route == "claim":
-            return 200, {"answers": self.store.claim()}
+        if route == "recent":
+            limit = body.get("limit")
+            return 200, {"answers": self.store.recent(limit if isinstance(limit, int) else RECENT)}
+        if route == "state" and _valid(body.get("answer")) and isinstance(body.get("state"), str):
+            return (200, {"ok": True}) if self.store.set_state(body["answer"], body["state"]) else (404, {"error": "no such answer"})
         return 404, {"error": "not found"}

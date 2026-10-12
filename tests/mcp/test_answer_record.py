@@ -45,13 +45,16 @@ async def calls(server: McpHttpServer, conversation: str | None, *steps: tuple[s
         return [await session.call_tool(name, arguments) for name, arguments in steps]
 
 
+def recent(server: McpHttpServer, **body: object) -> list[dict]:
+    return gateway(server, "recent", **body)["answers"]
+
+
 def an_answer_of(server: McpHttpServer, conversation: str, answer: str, *steps: tuple[str, dict]) -> dict:
-    """The gateway opens an answer, the agent makes `steps`, the gateway closes it; what the page is handed."""
+    """The gateway opens an answer, the agent makes `steps`, the gateway closes it; the answer as the page reads it."""
     gateway(server, "open", session=conversation, answer=answer)
     anyio.run(calls, server, conversation, *steps)
     gateway(server, "close", answer=answer)
-    handed = gateway(server, "claim")["answers"]
-    return handed[0] if handed else {}
+    return next((a for a in recent(server) if a["id"] == answer), {})
 
 
 def test_the_writes_of_one_answer_are_one_record_with_every_goal_as_it_was_and_as_it_was_left(f2_dsn: str, tmp_path: Path) -> None:
@@ -87,7 +90,7 @@ def test_a_call_with_no_conversation_or_no_open_answer_belongs_to_nobody(f2_dsn:
         anyio.run(calls, server, "chat-other", ("update", {"id": "SYNCOL03", "done": True}))  # another conversation
         gateway(server, "close", answer="answer-2")
 
-        assert gateway(server, "claim") == {"answers": []}, "an answer that wrote nothing is nothing"
+        assert recent(server) == [], "an answer that wrote nothing is nothing"
 
     with psycopg.connect(f2_dsn, autocommit=True) as conn:
         ticked = conn.execute("SELECT id FROM goals WHERE id IN ('SYNCOL01','SYNCOL02','SYNCOL03') AND done_at IS NOT NULL ORDER BY id").fetchall()
@@ -107,7 +110,7 @@ def test_two_conversations_at_once_each_keep_their_own_answer(f2_dsn: str, tmp_p
         anyio.run(both, server)
         gateway(server, "close", answer="answer-a")
         gateway(server, "close", answer="answer-b")
-        handed = {a["id"]: [c["id"] for w in a["writes"] for c in w["changes"]] for a in gateway(server, "claim")["answers"]}
+        handed = {a["id"]: [c["id"] for w in a["writes"] for c in w["changes"]] for a in recent(server)}
 
     assert handed == {"answer-a": ["SYNCOL01", "SYNCOL03"], "answer-b": ["SYNCOL02"]}
 
@@ -131,20 +134,38 @@ def test_reads_and_failed_writes_are_not_recorded_and_a_write_of_the_same_words_
     assert stamped["before"]["title"] == stamped["after"]["title"] and stamped["after"]["updated_at"] > stamped["before"]["updated_at"]
 
 
-def test_an_answer_is_handed_over_once_and_only_when_it_has_ended(f2_dsn: str, tmp_path: Path) -> None:
+def test_an_answer_is_read_once_it_has_ended_and_reading_takes_nothing_away(f2_dsn: str, tmp_path: Path) -> None:
     with mcp_http_subprocess(f2_dsn, tmp_path) as server:
         gateway(server, "open", session="chat-four", answer="answer-4")
         anyio.run(calls, server, "chat-four", ("update", {"id": "SYNCOL01", "done": True}))
-        assert gateway(server, "claim") == {"answers": []}, "still open: the page waits for its end"
+        assert recent(server) == [], "still open: it is read when it has ended"
 
         gateway(server, "close", answer="answer-4")
-        first = gateway(server, "claim")["answers"]
-        assert [a["id"] for a in first] == ["answer-4"]
-        assert gateway(server, "claim") == {"answers": []}, "handed over once"
+        assert [a["id"] for a in recent(server)] == ["answer-4"]
+        assert [a["id"] for a in recent(server)] == ["answer-4"], "read again by a window that opens later: nothing was taken"
 
         # A write that comes in after the answer ended (an agent stopped mid-call) is nobody's.
         anyio.run(calls, server, "chat-four", ("update", {"id": "SYNCOL02", "done": True}))
-        assert gateway(server, "claim") == {"answers": []}
+        (again,) = recent(server)
+        assert [c["id"] for w in again["writes"] for c in w["changes"]] == ["SYNCOL01"]
+
+
+def test_the_last_few_answers_are_handed_over_oldest_first_and_what_became_of_one_is_kept_with_it(f2_dsn: str, tmp_path: Path) -> None:
+    with mcp_http_subprocess(f2_dsn, tmp_path) as server:
+        for n, goal in enumerate(["SYNCOL01", "SYNCOL02", "SYNCOL03"], start=1):
+            an_answer_of(server, "chat-ten", f"answer-{n}", ("update", {"id": goal, "done": True}))
+
+        assert [a["id"] for a in recent(server)] == ["answer-1", "answer-2", "answer-3"]
+        assert [a["id"] for a in recent(server, limit=2)] == ["answer-2", "answer-3"], "the last ones, oldest first"
+        assert {a["state"] for a in recent(server)} == {"standing"}
+
+        gateway(server, "state", answer="answer-2", state="undone")
+        assert {a["id"]: a["state"] for a in recent(server)} == {"answer-1": "standing", "answer-2": "undone", "answer-3": "standing"}
+        gateway(server, "state", answer="answer-2", state="standing")
+        assert {a["state"] for a in recent(server)} == {"standing"}, "Redo is kept too"
+
+        assert httpx2.post(f"{BASE(server)}/answers/state", json={"answer": "no-such", "state": "undone"}, headers=AUTH(server), timeout=10.0).status_code == 404
+        assert httpx2.post(f"{BASE(server)}/answers/state", json={"answer": "answer-1", "state": "whatever"}, headers=AUTH(server), timeout=10.0).status_code == 404
 
 
 def test_the_next_answer_of_a_conversation_ends_one_that_was_left_open(f2_dsn: str, tmp_path: Path) -> None:
@@ -154,7 +175,7 @@ def test_the_next_answer_of_a_conversation_ends_one_that_was_left_open(f2_dsn: s
         gateway(server, "open", session="chat-five", answer="answer-5b")  # the close of 5a never came
         anyio.run(calls, server, "chat-five", ("update", {"id": "SYNCOL02", "done": True}))
         gateway(server, "close", answer="answer-5b")
-        handed = [(a["id"], [c["id"] for w in a["writes"] for c in w["changes"]]) for a in gateway(server, "claim")["answers"]]
+        handed = [(a["id"], [c["id"] for w in a["writes"] for c in w["changes"]]) for a in recent(server)]
 
     assert handed == [("answer-5a", ["SYNCOL01"]), ("answer-5b", ["SYNCOL02"])]
 
@@ -185,10 +206,10 @@ def test_a_delete_names_the_goal_it_took_and_lists_the_subtree_as_removed(f2_dsn
 
 def test_the_routes_need_the_token_and_refuse_what_is_not_theirs(f2_dsn: str, tmp_path: Path) -> None:
     with mcp_http_subprocess(f2_dsn, tmp_path) as server:
-        assert httpx2.post(f"{BASE(server)}/answers/claim", json={}, timeout=10.0).status_code == 401
+        assert httpx2.post(f"{BASE(server)}/answers/recent", json={}, timeout=10.0).status_code == 401
         assert httpx2.post(f"{BASE(server)}/answers/open", json={"session": "x"}, headers=AUTH(server), timeout=10.0).status_code == 404
         assert httpx2.post(f"{BASE(server)}/answers/open", json={"session": "bad id!", "answer": "a"}, headers=AUTH(server), timeout=10.0).status_code == 404
-        assert httpx2.get(f"{BASE(server)}/answers/claim", headers=AUTH(server), timeout=10.0).status_code == 405
-        assert httpx2.post(f"{BASE(server)}/answers/claim", content=b"{", headers=AUTH(server), timeout=10.0).status_code == 400
+        assert httpx2.get(f"{BASE(server)}/answers/recent", headers=AUTH(server), timeout=10.0).status_code == 405
+        assert httpx2.post(f"{BASE(server)}/answers/recent", content=b"{", headers=AUTH(server), timeout=10.0).status_code == 400
         # The MCP endpoint itself is where it was.
         assert httpx2.post(server.url, json={}, headers=AUTH(server), timeout=10.0).status_code != 404
