@@ -298,8 +298,6 @@ def _bring_back_steps(
             raise ValidationError("could not generate a unique step id", field="id")
 
 
-
-
 def materialize_next(
     conn: psycopg.Connection, *, owner: str, completed: Goal
 ) -> Occurrence | None:

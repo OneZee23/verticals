@@ -73,7 +73,7 @@ export const circleState = computed<CircleState>(() => {
   if (circle.focused || reporting.value || pictures.over) return 'open'
   if (circleWords.value) return 'answer'
   if (agentChat.running) return 'working'
-  // Pointing at the circle doesn't open it either: it stays `rest` and the field widens it (docs/design/field-hover.md).
+  // Pointing at the circle doesn't open it: it stays `rest` and the field widens it (docs/design/field-hover.md).
   if (inboxWriting.value) return 'open'
   return 'rest'
 })
