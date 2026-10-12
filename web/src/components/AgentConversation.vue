@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // The conversation (docs/design-handoff S2.P1): a column of balloons over the board or a window, the agent's black on
 // the left, yours a shade lighter on the right, rising out of the circle and sinking back into it. Its links move the
-// app in place; an ask of the agent's is its balloon with the choices as buttons. The documents a message links stand
-// under its words as chips (DocChip.vue; Inbox and Documents redesign, rounds 9–10).
+// app in place; an ask of the agent's is its balloon with the choices as buttons. The goals and documents a message links
+// stand under its words as chips (AgentChips.vue; docs/design/agent-chips.md).
 import { computed, nextTick, ref, watch } from 'vue'
-import DocChip from './DocChip.vue'
-import { docLinks, withoutDocLines } from '../lib/docLinks'
+import AgentChips from './AgentChips.vue'
+import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import { agentChat, agentOf, balloons, decide } from '../lib/agentChat'
 import { askDetail } from '../lib/askDetail'
 import { chatMarkdown } from '../lib/chatMarkdown'
@@ -30,6 +30,8 @@ const agentName = computed(() => agentOf(agentChat.selection?.provider).label)
 const look = computed(() => scrollLook())
 /* What each ask will change: the goal and its date (lib/askDetail.ts; docs/design/agent-fixes.md, fix 6). */
 const changes = computed(() => Object.fromEntries(balloons.value.map((balloon) => [balloon.key, balloon.ask ? askDetail(balloon.ask) : null])))
+/* What each of the agent's messages made or changed, from the links in its words. */
+const chips = computed(() => Object.fromEntries(balloons.value.map((balloon) => [balloon.key, balloon.who === 'agent' ? chipLinks(balloon.text) : []])))
 
 watch(() => [agentChat.open, balloons.value.length, balloons.value[balloons.value.length - 1]?.text], async () => {
   if (!agentChat.open) return
@@ -96,10 +98,8 @@ function onClick(event: MouseEvent): void {
           >
             <div v-if="balloon.who === 'you'" class="agent-balloon__plain">{{ balloon.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html -- chatMarkdown escapes every byte of the source -->
-            <div v-else-if="withoutDocLines(balloon.text)" class="agent-balloon__markdown" v-html="chatMarkdown(withoutDocLines(balloon.text))"></div>
-            <div v-if="balloon.who === 'agent' && docLinks(balloon.text).length" class="agent-balloon__docs" data-role="agent-docs">
-              <DocChip v-for="doc in docLinks(balloon.text)" :id="doc.id" :key="doc.id" :label="doc.label" dark />
-            </div>
+            <div v-else-if="withoutChipLines(balloon.text)" class="agent-balloon__markdown" v-html="chatMarkdown(withoutChipLines(balloon.text))"></div>
+            <AgentChips v-if="chips[balloon.key]!.length" class="agent-balloon__chips" :links="chips[balloon.key]!" />
             <div v-if="balloon.ask" class="agent-balloon__ask" data-role="agent-ask">
               <p class="agent-balloon__ask-title" :class="{ 'agent-balloon__ask-title--changes': changes[balloon.key] }">{{ balloon.ask.title }}</p>
               <p v-if="changes[balloon.key]" class="agent-balloon__ask-changes" data-role="agent-ask-changes">{{ changes[balloon.key]!.goal }}<template v-if="changes[balloon.key]!.date"><span class="agent-balloon__ask-sep" aria-hidden="true"> · </span>{{ changes[balloon.key]!.date }}</template></p>
@@ -196,10 +196,9 @@ function onClick(event: MouseEvent): void {
 .agent-balloon__ask-changes { margin: 0 0 10px; }
 .agent-balloon__ask-sep { color: rgb(255 255 255 / 40%); }
 .agent-balloon__markdown + .agent-balloon__ask { margin-top: 12px; }
-/* The documents the message brings, one chip under another, after its words. */
-.agent-balloon__docs { display: flex; flex-direction: column; gap: 12px; }
-.agent-balloon__markdown + .agent-balloon__docs { margin-top: 14px; }
-.agent-balloon__docs + .agent-balloon__ask { margin-top: 12px; }
+/* What the message made or changed, one chip under another, after its words. */
+.agent-balloon__markdown + .agent-balloon__chips { margin-top: 14px; }
+.agent-balloon__chips + .agent-balloon__ask { margin-top: 12px; }
 .agent-balloon__choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .agent-balloon__choice {
   height: 32px;

@@ -350,6 +350,11 @@ function follow(event: ChatEvent): void {
     case 'permission_done':
       if (agentChat.running) touchThread({ status: 'working' })
       break
+    case 'goal':
+      // The gateway: the agent made a goal in a conversation about no goal, so the conversation is now that goal's
+      // (docs/design/agent-chips.md). Discuss on the goal goes on with it, and your next words carry the goal.
+      if (!currentThread.value?.goal && typeof event.id === 'string') touchThread({ goal: { id: event.id, title: String(event.title ?? '') } })
+      break
     case 'done':
       agentChat.running = false
       // The server's clock, the one the goal's record keeps.

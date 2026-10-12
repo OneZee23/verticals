@@ -320,3 +320,89 @@ def test_a_refused_message_is_in_the_log_with_its_reason(scratch_dir) -> None:
     log = (scratch_dir / "agent.log").read_text()
     assert "refused" in log and "Empty message" in log and "Claude Code is not installed" in log
     assert "hello" not in log
+
+
+def test_the_goal_a_create_result_names_is_read_from_its_words() -> None:
+    """docs/design/agent-chips.md: the gateway reads the goal a conversation made from what the Verticals server's `create`
+    answers ("Created 'Title' [ID]", then the steps made and a replay); tests/mcp/test_create.py pins those words."""
+    chat = _chat()
+    for words, goal in (
+        ("Created 'Plan the review' [AB12CD34]", "AB12CD34"),
+        ("Created 'Fix [the bug]' [SYN00001]", "SYN00001"),
+        ('Created "It\'s a plan" [SYN00002] + 3 descendant(s)', "SYN00002"),
+        ("Created 'Plan' [SYN00003] (replayed)", "SYN00003"),
+        ("Created 'Plan' [SYN00004] + 2 descendant(s) (replayed)", "SYN00004"),
+        ("  Created 'Plan' [SYN00005]\n", "SYN00005"),
+        ('{"goal": {"id": "SYN00007", "title": "Plan", "children": 3}, "children": [], "replayed": false}', "SYN00007"),
+        ('{"goal": {"id": "SYN00008", "title": "A plan that was cut at fifteen hundred charac', "SYN00008"),
+    ):
+        assert chat.made_goal(words) == goal, words
+    for words in ("ok", "", None, "Created 'Plan'", "Updated 'Plan' [SYN00006]", "Created 'Plan' [SYN00006] and more",
+                  '{"goals": [{"id": "SYN00006"}]}', '{"goal": {"title": "No id"}}'):
+        assert chat.made_goal(words) is None, words
+
+
+OTHER_SESSION = "6e3d4d4f-2c2b-4d9f-8f20-1b7a4f4d0c12"
+
+
+def _made(session, call, goal, title="Plan the review", error=False, tool="create") -> None:
+    """What a session sees when the agent calls a tool: the call, then its result in the server's words."""
+    session.emit({"t": "tool", "id": call, "name": tool, "title": tool, "input": {"title": title}})
+    session.emit({"t": "tool_result", "id": call, "error": error,
+                  "summary": "The user declined this action." if error else f"Created {title!r} [{goal}]"})
+
+
+def test_a_conversation_about_no_goal_becomes_the_conversation_of_the_first_goal_the_agent_makes(scratch_dir) -> None:
+    """The conversation is that goal's from then on: the gateway's record says so (Discuss with agent asks it), the app is
+    told with a `goal` event, and a second goal made in it, a declined create or another tool changes nothing."""
+    chat = _chat()
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok-secret-0451")
+    try:
+        session = gateway.session(SESSION)
+        _made(session, "t0", "SYN00009", error=True)       # the owner declined it
+        _made(session, "t1", "SYN00009", tool="schedule")  # not a create
+        assert gateway.goal_conversations("SYN00009") == [] and not [e for _, e in session.events if e["t"] == "goal"]
+        _made(session, "t2", "SYN00001", "Plan the review")
+        _made(session, "t3", "SYN00002", "Another one")
+        assert [e for _, e in session.events if e["t"] == "goal"] == [{"t": "goal", "id": "SYN00001", "title": "Plan the review"}]
+        assert [c["session"] for c in gateway.goal_conversations("SYN00001")] == [SESSION]
+        assert gateway.goal_conversations("SYN00002") == []
+        assert gateway.goal_conversations("SYN00001")[0]["title"] == "Plan the review"
+
+        # A conversation that already belongs to a goal (Discuss with agent began it) keeps that goal.
+        gateway.update(OTHER_SESSION, goal={"id": "SYN00010", "title": "Opened with Discuss"})
+        _made(gateway.session(OTHER_SESSION), "t4", "SYN00011")
+        assert [c["session"] for c in gateway.goal_conversations("SYN00010")] == [OTHER_SESSION]
+        assert gateway.goal_conversations("SYN00011") == []
+    finally:
+        gateway.shutdown()
+    # The log says a goal was bound, and not which: no title, no ID.
+    log = (scratch_dir / "agent.log").read_text()
+    assert log.count("goal_bound") == 1
+    for private in ("SYN00001", "SYN00002", "SYN00009", "SYN00010", "SYN00011", "Plan the review", "Another one", "tok-secret-0451"):
+        assert private not in log, private
+
+
+def test_a_goal_made_in_a_conversation_survives_the_gateway_starting_again(scratch_dir) -> None:
+    chat = _chat()
+    first = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok")
+    try:
+        _made(first.session(SESSION), "t1", "SYN00001")
+    finally:
+        first.shutdown()
+    second = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok")
+    try:
+        assert [c["session"] for c in second.goal_conversations("SYN00001")] == [SESSION]
+    finally:
+        second.shutdown()
+
+
+def test_the_agent_is_told_to_link_what_it_made_and_to_name_the_rest_by_title() -> None:
+    """docs/design/agent-chips.md: the chips come from the links in the agent's words, so the agent links what it made or
+    changed, each on a line of its own, and names any other goal by its title."""
+    prompt = " ".join(_chat().PROMPT.split())
+    assert "Link each goal and each document you made or changed in a turn, once, each on a line of its own after your words" in prompt
+    assert "goals as [title](#goal/<id>), documents as [title](#doc/<id>)" in prompt
+    assert "The app draws those lines as chips under your words" in prompt
+    assert "Mention any other goal by its title, with no link" in prompt
+    assert "Link board dates inside a sentence as [label](/h/YYYY-MM-DD)" in prompt
