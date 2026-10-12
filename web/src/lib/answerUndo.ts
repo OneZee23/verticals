@@ -309,8 +309,7 @@ function tell(answer: string, state: AnswerState): void {
 
 /** Reads the answers that have ended: the ones the page did not know are given their place among the person's own changes, in
  *  the order they ended. An answer that changed nothing the board keeps has nothing to take back and is not here. */
-export async function refreshAnswers(): Promise<void> {
-  if (!gateway) return
+async function readAnswers(): Promise<void> {
   await Promise.all([...telling])
   const got = await post<{ answers?: Answer[] }>('answers', {})
   for (const answer of got?.answers ?? []) {
@@ -329,6 +328,28 @@ export async function refreshAnswers(): Promise<void> {
       label: count === 1 ? [...words, { text: ' by the agent' }] : [{ text: `${count} changes by the agent` }],
     }
   }
+}
+
+/** One read at a time: a call that comes while one is on its way gets the next one, which starts when that is done. A conversation
+ *  that is opened again replays every turn it had, each of which asks, and they are one read and one more. */
+let reading: Promise<void> | null = null
+let readAgain = false
+
+export function refreshAnswers(): Promise<void> {
+  if (!gateway) return Promise.resolve()
+  if (reading) {
+    readAgain = true
+    return reading
+  }
+  reading = (async () => {
+    do {
+      readAgain = false
+      await readAnswers()
+    } while (readAgain)
+  })().finally(() => {
+    reading = null
+  })
+  return reading
 }
 
 /** Takes the answer back, or does it again: from its Undo, and from the pick ⌘Z asks for. */

@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import subprocess
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -186,14 +185,11 @@ def outside_agent(server: McpHttpServer) -> Iterator[Callable[..., Any]]:
 @contextmanager
 def held(server: McpHttpServer) -> Iterator[None]:
     """The MCP server stops answering, without being restarted (SIGSTOP), so the gateway cannot read the record of the answers."""
-    port = server.url.rsplit(":", 1)[1].split("/", 1)[0]
-    listening = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True, text=True, check=True)
-    pid = int(listening.stdout.split()[0])
-    os.kill(pid, signal.SIGSTOP)
+    os.kill(server.pid, signal.SIGSTOP)
     try:
         yield
     finally:
-        os.kill(pid, signal.SIGCONT)
+        os.kill(server.pid, signal.SIGCONT)
 
 
 def answer_without_a_page(base_url: str, session_id: str, words: str) -> None:
