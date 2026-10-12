@@ -56,6 +56,7 @@ from playwright.sync_api import (
 
 from tests.harness.report import artifact, scenario_id_of
 from tests.ui.gesture_counter import GestureCounter
+from tests.ui.undo_helpers import sent_body
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = REPO_ROOT / "web"
@@ -566,15 +567,6 @@ _MORNING_ASKED_SCRIPT = """
 """
 
 
-def _sent_body(req) -> str | None:
-    """What a request carried, as text and cut short: for a log that says which write it is, never for an assertion."""
-    try:
-        data = req.post_data_buffer
-    except Exception:  # noqa: BLE001 - a body that cannot be read is just not logged
-        return None
-    return data.decode("utf-8", "replace")[:400] if data else None
-
-
 def _make_ui_session(
     *, browser: Browser, backend: Server, static_base_url: str, request: pytest.FixtureRequest,
     reduced_motion: str,
@@ -639,7 +631,7 @@ def _make_ui_session(
                 "url": req.url,
                 "status": req.response().status if req.response() else None,
                 "headers": req.headers,
-                "body": _sent_body(req),
+                "body": sent_body(req),
             }
         ),
     )

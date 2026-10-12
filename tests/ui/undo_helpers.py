@@ -45,6 +45,15 @@ def writes(session: Any, since: int = 0) -> list[tuple[str, str, int | None]]:
     ]
 
 
+def sent_body(req: Any) -> str | None:
+    """What a request carried, as text and cut short: for a log that says which write it is, never for an assertion."""
+    try:
+        data = req.post_data_buffer
+    except Exception:  # noqa: BLE001 - a body that cannot be read is just not logged
+        return None
+    return data.decode("utf-8", "replace")[:400] if data else None
+
+
 def write_log(session: Any, since: int = 0) -> list[str]:
     """The same writes as `writes`, each with what it carried, for the message of an assertion that counts them."""
     return [
