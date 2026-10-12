@@ -26,6 +26,7 @@ function open(session: TaskSession): void {
     role="menuitem"
     class="dropdown__item goal-actions__item"
     data-menu-item="open-in"
+    title="Start work or Discuss begins a session"
     disabled
   >
     <span>Open in</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" :size="14" /></span>
@@ -62,10 +63,11 @@ function open(session: TaskSession): void {
 </template>
 
 <style>
-.session-menu { padding-block: 8px; }
+/* Every session is in the list. The popover engine cuts its height to the window and it scrolls, so the rows must not shrink to fit. */
+.session-menu { padding-block: 8px; overscroll-behavior: contain; }
 /* The row is the menu's own (the submenu button rule of GoalCardTools.vue: 17 px, weight 500, 14 px in): the agent's mark, then
    the agent's name, and after the dot, in grey, when it moved. */
-.session-menu .session-menu__item { white-space: nowrap; }
+.session-menu .session-menu__item { flex: none; white-space: nowrap; }
 .session-menu__mark { flex: none; width: 16px; height: 16px; }
 .session-menu__when { color: rgb(0 0 0 / 45%); font-weight: 400; }
 </style>

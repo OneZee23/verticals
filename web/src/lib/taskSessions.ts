@@ -35,19 +35,23 @@ const shape = (wire: Wire): TaskSession => ({
   outside: !!wire.outside, working: !!wire.working,
 })
 
+let lastAnswer = ''
 export async function refreshSessions(): Promise<void> {
   if (!agentChat.available) return
   try {
     const res = await fetch('/__chat/sessions')
     if (!res.ok) return
-    const { goals } = await res.json() as { goals?: Record<string, { sessions: Wire[]; working: boolean; outside: { provider: string; at: number } | null }> }
+    const text = await res.text()
+    taskSessions.now = Date.now()
+    if (text === lastAnswer) return // nothing moved: the cards and the lists keep what they show
+    const { goals } = JSON.parse(text) as { goals?: Record<string, { sessions: Wire[]; working: boolean; outside: { provider: string; at: number } | null }> }
     const next: Record<string, TaskSessions> = {}
     for (const [id, entry] of Object.entries(goals ?? {})) {
       next[id] = { sessions: entry.sessions.map(shape), working: entry.working,
         outside: entry.outside ? { provider: entry.outside.provider, at: entry.outside.at * 1000 } : null }
     }
     taskSessions.goals = next
-    taskSessions.now = Date.now()
+    lastAnswer = text
   } catch { /* the gateway is away: what was known stays */ }
 }
 
