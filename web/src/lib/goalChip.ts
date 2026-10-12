@@ -6,7 +6,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { ApiError, getGoal, type GoalCard } from './api'
 import { findGoal } from './boardIndex'
 import { MONTH_NAMES, type VerticalScale } from './periods'
-import { isoDate, localDate, periodKeyFor, plannedPeriodLabel, verticalHeadline } from './schedule'
+import { kindOf } from './columnNames'
+import { isoDate, localDate, periodKeyFor, plannedPeriodLabel } from './schedule'
 import { store } from '../store'
 
 export interface ChipGoal {
@@ -88,12 +89,12 @@ export function ago(at: number, nowMs: number): string {
 export function whereIs(goal: ChipGoal, today: Date): string {
   if (!goal.vertical) return goal.parent_id ? 'Step' : 'Inbox'
   if (goal.vertical === 'life') return 'Life'
-  if (!goal.anchor_date) return verticalHeadline(goal.vertical)
+  if (!goal.anchor_date) return kindOf(goal.vertical)
   const scale = goal.vertical as VerticalScale
   if (periodKeyFor(scale, localDate(goal.anchor_date)) !== periodKeyFor(scale, today)) {
     return plannedPeriodLabel({ vertical: goal.vertical, anchor_date: goal.anchor_date, period_key: null })
   }
-  return scale === 'day' ? 'Today' : verticalHeadline(scale)
+  return scale === 'day' ? 'Today' : kindOf(scale)
 }
 
 /** When: "made" until something changed it after the first minute, then "changed" and how long ago that was. */
