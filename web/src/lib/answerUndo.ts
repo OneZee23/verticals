@@ -298,10 +298,20 @@ function post<T>(path: string, body: unknown): Promise<T | null> {
     .catch(() => null)
 }
 
+/** What became of an answer, on its way to the gateway. A read waits for these: it would otherwise hear the old word and make an
+ *  answer that was just taken back stand again. */
+const telling = new Set<Promise<unknown>>()
+function tell(answer: string, state: AnswerState): void {
+  const sent = post('answer-state', { answer, state })
+  telling.add(sent)
+  void sent.finally(() => telling.delete(sent))
+}
+
 /** Reads the answers that have ended: the ones the page did not know are given their place among the person's own changes, in
  *  the order they ended. An answer that changed nothing the board keeps has nothing to take back and is not here. */
 export async function refreshAnswers(): Promise<void> {
   if (!gateway) return
+  await Promise.all([...telling])
   const got = await post<{ answers?: Answer[] }>('answers', {})
   for (const answer of got?.answers ?? []) {
     const known = answerUndo.entries[answer.id]
@@ -331,7 +341,7 @@ async function work(id: string, direction: 'undo' | 'redo'): Promise<void> {
     if (ran.outcome === 'retry') return
     const spent = ran.outcome === 'drop' || (!!ran.applied?.kept.length && !ran.applied.set)
     entry.state = spent ? 'spent' : direction === 'undo' ? 'undone' : 'standing'
-    void post('answer-state', { answer: id, state: entry.state })
+    tell(id, entry.state)
     await announce(entry.step, direction, ran.applied, { undo: () => void takeBack(id), redo: () => void putBack(id) })
   } finally {
     entry.busy = false

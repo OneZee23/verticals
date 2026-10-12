@@ -61,6 +61,10 @@ let touchedAt = 0
 /** A change of the person's own that is this old is not obviously theirs any more, if an agent answered since. */
 const CLEAR_MS = 5000
 
+/** How long ⌘Z waits to hear of the answers that have ended: it is the app's own key and must not hang on a slow gateway. An answer
+ *  not heard of in this time is left out of this press. */
+const HEAR_MS = 700
+
 /** What the page knows of the agent's answers, bound once by `lib/answerUndo.ts`. */
 export interface AnswerSide {
   /** Reads the answers that have ended. */
@@ -348,13 +352,20 @@ function askWhat(last: Step | undefined, answer: { id: string; label: Segment[] 
   ])
 }
 
+async function hearAnswers(): Promise<void> {
+  if (!answers) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([answers.refresh().catch(() => undefined), new Promise<void>((resolve) => { timer = setTimeout(resolve, HEAR_MS) })])
+  clearTimeout(timer)
+}
+
 /** ⌘Z: the person's own last change, at once, unless it cannot be told whose change is meant. That is so when an agent's answer
  *  changed the board after the person's last change, and the person's own is 5 seconds old or more, or there is none: then the
  *  field asks which to take back, and a pick takes it (docs/design/agent-answer-undo.md). Inside text the key never gets here. */
 export function undo(): Promise<void> {
   return enqueue(async () => {
     await Promise.allSettled([...writing])
-    await answers?.refresh().catch(() => undefined) // an answer that has just ended counts
+    await hearAnswers() // an answer that has just ended counts
     const last = done[done.length - 1]
     const later = answers?.standingAfter(last ? stamps.get(last) ?? 0 : 0) ?? []
     if (!later.length || (last && Date.now() - touchedAt < CLEAR_MS)) return apply('undo')
