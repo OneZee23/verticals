@@ -22,13 +22,13 @@ import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
 import CircleTags from './CircleTags.vue'
 import DocPage from './DocPage.vue'
-import AgentStep from './AgentStep.vue'
 import { docLinks, withoutDocLines } from '../lib/docLinks'
 import { docCard } from '../lib/docCard'
 import MovingStack from './MovingStack.vue'
 import { backspace as pickBackspace, escape as movingEscape, tab as pickTab } from '../lib/moving'
 import { dots } from '../lib/spansDrag'
 import { brush, type Brush } from '../lib/brush'
+import AgentStep from './AgentStep.vue'
 import './circleField.css'
 
 defineKnobs('The field', [
@@ -45,6 +45,10 @@ const PAD_RIGHT = 84
 const PAD_Y = 24
 const LINE = 36
 const CIRCLE = 84
+/* While the agent works the circle is a pill with its step written beside the turning line (AgentStep.vue): the line stays where
+   the circle's centre was, 42 px in, and the stop square takes the right end. One width for every phrase, so the black moves
+   when the work begins and ends, not with each step. */
+const STEP_WIDTH = 360
 /* The open field's caption has 32 px on each side; "Ready?" has 36 (round 8's pill, at least the circle's 136). */
 const PAD_CAPTION = 32
 const PAD_ASK = 36
@@ -53,10 +57,6 @@ const PAD_ASK = 36
 const NOTE_PAGE = 50
 const NOTE_PAGE_H = 67
 const NOTE_WORDS = 236
-/* While the agent works the circle is a pill with its step written beside the turning line (AgentStep.vue): the line stays where
-   the circle's centre was, 42 px in, and the stop square takes the right end. One width for every phrase, so the black moves
-   when the work begins and ends, not with each step. */
-const STEP_WIDTH = 360
 
 const body = ref<HTMLElement | null>(null)
 const shape = ref<HTMLElement | null>(null)
