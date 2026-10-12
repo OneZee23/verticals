@@ -10,7 +10,10 @@ that opens with "Check again" (a document's comments and edits handed over, web/
 second and a half, which is the time a test has to rewrite the document as the real agent would, then answers in two
 lines. A message that opens with "Improve it" (a report's design asked for, web/src/lib/reportActions.ts) is answered as the
 real agent answers it through Verticals' tools: it writes a design document into the report's task, linked to it, and says
-it is waiting for the person's comments; this one reaches the API the tests' gateway was started with (FAKE_AGENT_API)."""
+it is waiting for the person's comments; this one reaches the API the tests' gateway was started with (FAKE_AGENT_API). A message that opens with "A person's report,
+in their words" (a report to sort, desktop/chat/report_kind.py) is answered with one word, request when the words say what
+the person would like ("I'd like", "would be nice", "I wish", "I want", "could be", "should be", "please add") and bug
+otherwise, or with a sentence that names neither when they carry `[unclear]`."""
 import json
 import os
 import re
@@ -31,6 +34,8 @@ def read():
 
 CHECKED = "Check again"
 IMPROVE = "Improve it"
+SORT = "A person's report, in their words"
+WISHES = ("i'd like", "i would like", "would be nice", "i wish", "i want", "could be", "should be", "please add")
 
 
 def api(method, path, body=None):
@@ -57,6 +62,14 @@ def improve(words):
     if f"doc:{path}" not in (task.get("body") or ""):
         api("PATCH", f"/api/goals/{goal}", {"body": ((task.get("body") or "") + f"\n\n[{title}](doc:{path})").strip()})
     return f"Wrote the design. Waiting for your comments.\n\n[{title}](#doc/{doc['id']})"
+
+
+def sort_for(words):
+    """What the real agent answers when it is asked to sort a report: one word, by the person's own words."""
+    said = words.split("\n\n", 1)[-1].rsplit("\n\nIs it a bug or a request?", 1)[0].lower()
+    if "[unclear]" in said:
+        return "It is hard to say from this."
+    return "request" if any(wish in said for wish in WISHES) else "bug"
 
 
 def answer_for(words):
@@ -118,10 +131,12 @@ for msg in iter(read, None):
         # What the server's `create` tool says (verticals/mcp/tools.py), which tests/mcp pins.
         out({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": f"make-{goal}", "content": [{"type": "text", "text": f"Created {title!r} [{goal}]"}]}]}})
-    improved = None
+    fixed = None
     if words.startswith(IMPROVE):
         time.sleep(1.0)
-        improved = improve(words)
+        fixed = improve(words)
+    elif words.startswith(SORT):
+        fixed = sort_for(words)
     if "[slow]" in words or words.startswith(CHECKED):
         time.sleep(1.5)
     if "[fail]" in words:
@@ -129,6 +144,6 @@ for msg in iter(read, None):
         continue
     out({"type": "stream_event", "event": {"type": "message_start"}})
     out({"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "text"}}})
-    for piece in re.findall(r"\S+\s*|\n+", improved or answer_for(words)):
+    for piece in re.findall(r"\S+\s*|\n+", fixed or answer_for(words)):
         out({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": piece}}})
     out({"type": "result", "is_error": False, "result": ""})

@@ -126,10 +126,10 @@ def shown(entries: Entries, count: int) -> tuple[list[str], int]:
 
 _AGENT_LINE = re.compile(r"^(?P<at>\d{4}-\d\d-\d\dT[\d:]+[+-]\d{4}) (?P<kind>[a-z_]+)(?: (?P<rest>.*))?$")
 _AGENT_KINDS = {"gateway", "send", "agent_start", "turn_start", "tool", "tool_error", "goal_bound", "permission",
-                "permission_done", "done", "exit", "refused", "turn_failed_to_start"}
+                "permission_done", "done", "exit", "refused", "turn_failed_to_start", "report_kind"}
 # `key=value` fields that hold flags, counts and names of kinds, never words.
 _AGENT_FIELDS = {"provider", "permission", "morning", "chars", "mode", "queued", "session", "resume", "handoff", "model",
-                 "effort", "name", "id", "tool", "value", "error", "ms", "code", "pid"}
+                 "effort", "name", "id", "tool", "value", "error", "ms", "code", "pid", "result", "why"}
 _FREE_KINDS = {"refused", "turn_failed_to_start"}  # the gateway's own message, or an OS error, then `session=`
 
 
@@ -288,8 +288,12 @@ def clean_launcher_lines(lines: list[str]) -> Entries:
 
 # ---------------------------------------------------------------- what the app collects for a report
 
-def collect(state_dir: Path, app_root: Path) -> dict:
-    """The facts for a report, as the page's `GET /__report/facts` returns them. Nothing here reads the board."""
+def collect(state_dir: Path, app_root: Path, logs: bool = True) -> dict:
+    """The facts for a report, as the page's `GET /__report/facts` returns them. Nothing here reads the board. Without `logs`
+    (a request has none, docs/design/bug-reports.md) no log is opened: the version and the Mac are all there is."""
+    if not logs:
+        return {"version": app_version(app_root), "system": system_line(),
+                "appLog": [], "appLeftOut": 0, "agentLog": [], "agentLeftOut": 0}
     app: list[str] = []
     app_left = 0
     for label, name, count in APP_LOGS:

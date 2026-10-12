@@ -173,6 +173,15 @@ def test_no_log_at_all_is_an_empty_list_not_an_error(scratch_dir: Path) -> None:
     assert facts["version"] and facts["system"]
 
 
+def test_a_request_takes_no_log_at_all(scratch_dir: Path) -> None:
+    # A request (docs/design/bug-reports.md) carries the version and the Mac and no log: none is opened, whatever it holds.
+    state = _state(scratch_dir)
+    facts = _facts().collect(state, ROOT, logs=False)
+    assert facts["appLog"] == [] and facts["agentLog"] == [] and facts["appLeftOut"] == 0 and facts["agentLeftOut"] == 0
+    assert facts["version"] and facts["system"]
+    assert _facts().collect(state, ROOT)["agentLog"], "the same state does have lines when logs are asked for"
+
+
 def test_a_log_is_read_from_its_end_only(scratch_dir: Path) -> None:
     """A log can be megabytes: only the last window of it is read, and the line the window cuts is dropped."""
     facts = _facts()

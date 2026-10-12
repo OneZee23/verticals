@@ -393,11 +393,12 @@ class RpcProcess(JsonProcess):
 # ---------------------------------------------------------------- agents
 
 class ClaudeAgent:
-    """`claude --print` stream-json; mirrors Enjoy's Claude client."""
+    """`claude --print` stream-json; mirrors Enjoy's Claude client. `prompt` replaces the chat's own system prompt for a
+    conversation that is not the chat's (report_kind.py)."""
 
     provider = "claude"
 
-    def __init__(self, chat, s, settings, resume_id):
+    def __init__(self, chat, s, settings, resume_id, prompt=None):
         self.chat, self.s, self.settings = chat, s, settings
         self.session_id = resume_id or str(uuid.uuid4())
         self.streamed = False
@@ -421,8 +422,9 @@ class ClaudeAgent:
                 "--settings", json.dumps(claude_settings),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
                 "--allowedTools", ",".join(f"mcp__verticals__{t}" for t in allowed),
-                "--append-system-prompt", PROMPT + "\n" + (MORNING_PROMPT if self.connected else
-                                                            report_prompt(getattr(chat, "state_dir", None), self.full) + "\n" + ACCESS_PROMPT[self.full]),
+                "--append-system-prompt", prompt if prompt is not None else PROMPT + "\n" + (
+                    MORNING_PROMPT if self.connected else
+                    report_prompt(getattr(chat, "state_dir", None), self.full) + "\n" + ACCESS_PROMPT[self.full]),
                 "--resume" if resume_id else "--session-id", self.session_id]
         if settings.get("model") and settings["model"] != "default":
             args += ["--model", settings["model"]]
