@@ -97,8 +97,8 @@ def test_the_last_sources_section_is_the_one_and_a_table_in_a_code_block_is_not_
 
 
 def test_what_could_not_be_read_is_the_lines_of_the_unread_block() -> None:
-    body = report_body(unread=["Mail: not approved yet, so it was not read.", "Team chat: get_messages was declined."])
-    assert report.unread(body) == ["Mail: not approved yet, so it was not read.", "Team chat: get_messages was declined."]
+    body = report_body(unread=["Mail: not approved yet, so it was not read.", "Team chat: list_messages was declined."])
+    assert report.unread(body) == ["Mail: not approved yet, so it was not read.", "Team chat: list_messages was declined."]
     assert report.unread(report_body()) is None
     assert report.render_unread(["A", "B"]) == "```unread\nA\nB\n```"
 

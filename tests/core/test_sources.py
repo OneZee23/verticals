@@ -335,7 +335,7 @@ def test_the_connections_document_is_made_once_and_left_alone_after(db: psycopg.
 
 # --- the tools that read a source, and where the last report stopped (docs/design/morning-quality.md) ----------------------
 
-CHAT_READS = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+CHAT_READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
 
 
 def test_a_view_carries_the_tools_that_read_the_source_and_they_are_only_the_approved_ones_to_use(db: psycopg.Connection) -> None:
@@ -344,10 +344,10 @@ def test_a_view_carries_the_tools_that_read_the_source_and_they_are_only_the_app
     assert (seen.reads, seen.approved, seen.needs_approval) == (tuple(CHAT_READS), True, False)
     assert seen.as_dict()["reads"] == CHAT_READS and seen.as_dict()["cutoff"] is None
     # A tool added to the list is a different check: the owner has not approved it, and the view says so beside the list.
-    changed = _edit(db, source, {**NAME, "reads": [*CHAT_READS, "mcp__telethon__get_messages"]}, approve=False)
+    changed = _edit(db, source, {**NAME, "reads": [*CHAT_READS, "mcp__chat__get_thread"]}, approve=False)
     waiting = _look(db, changed, T0 + MIN)
     assert (len(waiting.reads), waiting.approved, waiting.needs_approval, waiting.why) == (3, False, True, core.WAITING)
-    assert "get_messages" in waiting.summary
+    assert "get_thread" in waiting.summary
 
 
 def test_a_source_with_no_reads_has_none(db: psycopg.Connection) -> None:

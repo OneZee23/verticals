@@ -298,7 +298,7 @@ def test_a_bad_check_is_refused_with_why_and_writes_nothing(f2_dsn: str, tmp_pat
 
 CHAT = {"title": "Team chat", "gives": "What the team wrote.", "how": "Read the dialogs, then the unread ones.",
         "since": "the last report's cut-off"}
-READS = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
 LAST_REPORT = """Checked against the sources by a second agent: all 10 passed.
 
 ## Sources
@@ -319,9 +319,9 @@ async def _reads_and_cutoff(f2_dsn: str, tmp_path: Path) -> None:
         source = made.structured_content["source"]
         # The tools are in the check the owner approves, and the owner reads them beside Approve.
         assert source["reads"] == READS and source["needs_approval"] is True
-        assert source["summary"].endswith("The morning report may call recent_dialogs and unread_overview on telethon.")
+        assert source["summary"].endswith("The morning report may call list_messages and unread_summary on chat.")
         body = (await session.call_tool("doc_get", {"path": "sources/team-chat.md"})).structured_content["doc"]["body"]
-        assert '"reads"' in body and "mcp__telethon__recent_dialogs" in body
+        assert '"reads"' in body and "mcp__chat__list_messages" in body
 
         # No report before it: no cut-off, and the document's own "Since when" says where to start.
         first = await session.call_tool("sources", {"day": "2026-10-12"})

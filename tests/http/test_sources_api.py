@@ -228,7 +228,7 @@ def test_stopping_the_api_ends_the_timer_and_a_command_it_is_running(f2_dsn: str
 def test_the_list_carries_the_tools_that_read_each_source_and_where_the_last_report_stopped(api: httpx.Client) -> None:
     """For the morning report (docs/design/morning-quality.md): `reads` is in the check the owner approves, `cutoff` is the end
     of the source's window in the report before the day asked for."""
-    reads = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+    reads = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
     made = _source(api, "team-chat", {"kind": "dns", "host": "localhost", "reads": reads})
     plain = _source(api, "mail", {"kind": "dns", "host": "localhost"})
     report = ("Not checked yet: a second agent is reading it against the sources.\n\n## Sources\n\nTimes in Europe/Berlin.\n\n"

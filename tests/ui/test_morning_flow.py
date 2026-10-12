@@ -31,7 +31,7 @@ DAY, YESTERDAY = "2026-08-08", "2026-08-07"
 ZONE = "Europe/Berlin"
 NOW = "2026-08-08 07:00"
 THEN = "2026-08-07 07:00"
-CHAT_READS = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+CHAT_READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
 
 
 def at(day: str, time_: str) -> str:

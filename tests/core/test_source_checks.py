@@ -200,7 +200,7 @@ def test_a_file_name_comes_from_the_title() -> None:
 
 # --- the tools that read a source in the morning (docs/design/morning-quality.md) --------------------------------------
 
-READS = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview", "mcp__mail__searchThreads"]
+READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary", "mcp__mail__search_mail"]
 
 
 def test_a_source_names_the_tools_that_read_it_in_the_block_that_the_owner_approves() -> None:
@@ -220,16 +220,16 @@ def test_a_source_names_the_tools_that_read_it_in_the_block_that_the_owner_appro
 def test_the_summary_the_owner_reads_beside_approve_says_which_tools_the_morning_may_call() -> None:
     summary = _check({**DNS, "reads": READS}).summary()
     assert summary == ("Looks up example.test every hour and wants it to resolve. The morning report may call "
-                       "recent_dialogs and unread_overview on telethon; searchThreads on mail.")
+                       "list_messages and unread_summary on chat; search_mail on mail.")
     assert "morning report" not in _check(DNS).summary()
 
 
 def test_a_source_cannot_name_a_tool_of_verticals_or_anything_that_is_not_a_tool() -> None:
     for tool in ("mcp__verticals__delete", "mcp__Verticals__update", "mcp__verticals-desktop__schedule", "mcp__verticals_desktop__create"):
         assert "Verticals itself" in _refused({**DNS, "reads": [tool]}, "reads"), tool
-    for bad in ("recent_dialogs", "telethon__recent_dialogs", "mcp__telethon", "mcp____x", "mcp__telethon__*", " mcp__a__b", 7, None):
+    for bad in ("list_messages", "chat__list_messages", "mcp__chat", "mcp____x", "mcp__chat__*", " mcp__a__b", 7, None):
         assert "mcp__<server>__<tool>" in _refused({**DNS, "reads": [bad]}, "reads"), bad
-    assert "list of 1 to" in _refused({**DNS, "reads": "mcp__telethon__recent_dialogs"}, "reads")  # one name is not a list
+    assert "list of 1 to" in _refused({**DNS, "reads": "mcp__chat__list_messages"}, "reads")  # one name is not a list
     assert "list of 1 to" in _refused({**DNS, "reads": []}, "reads")
     assert "list of 1 to" in _refused({**DNS, "reads": [f"mcp__s__t{n}" for n in range(sc.MAX_READS + 1)]}, "reads")
     assert len(_check({**DNS, "reads": [f"mcp__s__t{n}" for n in range(sc.MAX_READS)]}).fields["reads"]) == sc.MAX_READS

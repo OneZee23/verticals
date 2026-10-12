@@ -15,7 +15,7 @@ the check or its hash. The block is the only copy of the check; the table beside
 
 Five kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns`. A sixth, `connections`, is written only by the app.
 Any of the five may also say `reads`: the tools of the owner's other MCP servers that read this source for the morning report,
-each as Claude Code names it (`mcp__telethon__recent_dialogs`). They sit in the block so the one Approve covers them: the hash
+each as Claude Code names it (`mcp__chat__list_messages`). They sit in the block so the one Approve covers them: the hash
 below changes with them, and the morning turn calls a source's tools only while that hash is the approved one.
 Unknown fields are refused, so a typo cannot quietly drop a limit. Every kind the agent writes is gated: each reaches
 something (an address, a server, a program, a file, a name resolver) and can carry something out or bring something in, so

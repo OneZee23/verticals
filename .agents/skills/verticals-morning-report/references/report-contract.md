@@ -11,7 +11,7 @@ A fenced block named `unread`, at the very top, one line for each source or tool
 ````
 ```unread
 Mail: waiting for your Approve, so it was not read.
-Team chat: get_messages answered with an error at 06:51.
+Team chat: list_messages answered with an error at 06:51.
 ```
 ````
 

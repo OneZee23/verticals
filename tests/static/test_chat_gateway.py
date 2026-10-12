@@ -23,7 +23,7 @@ def _chat():
 
 def test_no_tool_is_judged_by_its_name_any_more() -> None:
     """The morning turn used to run a tool of another server when its name began with a reading verb: a chat server's
-    `recent_dialogs` or `unread_overview` was declined, and a write called `get_and_send` would have run. A source's document
+    `list_messages` or `unread_summary` was declined, and a write called `get_and_send` would have run. A source's document
     now names the tools that read it, and nothing else outside Verticals runs without the reader."""
     chat = _chat()
     assert not hasattr(chat, "reads_only") and not hasattr(chat, "READ_VERBS")
@@ -207,30 +207,30 @@ def test_the_morning_turn_asks_first_whatever_mode_the_chat_is_in() -> None:
     assert _flag(_claude({"permission": "bypassPermissions"})[0], "--permission-mode") == "bypassPermissions"
 
 
-TEAM_CHAT = ["mcp__telethon__recent_dialogs", "mcp__telethon__unread_overview"]
+TEAM_CHAT = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
 SOURCES = [
     {"title": "Team chat", "approved": True, "needs_approval": False, "reads": TEAM_CHAT},
-    {"title": "Mail", "approved": True, "needs_approval": False, "reads": ["mcp__mail__searchThreads", "mcp__mail__getThreadMsgs"]},
-    {"title": "Calendar", "approved": False, "needs_approval": True, "reads": ["mcp__google-calendar__list-events"]},
+    {"title": "Mail", "approved": True, "needs_approval": False, "reads": ["mcp__mail__search_mail", "mcp__mail__get_mail"]},
+    {"title": "Calendar", "approved": False, "needs_approval": True, "reads": ["mcp__calendar__list_events"]},
     {"title": "Sneaky", "approved": True, "needs_approval": False,
      "reads": ["mcp__verticals__delete", "mcp__verticals-desktop__schedule", "not a tool", 7, None]},
 ]
 
 
 def test_the_morning_turn_calls_the_tools_its_sources_declare_and_asks_for_every_other() -> None:
-    """docs/design/morning-quality.md: a tool was judged by its name (a chat server's `recent_dialogs` was declined). Each source's
+    """docs/design/morning-quality.md: a tool was judged by its name (a chat server's `list_messages` was declined). Each source's
     document now declares the tools that read it, inside the check the owner approved; the turn allows exactly those on the
     command line and asks the reader about any other, and about nothing it was already told to allow."""
     agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"}, sources=SOURCES)
     allowed = _flag(agent, "--allowedTools").split(",")
-    for tool in (*TEAM_CHAT, "mcp__mail__searchThreads", "mcp__mail__getThreadMsgs"):
+    for tool in (*TEAM_CHAT, "mcp__mail__search_mail", "mcp__mail__get_mail"):
         assert tool in allowed, tool
     # A source whose check the owner has not approved declares nothing; Verticals' own tools cannot be declared; junk is junk.
-    for tool in ("mcp__google-calendar__list-events", "mcp__verticals__delete", "mcp__verticals-desktop__schedule", "not a tool"):
+    for tool in ("mcp__calendar__list_events", "mcp__verticals__delete", "mcp__verticals-desktop__schedule", "not a tool"):
         assert tool not in allowed, tool
-    assert agent.reads["mcp__telethon__recent_dialogs"] == "Team chat"
+    assert agent.reads["mcp__chat__list_messages"] == "Team chat"
     # Anything else outside Verticals comes to the reader, a reading name or not.
-    for other in ("mcp__google-calendar__list-events", "mcp__telethon__send_message", "mcp__telethon__get_everything_and_send",
+    for other in ("mcp__calendar__list_events", "mcp__chat__send_message", "mcp__chat__get_everything_and_send",
                   "mcp__mail__createDraft"):
         _tool(agent, other, {"to": "x"})
         assert session.asked[-1] == f"Allow Claude to use {other}?", other
@@ -283,7 +283,7 @@ def test_the_second_agent_reads_what_the_sources_declare_and_is_declined_for_eve
     for tool in ("doc_create", "doc_save", "doc_link", "evidence_update"):
         assert f"mcp__verticals__{tool}" not in allowed, tool
     for name, call in (("mcp__verticals__update", {"id": "SYN00001", "done": True}), ("mcp__verticals__doc_save", {"id": "x"}),
-                       ("mcp__telethon__send_message", {}), ("mcp__google-calendar__list-events", {})):
+                       ("mcp__chat__send_message", {}), ("mcp__calendar__list_events", {})):
         _tool(agent, name, call)
         assert _decision(agent) == "deny", name
     assert not session.asked
@@ -296,8 +296,8 @@ def test_a_source_list_that_cannot_be_read_declares_nothing_and_the_turn_still_s
     agent, session = _claude({"sources": "connected"})  # the host's API raises
     allowed = _flag(agent, "--allowedTools").split(",")
     assert agent.reads == {} and all(tool.startswith("mcp__verticals__") for tool in allowed)
-    _tool(agent, "mcp__telethon__recent_dialogs")
-    assert session.asked == ["Allow Claude to use mcp__telethon__recent_dialogs?"]
+    _tool(agent, "mcp__chat__list_messages")
+    assert session.asked == ["Allow Claude to use mcp__chat__list_messages?"]
 
 
 def test_a_declared_tool_names_its_source_in_the_step_the_field_shows() -> None:
@@ -305,9 +305,9 @@ def test_a_declared_tool_names_its_source_in_the_step_the_field_shows() -> None:
     events = []
     session.emit = events.append
     agent.handle({"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "id": "t1", "name": "mcp__telethon__recent_dialogs", "input": {}},
+        {"type": "tool_use", "id": "t1", "name": "mcp__chat__list_messages", "input": {}},
         {"type": "tool_use", "id": "t2", "name": "mcp__verticals__doc_get", "input": {}},
-        {"type": "tool_use", "id": "t3", "name": "mcp__telethon__send_message", "input": {}}]}})
+        {"type": "tool_use", "id": "t3", "name": "mcp__chat__send_message", "input": {}}]}})
     tools = [event for event in events if event["t"] == "tool"]
     assert [event.get("step") for event in tools] == ["Reading Team chat", None, None]
 
