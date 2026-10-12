@@ -41,6 +41,7 @@ from psycopg_pool import PoolTimeout
 
 from mcp import types
 
+from verticals.core import answers as core_answers
 from verticals.core import board as core_board
 from verticals.core import docs as core_docs
 from verticals.core import evidence as core_evidence
@@ -49,6 +50,7 @@ from verticals.core import markdown as core_markdown
 from verticals.core import moves as core_moves
 from verticals.core import search as core_search
 from verticals.core.errors import VerticalError, ValidationError
+from verticals.mcp import answers as mcp_answers
 from verticals.mcp import comments as mcp_comments
 from verticals.mcp import docs as mcp_docs
 from verticals.mcp import due_ack as mcp_due_ack
@@ -656,13 +658,20 @@ _HANDLERS: dict[str, Any] = {
 # --- entrypoint --------------------------------------------------------------------------------
 
 
-def call_tool(conn: psycopg.Connection, *, owner: str, name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
+def call_tool(
+    conn: psycopg.Connection, *, owner: str, name: str, arguments: dict[str, Any] | None, record: list[dict[str, Any]] | None = None
+) -> types.CallToolResult:
     """The one function `verticals/mcp/server.py` calls. Synchronous, matching `core/`'s own
     psycopg3-sync contract — the server offloads this to a thread (`anyio.to_thread.run_sync`),
     never runs it inline on the event loop. Never raises: every path — a bad schema, a refused
     `core/` call, an unreachable database, or a genuinely unexpected bug — returns a
     `CallToolResult` with `is_error` set, because an exception escaping this function would take
     the whole server process down with it (AC-139: "the server process is still alive").
+
+    `record` is a list when the call belongs to an agent answer the app's chat is following
+    (`verticals/mcp/answers.py`, docs/design/agent-answer-undo.md): a write is then bracketed by
+    `core/answers.py`, and what it changed is appended to the list for the caller to keep once the
+    transaction has committed. `None` for every other caller, which pays nothing for it.
     """
     schema = _SCHEMAS.get(name)
     if schema is None:
@@ -670,7 +679,14 @@ def call_tool(conn: psycopg.Connection, *, owner: str, name: str, arguments: dic
         return error_result(f"unknown tool {name!r}")
     try:
         validated = _validate_top_level(schema, arguments or {})
-        result = _HANDLERS[name](conn, owner, validated)
+        followed = mcp_answers.watched(name, validated) if record is not None else None
+        if followed is None:
+            result = _HANDLERS[name](conn, owner, validated)
+        else:
+            with core_answers.watch(conn, owner=owner, ids=followed[0], subtree=followed[1]) as found:
+                result = _HANDLERS[name](conn, owner, validated)
+            if found.changes:
+                record.append(mcp_answers.write_of(name, validated, found.changes))
         # AC-139 / the mcp-suite stream rule: stderr is *expected* non-empty, at least one
         # structured line per run — "a server that logs nothing is not one anybody can run in
         # anger." A tool call is the one event guaranteed to happen in every scenario in this
