@@ -13,6 +13,12 @@ export interface NoticeAction {
   run: () => void
 }
 
+/** One of the things a question offers: a pill that says what it would take back, and takes it. */
+export interface NoticeChoice {
+  label: Segment[]
+  run: () => void
+}
+
 export const NOTICE_MS = 6000
 /** Held under the pointer, the time left is never shorter than this when the pointer goes. */
 const AFTER_HOLD_MS = 2000
@@ -21,6 +27,8 @@ export const notice = reactive({
   open: false,
   segments: [] as Segment[],
   action: null as NoticeAction | null,
+  /** A question puts its candidates here, as pills, instead of one action. */
+  choices: [] as NoticeChoice[],
   /** A new notice is a new thing even when the words match: the component keys its animation on this. */
   seq: 0,
 })
@@ -37,9 +45,10 @@ function arm(ms: number): void {
 }
 
 /** Says `segments` in the field, with `action` at the right end (none: the line alone). A notice already there is replaced. */
-export function say(segments: Segment[], action: NoticeAction | null): void {
+export function say(segments: Segment[], action: NoticeAction | null, choices: NoticeChoice[] = []): void {
   notice.segments = segments
   notice.action = action
+  notice.choices = choices
   notice.seq += 1
   notice.open = true
   arm(NOTICE_MS)
@@ -60,4 +69,11 @@ export function hold(): void {
 /** The pointer left: the rest of the time runs, but not less than two seconds. */
 export function release(): void {
   if (notice.open) arm(Math.max(left, AFTER_HOLD_MS))
+}
+
+/** The question ⌘Z asks when it cannot tell whose change was meant (docs/design/agent-answer-undo.md): in the field, in the notice's
+ *  shape, "Take back" and the candidates as pills. A click takes one; Esc, a click elsewhere and the six seconds drop it with nothing
+ *  taken back, as for any notice. */
+export function ask(choices: NoticeChoice[]): void {
+  say([{ text: 'Take back' }], null, choices)
 }

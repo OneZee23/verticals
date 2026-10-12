@@ -45,7 +45,7 @@ function successor(board: BoardResponse, goal: GoalCard): string | null {
 }
 
 /** One goal's shot from its card; `before` as the caller knows it (`undefined` for a card not read from the board). */
-export function shotOfCard(card: GoalCard, before: string | null | undefined): Shot {
+export function shotOfCard(card: Omit<GoalCard, 'owner'>, before: string | null | undefined): Shot {
   return {
     id: card.id,
     title: card.title,

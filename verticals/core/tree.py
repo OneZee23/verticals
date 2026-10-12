@@ -67,6 +67,7 @@ from datetime import date
 import psycopg
 from psycopg.types.json import Jsonb
 
+from verticals.core import changes
 from verticals.core import vertical as vertical_mod
 from verticals.core import placement
 from verticals.core.errors import CycleRefused, NotFound, ValidationError
@@ -326,6 +327,8 @@ def attach(
                 "private": private,
             },
         ).fetchone()
+        if row is not None:
+            changes.note_made(id)  # whoever is watching this call (`core/answers.py`) hears of the goal it made
 
     return _to_goal(row) if row is not None else None
 

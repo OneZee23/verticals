@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -495,7 +496,7 @@ class ClaudeAgent:
                 "--input-format", "stream-json", "--output-format", "stream-json",
                 "--permission-mode", ASK_FIRST if mode == BOARD_ONLY else mode,
                 "--permission-prompts", "host", "--permission-prompt-tool", "stdio",
-                *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_mcp),
+                *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_config(s.id)),
                 "--settings", json.dumps(claude_settings),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
                 "--allowedTools", ",".join(self.allowed),
@@ -630,6 +631,11 @@ def codex_instructions(settings, state_dir=None):
     return text.replace('server "verticals"', 'server "verticals_desktop"')
 
 
+# What the stdio proxy reads from its environment: where the MCP server is, its token and the conversation its calls belong to
+# (the server keeps what each answer of a conversation wrote, `verticals/mcp/answers.py`).
+PROXY_ENV = ["VERTICALS_MCP_URL", "VERTICALS_MCP_TOKEN", "VERTICALS_MCP_SESSION"]
+
+
 def codex_args(chat):
     """Keep the user's CLI sign-in, but expose only this desktop's MCP server.
 
@@ -656,7 +662,7 @@ def codex_args(chat):
                   "-c", "features.multi_agent=false", "-c", 'web_search="disabled"',
                   "-c", f"mcp_servers.verticals_desktop.command={q(sys.executable)}",
                   "-c", f"mcp_servers.verticals_desktop.args={q([str(HERE / 'mcp_proxy.py')])}",
-                  "-c", 'mcp_servers.verticals_desktop.env_vars=["VERTICALS_MCP_URL","VERTICALS_MCP_TOKEN"]',
+                  "-c", f"mcp_servers.verticals_desktop.env_vars={q(PROXY_ENV)}",
                   "-c", 'mcp_servers.verticals_desktop.default_tools_approval_mode="writes"']
     # Includes system/project layers and plugin servers; fail closed if one escaped the overrides.
     try:
@@ -684,7 +690,7 @@ class CodexAgent:
         self.thread_id, self.turn_id = None, None
         self.approvals = {}      # request id -> [(label, response)]
         self.streamed = set()    # agentMessage item ids that got deltas
-        env = child_env({"VERTICALS_MCP_URL": chat.mcp_url, "VERTICALS_MCP_TOKEN": chat.token})
+        env = child_env({"VERTICALS_MCP_URL": chat.mcp_url, "VERTICALS_MCP_TOKEN": chat.token, "VERTICALS_MCP_SESSION": s.id})
         self.proc = RpcProcess(codex_args(chat), self.cwd, env, self.notify, self.request, self.exited)
         self.proc.request("initialize", {"clientInfo": {"name": "verticals-desktop", "title": "Verticals", "version": "0.1.0"},
                                          "capabilities": {"experimentalApi": True}})
@@ -868,6 +874,7 @@ class Session:
         self.started_at = None
         self.reply = ""                  # text of the agent's current reply, for handoffs
         self.tools = {}                  # tool call id -> (name, input) until its result comes
+        self.answer = None               # id of the answer the running turn is: what its writes are kept under
 
     # -- events
 
@@ -933,7 +940,10 @@ class Session:
         self.chat.record(self.id, "assistant", self.reply)
         at = time.time()
         self.chat.update(self.id, lastTurnAt=at)
-        self.emit({"t": "done", "error": bool(error), "detail": detail or "", "ms": ms, "at": at})
+        answer, self.answer = self.answer, None
+        # The answer ends at the MCP server before the page is told: it asks for the answer as soon as it hears of its end.
+        self.chat.close_answer(answer)
+        self.emit({"t": "done", "error": bool(error), "detail": detail or "", "ms": ms, "at": at, "answer": answer})
         for key in list(self.asks):
             self.resolve(key, "Expired")
         if self.queue:
@@ -948,7 +958,9 @@ class Session:
             self.flow.abandon()
         if self.running:
             self.running = False
-            self.emit({"t": "exit", "code": code, "detail": detail if code else ""})
+            answer, self.answer = self.answer, None
+            self.chat.close_answer(answer)
+            self.emit({"t": "exit", "code": code, "detail": detail if code else "", "answer": answer})
         self.queue.clear()
 
 
@@ -971,19 +983,64 @@ class Chat:
         self.moved: dict[str, tuple[int, float]] = {}
         self._cached, self._stamp = {}, None
         self.stopping = threading.Event()
-        self.claude_mcp = state_dir / "chat-mcp.json"
-        # Owner-only file: the MCP bearer token must not appear in `ps` output.
-        self.claude_mcp.unlink(missing_ok=True)
-        fd = os.open(self.claude_mcp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump({"mcpServers": {"verticals": {"type": "http", "url": mcp_url,
-                                                   "headers": {"Authorization": f"Bearer {token}"}}}}, f)
+        # The MCP server also answers the record of what each answer wrote, beside its /mcp endpoint.
+        self.answers_url = mcp_url.removesuffix("/mcp")
+        for stale in state_dir.glob("chat-mcp*.json"):
+            stale.unlink(missing_ok=True)
         # The agents' working directory: empty, writable, outside the app bundle.
         self.workdir = state_dir / "chat-workspace"
         self.workdir.mkdir(exist_ok=True)
         every = float(os.environ.get("VERTICALS_WATCH_SECONDS", WATCH_SECONDS)) if watch_every is None else watch_every
         if every > 0:
             threading.Thread(target=self._watch, args=(every,), daemon=True).start()
+
+    # -- the agents' connection to the MCP server
+
+    def claude_config(self, session_id):
+        """One conversation's Claude connects to the app's MCP server with the token and the conversation's id in its headers: every
+        call it makes says whose it is, and the server keeps what the answers of that conversation wrote. Owner-only files: the
+        MCP bearer token must not appear in `ps` output."""
+        path = self.state_dir / f"chat-mcp-{session_id}.json"
+        if not path.exists():
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump({"mcpServers": {"verticals": {"type": "http", "url": self.mcp_url, "headers": {
+                    "Authorization": f"Bearer {self.token}", "X-Verticals-Session": session_id}}}}, f)
+        return path
+
+    # -- the record of what each answer wrote (verticals/mcp/answers.py, docs/design/agent-answer-undo.md)
+
+    def answers_call(self, route, body=None, timeout=3):
+        """A call to the MCP server's record of the answers. Best effort: without it an answer has no Undo, and the conversation
+        goes on as it did."""
+        request = urllib.request.Request(
+            f"{self.answers_url}/answers/{route}", data=json.dumps(body or {}).encode(), method="POST",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read() or b"{}")
+        except (OSError, ValueError):
+            return None
+
+    def open_answer(self, session_id, answer):
+        self.answers_call("open", {"session": session_id, "answer": answer})
+
+    def close_answer(self, answer):
+        if answer:
+            self.answers_call("close", {"answer": answer})
+
+    def recent_answers(self):
+        """The answers that have ended, the last few, each with what its writes changed (what the page makes its Undo of). Reading
+        takes nothing away: a window that opens later finds the answers given while it was closed."""
+        got = self.answers_call("recent", {"limit": 20}, timeout=10)
+        answers = got.get("answers") if isinstance(got, dict) else None
+        return answers if isinstance(answers, list) else []
+
+    def answer_state(self, answer, state):
+        """What became of an answer (`standing`, `undone`, `spent`): kept with it, so a page that opens again shows Redo where it
+        showed Redo."""
+        if isinstance(answer, str) and isinstance(state, str):
+            self.answers_call("state", {"answer": answer, "state": state})
 
     # -- persistence: agent session ids and a short transcript per conversation
 
@@ -1375,10 +1432,13 @@ class Chat:
         threading.Thread(target=self.start_turn, args=(s, text, context, settings), daemon=True).start()
 
     def start_turn(self, s: Session, text, context, settings, stage=None):
-        # A later turn of the morning report (the fixing turn, `stage`) goes on with the answer the ask began.
+        # A later turn of the morning report (the fixing turn, `stage`) goes on with the answer the ask began: its writes join
+        # that answer, which ends when the report is told (docs/design/morning-quality.md: the whole morning's changes are
+        # taken back at once from the report's answer).
         s.running, s.reply = True, ""
         if stage is None:
             s.started_at = time.time()
+            s.answer = secrets.token_hex(8)  # this turn is one answer, and what its writes change is kept under this id
         s.settings = settings
         stored = self.load().get(s.id, {})
         provider = settings["provider"]
@@ -1400,7 +1460,7 @@ class Chat:
                 if changed_provider or (resume is None and stored.get("transcript")):
                     handoff = format_handoff(stored.get("transcript") or [], text)
             s.emit({"t": "turn_start", "provider": provider, "model": settings.get("model"),
-                    "effort": settings.get("effort"), **({"stage": stage} if stage else {})})
+                    "effort": settings.get("effort"), "answer": s.answer, **({"stage": stage} if stage else {})})
             if agent is None:
                 s.emit({"t": "activity", "label": "Starting…"})
                 self.log.info("agent_start provider=%s resume=%s handoff=%d session=%s", provider, bool(resume), len(handoff),
@@ -1427,12 +1487,16 @@ class Chat:
                 # The morning report: written, checked by a second agent, fixed once if a check fails, and told when it is ready.
                 flow = MorningFlow.begin(self, s, settings, context, text)
                 s.flow, s.holding = flow, [] if flow else None
+            if stage is None:
+                self.open_answer(s.id, s.answer)  # before the agent hears the words: every call it makes after is this answer's
             agent.send(body + text)
         except (ChatError, OSError) as e:
             s.running = False
             s.flow, s.holding = None, None
             self.log.warning("turn_failed_to_start %s session=%s", clip(e), str(s.id)[:8])
-            s.emit({"t": "done", "error": True, "detail": str(e), "ms": 0})
+            answer, s.answer = s.answer, None
+            self.close_answer(answer)
+            s.emit({"t": "done", "error": True, "detail": str(e), "ms": 0, "answer": answer})
 
     def decide(self, id, request_id, value):
         s = self.session(id)
@@ -1457,6 +1521,7 @@ class Chat:
             s.flow.abandon()
         if s and s.agent:
             s.agent.close()
+        (self.state_dir / f"chat-mcp-{id}.json").unlink(missing_ok=True)
 
     def shutdown(self):
         self.stopping.set()
@@ -1465,6 +1530,8 @@ class Chat:
                 s.flow.abandon()
             if s.agent:
                 s.agent.close()
+        for config in self.state_dir.glob("chat-mcp-*.json"):
+            config.unlink(missing_ok=True)
         self.log.info("gateway stop")
         for handler in list(self.log.handlers):
             handler.close()

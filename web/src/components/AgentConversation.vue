@@ -5,6 +5,7 @@
 // stand under its words as chips (AgentChips.vue; docs/design/agent-chips.md).
 import { computed, nextTick, ref, watch } from 'vue'
 import AgentChips from './AgentChips.vue'
+import AnswerUndo from './AnswerUndo.vue'
 import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import { agentChat, agentOf, balloons, decide } from '../lib/agentChat'
 import { askDetail } from '../lib/askDetail'
@@ -100,6 +101,8 @@ function onClick(event: MouseEvent): void {
             <!-- eslint-disable-next-line vue/no-v-html -- chatMarkdown escapes every byte of the source -->
             <div v-else-if="withoutChipLines(balloon.text)" class="agent-balloon__markdown" v-html="chatMarkdown(withoutChipLines(balloon.text))"></div>
             <AgentChips v-if="chips[balloon.key]!.length" class="agent-balloon__chips" :links="chips[balloon.key]!" />
+            <!-- At the answer's end, under what it made (docs/design/agent-answer-undo.md, agent-chips.md). -->
+            <AnswerUndo v-if="balloon.who === 'agent' && balloon.answer" :answer="balloon.answer" stays />
             <div v-if="balloon.ask" class="agent-balloon__ask" data-role="agent-ask">
               <p class="agent-balloon__ask-title" :class="{ 'agent-balloon__ask-title--changes': changes[balloon.key] }">{{ balloon.ask.title }}</p>
               <p v-if="changes[balloon.key]" class="agent-balloon__ask-changes" data-role="agent-ask-changes">{{ changes[balloon.key]!.goal }}<template v-if="changes[balloon.key]!.date"><span class="agent-balloon__ask-sep" aria-hidden="true"> · </span>{{ changes[balloon.key]!.date }}</template></p>

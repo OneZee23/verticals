@@ -15,6 +15,7 @@ import { fieldUndo } from '../lib/fieldUndo'
 import { circle, circleCaption, circleState, circleWords, inboxWriting } from '../lib/circle'
 import { carry } from '../lib/inboxCarry'
 import { agentChat, decide, openAsk, stop } from '../lib/agentChat'
+import { answerUndo } from '../lib/answerUndo'
 import { plainWords } from '../lib/chatMarkdown'
 import { closeWindows, windows } from '../lib/windows'
 import { mascot, useMascot, watchBoardNews } from '../lib/mascot'
@@ -24,6 +25,7 @@ import { launch } from '../lib/chatFlight'
 import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
 import AgentChips from './AgentChips.vue'
+import AnswerUndo from './AnswerUndo.vue'
 import CircleTags from './CircleTags.vue'
 import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import MovingStack from './MovingStack.vue'
@@ -60,6 +62,10 @@ const CHIPS_PAD = 32
 const CHIPS_SHOWN = 3
 const CHIPS_GAP = 14
 const CHIP_HEIGHT = { doc: 67, goal: 44 }
+/* An answer that changed the board has its Undo at its end, under its words and its chips (`AnswerUndo.vue`): the notice's
+   pill, 40 px tall and about 80 wide, 12 px under what is above it. */
+const UNDO_ROW = 52
+const UNDO_W = 80
 
 const body = ref<HTMLElement | null>(null)
 const shape = ref<HTMLElement | null>(null)
@@ -120,6 +126,12 @@ function textWidth(value: string): number {
 const answerChips = computed(() => (circleWords.value?.kind === 'answer' ? chipLinks(circleWords.value.text) : []))
 const shownChips = computed(() => answerChips.value.slice(0, CHIPS_SHOWN))
 const moreChips = computed(() => answerChips.value.length - shownChips.value.length)
+/* Whether the answer in the circle has an Undo: it changed the board, and has not been let go. */
+const undoable = computed(() => {
+  const words = circleWords.value
+  const entry = words?.kind === 'answer' && words.answer ? answerUndo.entries[words.answer] : undefined
+  return !!entry && entry.state !== 'spent'
+})
 const answerText = computed(() => {
   if (!circleWords.value) return ''
   return plainWords(answerChips.value.length ? withoutChipLines(circleWords.value.text) : circleWords.value.text)
@@ -155,7 +167,10 @@ const openWidth = computed(() => Math.min(maxWidth.value, Math.ceil(PAD_CAPTION 
 const baseWidth = computed(() => {
   if (carry.over) return 120
   if (state.value === 'answer' && answerChips.value.length) return ANSWER_MEASURE + 2 * CHIPS_PAD
-  if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
+  if (state.value === 'answer') {
+    const wide = Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD)
+    return Math.max(CIRCLE, wide, undoable.value ? UNDO_W + 2 * ANSWER_PAD : 0)
+  }
   if (stepShown.value) return Math.min(STEP_WIDTH, maxWidth.value)
   if (stopping.value) return 132
   // Typing, it grows around your words and never gets narrower than it was open, so the first key moves nothing.
@@ -178,10 +193,12 @@ const width = computed(() => Math.min(maxWidth.value,
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))
 const height = computed(() => {
   if (state.value === 'typing') return PAD_Y * 2 + shownLines.value * LINE
-  if (state.value === 'answer' && answerChips.value.length) return Math.max(CIRCLE, PAD_Y * 2 + chipWords.value + chipsHeight.value)
+  if (state.value === 'answer' && answerChips.value.length) {
+    return Math.max(CIRCLE, PAD_Y * 2 + chipWords.value + chipsHeight.value + (undoable.value ? UNDO_ROW : 0))
+  }
   if (state.value === 'answer') {
     const ask = circleWords.value?.kind === 'ask' ? 44 + (leadLines.value ? leadLines.value * 22 + 8 : 0) : 0
-    return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask)
+    return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask + (undoable.value ? UNDO_ROW : 0))
   }
   return CIRCLE
 })
@@ -588,6 +605,8 @@ onBeforeUnmount(() => {
             <AgentChips :links="shownChips" />
             <p v-if="moreChips" class="circle-field__answer-more" data-role="circle-answer-more">{{ moreChips }} more</p>
           </div>
+          <!-- At the answer's end, under its words and what it made (docs/design/agent-answer-undo.md, agent-chips.md). -->
+          <AnswerUndo v-if="undoable && circleWords.kind === 'answer'" :answer="circleWords.answer" class="circle-field__answer-undo" />
           <div v-if="circleWords.kind === 'ask' && openAsk" class="circle-field__answer-choices">
             <button v-for="option in openAsk.options" :key="option.value" type="button" class="circle-field__answer-choice"
               @click.stop="decide(openAsk.requestId, option.value)">{{ option.label }}</button>

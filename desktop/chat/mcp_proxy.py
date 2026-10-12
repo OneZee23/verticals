@@ -5,7 +5,9 @@ JSON-RPC message to the demo's streamable-HTTP MCP endpoint. The URL comes from 
 Codex the gateway starts itself. A Codex the owner connected from the menu bar ("Use Verticals in
 Codex") is given the path of the owner-only file the launcher writes instead (VERTICALS_MCP_HEADERS):
 the token is read from it at every message, so it is in no Codex setting and a new launch's token is
-the one used."""
+the one used. The conversation the agent belongs to (VERTICALS_MCP_SESSION, set only for the Codex the
+gateway starts) goes on every request as X-Verticals-Session, so the server can keep what each answer
+of that conversation wrote."""
 import json
 import os
 import sys
@@ -16,6 +18,7 @@ URL = os.environ["VERTICALS_MCP_URL"]
 HEADERS_FILE = os.environ.get("VERTICALS_MCP_HEADERS")
 if not (os.environ.get("VERTICALS_MCP_TOKEN") or HEADERS_FILE):
     sys.exit("VERTICALS_MCP_TOKEN or VERTICALS_MCP_HEADERS is needed")
+CONVERSATION = os.environ.get("VERTICALS_MCP_SESSION")
 session_id = None
 
 
@@ -38,6 +41,8 @@ def relay(message):
                "Authorization": authorization()}
     if session_id:
         headers["Mcp-Session-Id"] = session_id
+    if CONVERSATION:
+        headers["X-Verticals-Session"] = CONVERSATION
     req = urllib.request.Request(URL, data=json.dumps(message).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=600) as resp:
         session_id = resp.headers.get("Mcp-Session-Id") or session_id
