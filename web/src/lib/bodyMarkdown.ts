@@ -6,7 +6,7 @@
  *  An image `![alt](src)` takes its own, narrower allowlist: see `isAllowedImageSrc`. */
 export type Run =
   | { kind: 'text' | 'strong' | 'em' | 'code'; text: string }
-  | { kind: 'link'; text: string; href: string }
+  | { kind: 'link'; text: string; href: string; strong?: boolean }
   | { kind: 'image'; alt: string; src: string }
   | { kind: 'break' }
 
@@ -46,6 +46,9 @@ export function internalLinkTarget(href: string): InternalLink | null {
  *  inside identifiers. */
 const INLINE_RE =
   /!\[([^\]]*)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|(?<![\w_])_([^_\s][^_]*?)_(?![\w_])|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/
+/** What bold may hold besides plain words: one link, as a parent task is written in a morning report's table
+ *  (`**[Name](goal:<id>)**`). It is one run, a bold link, and is written back as it was. */
+const BOLD_LINK_RE = /^\[([^\]]+)\]\(([^)\s]+)\)$/
 const LIST_ITEM_RE = /^(\s*)(?:[-*+]|\d+\.)\s+(.*)$/
 const ORDERED_ITEM_RE = /^\s*\d+\./
 const HEADING_RE = /^(#{1,6})\s+(.*)$/
@@ -125,7 +128,12 @@ export function tokenizeInline(text: string): Run[] {
       if (isAllowedImageSrc(src)) runs.push({ kind: 'image', alt: match[1], src })
       else runs.push({ kind: 'text', text: match[0] })
     }
-    else if (match[3] !== undefined) runs.push({ kind: 'strong', text: match[3] })
+    else if (match[3] !== undefined) {
+      const bold = BOLD_LINK_RE.exec(match[3])
+      const href = bold ? cleanHref(bold[2]) : ''
+      if (bold && isAllowedHref(href)) runs.push({ kind: 'link', text: bold[1], href, strong: true })
+      else runs.push({ kind: 'strong', text: match[3] })
+    }
     else if (match[4] !== undefined) runs.push({ kind: 'em', text: match[4] })
     else if (match[5] !== undefined) runs.push({ kind: 'em', text: match[5] })
     else if (match[6] !== undefined) runs.push({ kind: 'code', text: match[6] })
@@ -207,7 +215,7 @@ function serializeRuns(runs: Run[]): string {
     if (run.kind === 'strong') return `**${run.text}**`
     if (run.kind === 'em') return `*${run.text}*`
     if (run.kind === 'code') return `\`${run.text}\``
-    if (run.kind === 'link') return `[${run.text}](${run.href})`
+    if (run.kind === 'link') return run.strong ? `**[${run.text}](${run.href})**` : `[${run.text}](${run.href})`
     if (run.kind === 'image') return `![${run.alt}](${run.src})`
     return run.text
   }).join('')
@@ -288,6 +296,13 @@ function appendRun(parent: HTMLElement, run: Run): void {
       element.setAttribute('target', '_blank')
       element.setAttribute('rel', 'noopener noreferrer')
     }
+  }
+  if (run.kind === 'link' && run.strong) {
+    // `serializeInlineNode` writes `<strong><a>` back as `**[label](href)**`, the form it was read from.
+    const bold = document.createElement('strong')
+    bold.append(element)
+    parent.append(bold)
+    return
   }
   parent.append(element)
 }
