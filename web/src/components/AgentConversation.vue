@@ -98,7 +98,7 @@ function onClick(event: MouseEvent): void {
             <div v-if="balloon.who === 'agent' && docLinks(balloon.text).length" class="agent-balloon__docs" data-role="agent-docs">
               <DocChip v-for="doc in docLinks(balloon.text)" :id="doc.id" :key="doc.id" :label="doc.label" dark />
             </div>
-            <AnswerUndo v-if="balloon.who === 'agent' && balloon.answer" :answer="balloon.answer" />
+            <AnswerUndo v-if="balloon.who === 'agent' && balloon.answer" :answer="balloon.answer" stays />
             <div v-if="balloon.ask" class="agent-balloon__ask" data-role="agent-ask">
               <p class="agent-balloon__ask-title">{{ balloon.ask.title }}</p>
               <div class="agent-balloon__choices">

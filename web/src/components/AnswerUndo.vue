@@ -5,12 +5,14 @@
 import { computed } from 'vue'
 import { answerUndo, putBack, takeBack } from '../lib/answerUndo'
 
-const props = defineProps<{ answer?: string | null }>()
+/* `stays`: the pill is on the answer's message, which stays in front of the person while the answer is taken back, so the notice
+   that says what happened has no button of its own. The field's pill goes under the notice, which then is the button. */
+const props = defineProps<{ answer?: string | null; stays?: boolean }>()
 const entry = computed(() => (props.answer ? answerUndo.entries[props.answer] : undefined))
 const undone = computed(() => entry.value?.state === 'undone')
 
 function press(): void {
-  if (entry.value) void (undone.value ? putBack(entry.value.id) : takeBack(entry.value.id))
+  if (entry.value) void (undone.value ? putBack(entry.value.id, props.stays) : takeBack(entry.value.id, props.stays))
 }
 </script>
 

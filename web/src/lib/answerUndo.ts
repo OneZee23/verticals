@@ -318,10 +318,15 @@ async function readAnswers(): Promise<void> {
       if (!known.busy) known.state = answer.state
       continue
     }
-    const step = answerStep(answer)
+    let step: Step | null
+    let count: number
+    try {
+      step = answerStep(answer)
+      count = countOf(netOf(answer))
+    } catch {
+      continue // a record the page cannot read is no answer to take back; the others go on
+    }
     if (!step) continue
-    const net = netOf(answer)
-    const count = countOf(net)
     const words = step.words('redo') ?? []
     answerUndo.entries[answer.id] = {
       id: answer.id, step, count, state: answer.state, busy: false, seq: nextSeq(),
@@ -352,8 +357,9 @@ export function refreshAnswers(): Promise<void> {
   return reading
 }
 
-/** Takes the answer back, or does it again: from its Undo, and from the pick ⌘Z asks for. */
-async function work(id: string, direction: 'undo' | 'redo'): Promise<void> {
+/** Takes the answer back, or does it again: from its Undo, and from the pick ⌘Z asks for. `inPlace`: the person pressed the pill on
+ *  the answer's message and still has it in front of them, so the notice carries no button of its own. */
+async function work(id: string, direction: 'undo' | 'redo', inPlace: boolean): Promise<void> {
   const entry = answerUndo.entries[id]
   if (!entry || entry.busy) return
   entry.busy = true
@@ -363,14 +369,14 @@ async function work(id: string, direction: 'undo' | 'redo'): Promise<void> {
     const spent = ran.outcome === 'drop' || (!!ran.applied?.kept.length && !ran.applied.set)
     entry.state = spent ? 'spent' : direction === 'undo' ? 'undone' : 'standing'
     tell(id, entry.state)
-    await announce(entry.step, direction, ran.applied, { undo: () => void takeBack(id), redo: () => void putBack(id) })
+    await announce(entry.step, direction, ran.applied, inPlace ? null : { undo: () => void takeBack(id), redo: () => void putBack(id) })
   } finally {
     entry.busy = false
   }
 }
 
-export const takeBack = (id: string): Promise<void> => work(id, 'undo')
-export const putBack = (id: string): Promise<void> => work(id, 'redo')
+export const takeBack = (id: string, inPlace = false): Promise<void> => work(id, 'undo', inPlace)
+export const putBack = (id: string, inPlace = false): Promise<void> => work(id, 'redo', inPlace)
 
 /** The answers that stand, that the page learned of after `seq`, in the order it did. */
 function standingAfter(seq: number): AnswerEntry[] {

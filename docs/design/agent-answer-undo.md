@@ -16,7 +16,7 @@ And: "Also if human is typing anything and doing cmd z while focused in any text
 - Undo takes back what that answer wrote, and only where the goal is still as the answer left it. What it deleted comes back with what was under it. What it ticked, retitled, moved or reparented on goals that were there goes back kind by kind: a tick still as the answer left it goes back even if the title was changed since. What it made goes to the trash, unless somebody has taken it up since (written to it, put something under it, commented on it).
 - Then the same place offers Redo, which does the answer again with the same care.
 - What changed since stays, and the field says so in one line, as in #40: `Put back “X” and 2 more; what changed since stays`, with Redo. When nothing could be taken back: `“X” changed since, so it stays`, with no button, and the answer is let go: it has no Undo any more.
-- What you can see is undone in place, its own movement played backwards; what leaves your view (a goal it made, a goal it deleted again by Redo) is said in the field with its button, as in #40.
+- What you can see is undone in place, its own movement played backwards; what leaves your view (a goal it made, a goal it deleted again by Redo) is said in the field with its button, as in #40. When the answer is taken back from its message in the open conversation, the message's own pill is the Redo, so the field says only what happened.
 - An answer that changed nothing on the board has no Undo. Neither has what an agent did from Claude Code or Codex outside the app: it carries no conversation of the app's, so it is nobody's answer.
 - An answer is never a step of ⌘Z. The keys are the person's own.
 

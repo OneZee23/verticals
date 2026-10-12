@@ -145,7 +145,8 @@ export function seen(id: string): boolean {
 
 const frame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()))
 
-/** What the notice's button does: the history's own, or an answer's (`lib/answerUndo.ts`). */
+/** What the notice's button does: the history's own, or an answer's (`lib/answerUndo.ts`). `null` for an answer taken back from its
+ *  message in the open conversation: the message's pill is the button then, and the notice says only what happened. */
 export interface Again {
   undo(): void
   redo(): void
@@ -155,11 +156,11 @@ const OWN: Again = { undo: () => void undoOwn(), redo: () => void redo() }
 /** A change that leaves your view is said in the field; one you can see is not. The board has drawn the change by the
  *  time this looks, and the check is what is on the screen, so it holds for every kind of change. What stayed because it was
  *  changed since is always said: the person is looking at a goal that did not move. */
-export async function announce(step: Step, direction: 'undo' | 'redo', applied: Applied | null = null, again: Again = OWN): Promise<void> {
+export async function announce(step: Step, direction: 'undo' | 'redo', applied: Applied | null = null, again: Again | null = OWN): Promise<void> {
   await nextTick()
   await frame()
   if (typeof document === 'undefined') return
-  const other: NoticeAction = direction === 'redo' ? { label: 'Undo', run: () => again.undo() } : { label: 'Redo', run: () => again.redo() }
+  const other: NoticeAction | null = !again ? null : direction === 'redo' ? { label: 'Undo', run: () => again.undo() } : { label: 'Redo', run: () => again.redo() }
   if (applied?.kept.length) {
     // With nothing set there is nothing to take back or play again from here: the line stands alone.
     const put = applied.put // a step of many goals names the first it put right and counts the rest
