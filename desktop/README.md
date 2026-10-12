@@ -177,7 +177,10 @@ Something is wrong, or could be better: pictures dropped on the window (or paste
 them there what you type says what you see and what you want. ↵ makes a report (docs/design/bug-reports.md): a document with
 your words, the pictures and the version, and a task with no date that holds it. There is nothing to pick: the agent tells
 which kind it is from your words, once, and gets the words alone (`chat/report_kind.py` asks the Claude Code the chat runs, in a
-conversation nobody sees, with no tools and no MCP servers; the pictures and the logs never go to a model). A bug, something that
+conversation nobody sees, with no tools and no MCP servers; the pictures and the logs never go to a model). In the same answer it
+names the task by its result, as the board names its tasks ("A card dragged to Friday stays there"), in the language of your words
+and in at most 8 words; the report keeps your words as you wrote them, and with no name (no agent, a slow or unsure one) the task
+takes your words. A bug, something that
 went wrong, is made under `reports/bugs/` and also holds the last lines of the app's and the agent's logs; a request, something
 that could be better, is made under `reports/requests/` and holds none (`GET /__report/facts?logs=0` opens no log). When the agent
 cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a request: that shape loses nothing. A document holds
@@ -190,6 +193,12 @@ cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a requ
   link limit; a link is kept to 6,000 characters, the oldest log lines going first and the issue saying how many. With ⌥
   held it is an email draft with the same text, to no address (`DEVELOPERS_EMAIL` in `web/src/lib/reportSend.ts` is empty;
   the repository publishes none).
+- **What an agent reads of a report:** its pictures are data URLs inside the text, hundreds of kilobytes of base64, so every MCP read
+  of a document or a goal (`doc_get`, `doc_revision`, `doc_create`/`doc_save`/`doc_restore`'s answers, `goal`) returns each as
+  `[picture 1]`, `[picture 2]` and so on with every word as it is (`verticals/core/pictures.py`), and a placeholder the agent keeps
+  in a body it saves (`doc_save`, `update` of one goal) is the picture again, so editing a report's words never costs it its
+  pictures. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
+  text without its pictures.
 - **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
   knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the
   Mac's user name; the number of entries left out is told in the report.

@@ -46,7 +46,11 @@ def test_the_prompt_says_what_a_report_is_and_how_a_design_and_its_pull_request_
     prompt = " ".join(_chat().report_prompt(None, False, home=scratch_dir, code_root=scratch_dir / "nowhere").split())
     assert prompt.startswith("## Reports from the app")
     # What a report is, and not to read it: its pictures are inside the text.
-    assert "a document under reports/bugs/ or reports/requests/" in prompt and "Never read a report with doc_get" in prompt
+    assert "a document under reports/bugs/ or reports/requests/" in prompt
+    # Reading a report is cheap, because its pictures come as placeholders; keeping them in a saved text keeps the pictures.
+    assert "each comes as [picture 1], [picture 2] and so on, never its data" in prompt
+    assert "keep those lines where they are and the pictures stay" in prompt and "take one out and the picture goes" in prompt
+    assert "Never read a report" not in prompt and "doc_get" in prompt
     # A bug has the logs, a request none: the agent is told which is which, and that either holds the words and the pictures.
     assert "A bug is something that went wrong" in prompt and "a request is something that could be better" in prompt
     assert "and holds none" in prompt
