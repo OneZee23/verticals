@@ -226,7 +226,7 @@ def build_launcher():
     log("launcher")
     (APP / "Contents/MacOS").mkdir(parents=True, exist_ok=True)
     sh("swiftc", "-O", "-parse-as-library", "-target", "arm64-apple-macos13.0", "-o", APP / "Contents/MacOS/Verticals",
-       *(ROOT / "macos" / name for name in ("Verticals.swift", "Updater.swift", "UpdateIndicator.swift")))
+       *(ROOT / "macos" / name for name in ("Verticals.swift", "AppLinks.swift", "Updater.swift", "UpdateIndicator.swift")))
     shutil.copy2(ICON, RES / "AppIcon.icns")
     (APP / "Contents/Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -243,6 +243,10 @@ def build_launcher():
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSArchitecturePriority</key><array><string>arm64</string></array>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>app.verticals.desktop.task</string>
+    <key>CFBundleURLSchemes</key><array><string>verticals</string></array>
+  </dict></array>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>
 </plist>
