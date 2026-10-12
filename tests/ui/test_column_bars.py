@@ -4,7 +4,8 @@ Every column but Life shows three bars at rest, the middle one dark, in place of
 the pointer and steps the column to the period before and after; the middle one opens the column's spans mode, the one a
 dragged task opens on the column's corner (`lib/spans.ts`). When a column scrolls, the line holding them stays pinned at
 its top on white, the goals fading out under it over 14 px; it names the kind while the column is at its top and the
-period once the big name has gone under it.
+period once the big name has gone under it. A column whose period no longer holds today shows the dark middle bar alone,
+`|`, which brings the board back to today: that look is `test_column_bars_today.py`'s.
 
 The suite's pinned clock is Saturday 8 Aug 2026 and its window 1458 px, so a column is 208 px wide (182 px of room for
 its name). Sizes and colours are the board's own: the ink and the light grey the dots in a column's corner already use
@@ -26,6 +27,8 @@ SPANS = '[data-role="spans-board"]'
 SPAN_HEADS = '[data-role="spans-row"] > .pattern-vertical-board__column:not([data-span-edge]) .column-header__sub-label'
 PAGED = ("day", "week", "month", "quarter", "year", "decade")
 KINDS = {"day": "Day", "week": "Week", "month": "Month", "quarter": "Quarter", "year": "Year", "decade": "Three years"}
+# What the mode shows, in the plural, for the three bars' name: "Weeks side by side".
+PLURALS = {"day": "Days", "week": "Weeks", "month": "Months", "quarter": "Quarters", "year": "Years", "decade": "Three years"}
 # The period each column pages to from the suite's pinned day, Saturday 8 Aug 2026: (this period, the next, the one before).
 PERIODS = {
     "day": ("2026-08-08", "2026-08-09", "2026-08-07"),
@@ -137,6 +140,15 @@ def _wait_colours(page: Page, vertical: str, want: list[str]) -> list[str]:
 
 def _gaps(bars: list[dict]) -> list[float]:
     return [round(b["left"] - a["left"] - BAR_W, 2) for a, b in zip(bars, bars[1:])]
+
+
+def _step(page: Page, vertical: str, cap: str, key: str) -> None:
+    """One click on a side bar of `vertical`, the pointer on its column as for a person, and the column on `key`."""
+    _hover(page, vertical)
+    column = _col(page, vertical)
+    column.locator(f'[data-cap="{cap}"]').click()
+    expect(column).to_have_attribute("data-period-key", key)
+    expect(column.locator('[data-role="period-slide"]')).to_have_count(1)
 
 
 def test_every_column_but_life_shows_three_bars_at_rest(ui_f2: UiSession) -> None:
@@ -287,13 +299,14 @@ def test_the_side_bars_page_the_column(ui_f2: UiSession, vertical: str) -> None:
 
 
 def test_t_still_goes_back_to_today(ui_f2: UiSession) -> None:
-    """The dot between the arrows is gone with them; the board's own key to today is not."""
+    """The board's own key to today works as it did, and the sign turns back into three bars."""
     page = _open(ui_f2)
-    activate_column(page, "week")
-    _col(page, "week").locator('[data-cap="period-next"]').click()
-    expect(_col(page, "week")).to_have_attribute("data-period-key", "2026-W33")
+    _step(page, "week", "period-next", "2026-W33")
+    _rest(page)
+    assert len(_wait_bars(page, "week", 1)) == 1
     page.keyboard.press("t")
     expect(_col(page, "week")).to_have_attribute("data-period-key", "2026-W32")
+    assert len(_wait_bars(page, "week", 3)) == 3
 
 
 def test_a_click_on_the_lines_words_does_what_a_click_on_the_header_does(ui_f2: UiSession) -> None:
@@ -336,18 +349,61 @@ def test_the_middle_bar_opens_the_spans_mode(ui_f2: UiSession, vertical: str, vi
     expect(page.locator('[data-role="moving-stack"]')).to_have_count(0)
 
 
-def test_the_mode_opens_from_this_period_whichever_the_column_shows(ui_f2: UiSession) -> None:
-    """Paged two weeks on, the Week column's mode still starts at this week, as the mode does from the corner."""
+# Where each of a column's three buttons and five bars stands, in px from the column's own top left; the Today bar's box is
+# the mode's, so both go by "period-mode" here.
+_GEOMETRY = """(vertical) => {
+  const col = document.querySelector(`[data-role="column-strip"] > [data-vertical="${vertical}"]`);
+  const box = col.getBoundingClientRect();
+  const rel = (el) => { const r = el.getBoundingClientRect(); return [r.left - box.left, r.top - box.top, r.width, r.height].map((v) => Math.round(v * 100) / 100); };
+  return {
+    width: box.width,
+    boxes: Object.fromEntries([...col.querySelectorAll('.column-bars__button')].map((b) => [b.dataset.cap.replace('period-today', 'period-mode'), rel(b)])),
+    bars: [...col.querySelectorAll('.column-bars__bar')].map(rel),
+  };
+}"""
+
+
+def test_the_three_boxes_do_not_overlap_and_the_side_boxes_grow_outward(ui_f2: UiSession) -> None:
+    """The sign's marks stand as drawn and only the invisible boxes grow, outward from it: the left one to 24 px, the right
+    one to the column's own edge, which is as far as that edge allows (the sign stands 22 px from it), and the middle one
+    keeps its 18. All three are 28 px tall, the line's height, and none overlaps another."""
     page = _open(ui_f2)
-    activate_column(page, "week")
-    for key in ("2026-W33", "2026-W34"):
-        _col(page, "week").locator('[data-cap="period-next"]').click()
-        expect(_col(page, "week")).to_have_attribute("data-period-key", key)
-    _col(page, "week").locator('[data-cap="period-mode"]').click()
-    expect(page.locator(SPANS)).to_have_count(1, timeout=5000)
-    expect(page.locator(SPAN_HEADS).first).to_have_text("This week")
-    page.keyboard.press("Escape")
-    expect(page.locator(SPANS)).to_have_count(0, timeout=5000)
+    _hover(page, "week")
+    geometry = page.evaluate(_GEOMETRY, "week")
+    prev, mode, nxt = (geometry["boxes"][cap] for cap in ("period-prev", "period-mode", "period-next"))
+    left = lambda box: box[0]  # noqa: E731
+    right = lambda box: box[0] + box[2]  # noqa: E731
+    assert right(prev) <= left(mode) + 0.01 and right(mode) <= left(nxt) + 0.01, "none overlaps another"
+    assert (prev[2], mode[2]) == (24, 18) and nxt[2] == 19
+    assert right(nxt) == pytest.approx(geometry["width"], abs=0.01), "the right box stops at the column's edge, not beyond"
+    assert [box[3] for box in (prev, mode, nxt)] == [28, 28, 28] and [box[1] for box in (prev, mode, nxt)] == [0, 0, 0]
+    # every mark is inside its own box
+    bars = geometry["bars"]
+    for box, mark in ((prev, bars[0]), (mode, bars[1]), (mode, bars[2]), (mode, bars[3]), (nxt, bars[4])):
+        assert left(box) <= left(mark) and right(mark) <= right(box) + 0.01, (box, mark)
+
+
+def test_the_left_box_stops_where_the_words_of_the_kind_line_end(ui_f2: UiSession) -> None:
+    """A 1320 px window with the Quarter column open leaves the others 160 px, and Week's kind line, "Week · May ’27",
+    fills its room: it ends 4 px from the first bar. The left box grows no further left than that, so it never covers the
+    words, though it is smaller than 24 px there; Day's short "Day · ’27" leaves the whole 24 px."""
+    page = _open(ui_f2, "2027-05-12", width=1320)
+    expand_column(page, "quarter")
+    expect(_col(page, "week").locator(".column-header__sub-label")).to_have_text("Week · May ’27", timeout=5000)
+    page.wait_for_timeout(600)
+    ends = page.evaluate(
+        """() => Object.fromEntries(['day', 'week'].map((v) => {
+          const col = document.querySelector(`[data-role="column-strip"] > [data-vertical="${v}"]`);
+          const word = col.querySelector('[data-role="column-line-kind"]'); const range = document.createRange(); range.selectNodeContents(word);
+          return [v, [range.getBoundingClientRect().right - col.getBoundingClientRect().left, col.getBoundingClientRect().width]];
+        }))""")
+    assert ends["week"][1] == pytest.approx(160, abs=1.5), ends
+    week = page.evaluate(_GEOMETRY, "week")["boxes"]
+    assert week["period-prev"][0] >= ends["week"][0] - 0.5, f"the left box starts at {week['period-prev'][0]:.1f}, the words end at {ends['week'][0]:.1f}"
+    assert 8 <= week["period-prev"][2] < 24
+    assert (week["period-mode"][2], week["period-next"][2]) == (18, 19), "the others keep their sizes"
+    day = page.evaluate(_GEOMETRY, "day")["boxes"]
+    assert day["period-prev"][2] == 24 and day["period-prev"][0] >= ends["day"][0]
 
 
 # What the pinned line shows, read off the page: its state, both of its words with how much each is seen, where it stands
@@ -577,79 +633,35 @@ def test_life_has_the_line_and_no_bars(ui_f2: UiSession) -> None:
     assert _wait_line(page, "life", "period")["name"] == "All time"
 
 
-def test_the_bars_are_buttons_named_by_the_columns_kind(ui_f2: UiSession) -> None:
-    """"Previous week", "Week mode", "Next week" for Week, and the same by each column's kind, for the keyboard and for
-    assistive tech: three buttons, the side bars first and last."""
+def test_the_bars_are_buttons_named_by_what_they_do(ui_f2: UiSession) -> None:
+    """"Previous week", "Weeks side by side", "Next week" for Week, and the same by each column's kind, for the keyboard
+    and for assistive tech: three buttons, the side bars first and last. A column away from today has "Today" for its
+    middle one."""
     page = _open(ui_f2)
     for vertical in PAGED:
         kind = KINDS[vertical]
-        want = [f"Previous {kind.lower()}", f"{kind} mode", f"Next {kind.lower()}"]
+        want = [f"Previous {kind.lower()}", f"{PLURALS[vertical]} side by side", f"Next {kind.lower()}"]
         column = _col(page, vertical)
         bars = column.locator("[data-cap='period-prev'], [data-cap='period-mode'], [data-cap='period-next']")
         assert bars.evaluate_all("els => els.map((el) => [el.tagName, el.getAttribute('aria-label')])") == [["BUTTON", name] for name in want]
         for name in want:
             expect(column.get_by_role("button", name=name, exact=True)).to_have_count(1)
-
-
-# Where each of a column's three buttons and five bars stands, in px from the column's own top left.
-_GEOMETRY = """(vertical) => {
-  const col = document.querySelector(`[data-role="column-strip"] > [data-vertical="${vertical}"]`);
-  const box = col.getBoundingClientRect();
-  const rel = (el) => { const r = el.getBoundingClientRect(); return [r.left - box.left, r.top - box.top, r.width, r.height].map((v) => Math.round(v * 100) / 100); };
-  return {
-    width: box.width,
-    boxes: Object.fromEntries([...col.querySelectorAll('.column-bars__button')].map((b) => [b.dataset.cap, rel(b)])),
-    bars: [...col.querySelectorAll('.column-bars__bar')].map(rel),
-  };
-}"""
-
-
-def test_the_three_boxes_do_not_overlap_and_the_side_boxes_grow_outward(ui_f2: UiSession) -> None:
-    """The sign's marks stand as drawn and only the invisible boxes grow, outward from it: the left one to 24 px, the right
-    one to the column's own edge, which is as far as that edge allows (the sign stands 22 px from it), and the middle one
-    keeps its 18. All three are 28 px tall, the line's height, and none overlaps another."""
-    page = _open(ui_f2)
-    _hover(page, "week")
-    geometry = page.evaluate(_GEOMETRY, "week")
-    prev, mode, nxt = (geometry["boxes"][cap] for cap in ("period-prev", "period-mode", "period-next"))
-    left = lambda box: box[0]  # noqa: E731
-    right = lambda box: box[0] + box[2]  # noqa: E731
-    assert right(prev) <= left(mode) + 0.01 and right(mode) <= left(nxt) + 0.01, "none overlaps another"
-    assert (prev[2], mode[2]) == (24, 18) and nxt[2] == 19
-    assert right(nxt) == pytest.approx(geometry["width"], abs=0.01), "the right box stops at the column's edge, not beyond"
-    assert [box[3] for box in (prev, mode, nxt)] == [28, 28, 28] and [box[1] for box in (prev, mode, nxt)] == [0, 0, 0]
-    # every mark is inside its own box
-    bars = geometry["bars"]
-    for box, mark in ((prev, bars[0]), (mode, bars[1]), (mode, bars[2]), (mode, bars[3]), (nxt, bars[4])):
-        assert left(box) <= left(mark) and right(mark) <= right(box) + 0.01, (box, mark)
-
-
-def test_the_left_box_stops_where_the_words_of_the_kind_line_end(ui_f2: UiSession) -> None:
-    """A 1320 px window with the Quarter column open leaves the others 160 px, and Week's kind line, "Week · May ’27",
-    fills its room: it ends 4 px from the first bar. The left box grows no further left than that, so it never covers the
-    words, though it is smaller than 24 px there; Day's short "Day · ’27" leaves the whole 24 px."""
-    page = _open(ui_f2, "2027-05-12", width=1320)
-    expand_column(page, "quarter")
-    expect(_col(page, "week").locator(".column-header__sub-label")).to_have_text("Week · May ’27", timeout=5000)
-    page.wait_for_timeout(600)
-    ends = page.evaluate(
-        """() => Object.fromEntries(['day', 'week'].map((v) => {
-          const col = document.querySelector(`[data-role="column-strip"] > [data-vertical="${v}"]`);
-          const word = col.querySelector('[data-role="column-line-kind"]'); const range = document.createRange(); range.selectNodeContents(word);
-          return [v, [range.getBoundingClientRect().right - col.getBoundingClientRect().left, col.getBoundingClientRect().width]];
-        }))""")
-    assert ends["week"][1] == pytest.approx(160, abs=1.5), ends
-    week = page.evaluate(_GEOMETRY, "week")["boxes"]
-    assert week["period-prev"][0] >= ends["week"][0] - 0.5, f"the left box starts at {week['period-prev'][0]:.1f}, the words end at {ends['week'][0]:.1f}"
-    assert 8 <= week["period-prev"][2] < 24
-    assert (week["period-mode"][2], week["period-next"][2]) == (18, 19), "the others keep their sizes"
-    day = page.evaluate(_GEOMETRY, "day")["boxes"]
-    assert day["period-prev"][2] == 24 and day["period-prev"][0] >= ends["day"][0]
+    _step(page, "week", "period-next", "2026-W33")
+    for vertical in ("day", "week"):
+        kind = KINDS[vertical]
+        column = _col(page, vertical)
+        bars = column.locator("[data-cap='period-prev'], [data-cap='period-today'], [data-cap='period-next']")
+        assert bars.evaluate_all("els => els.map((el) => [el.tagName, el.getAttribute('aria-label')])") == [
+            ["BUTTON", f"Previous {kind.lower()}"], ["BUTTON", "Today"], ["BUTTON", f"Next {kind.lower()}"]]
+    month = _col(page, "month")
+    expect(month.get_by_role("button", name="Months side by side", exact=True)).to_have_count(1)
+    expect(month.get_by_role("button", name="Today", exact=True)).to_have_count(0)
 
 
 def test_the_keyboard_reaches_every_bar_and_shows_them(ui_f2: UiSession) -> None:
     """Tab goes through a column's three bars, which come first in it, whether the pointer is there or not, and a bar in
-    focus brings its sides into view; Enter pages, Space opens the mode, Esc leaves it."""
+    focus brings its sides into view; Enter pages, Space brings a paged column back to today and then opens the mode, Esc
+    leaves it."""
     page = _open(ui_f2)
     _rest(page)
     assert len(_bars(page, "week")) == 3
@@ -665,6 +677,10 @@ def test_the_keyboard_reaches_every_bar_and_shows_them(ui_f2: UiSession) -> None
     page.keyboard.press("Enter")
     expect(week).to_have_attribute("data-period-key", "2026-W33")
     expect(week.locator('[data-role="period-slide"]')).to_have_count(1)
+    week.locator('[data-cap="period-today"]').focus()  # the middle bar is the single one now
+    page.keyboard.press("Space")
+    expect(week).to_have_attribute("data-period-key", "2026-W32")
+    expect(week.locator('[data-role="period-slide"]')).to_have_count(1)
     week.locator('[data-cap="period-mode"]').focus()
     page.keyboard.press("Space")
     expect(page.locator(SPANS)).to_have_count(1, timeout=5000)
@@ -673,7 +689,8 @@ def test_the_keyboard_reaches_every_bar_and_shows_them(ui_f2: UiSession) -> None
 
 
 def test_on_touch_the_side_bars_stay_in_view(ui_f2: UiSession) -> None:
-    """Nothing hovers on a touch screen, so the bars are all there at rest, and a tap does what the pointer does."""
+    """Nothing hovers on a touch screen, so the bars are all there at rest, and a tap does what the pointer does: the
+    side bars page, the single bar goes back to today, the three open the mode."""
     context = ui_f2.context.browser.new_context(
         viewport={"width": 390, "height": 800}, has_touch=True, is_mobile=True, reduced_motion="reduce")
     context.add_init_script(script=_DIALOG_RECORDER_SCRIPT)
@@ -691,6 +708,10 @@ def test_on_touch_the_side_bars_stay_in_view(ui_f2: UiSession) -> None:
         assert heights == {"period-prev": 44, "period-mode": 44, "period-next": 44}, "a finger's boxes are 44 px tall"
         _col(page, "day").locator('[data-cap="period-next"]').tap()
         expect(_col(page, "day")).to_have_attribute("data-period-key", "2026-08-09")
+        assert _wait_colours(page, "day", [LIGHT, INK, LIGHT]) == [LIGHT, INK, LIGHT], "the single bar between its sides"
+        _col(page, "day").locator('[data-cap="period-today"]').tap()
+        expect(_col(page, "day")).to_have_attribute("data-period-key", "2026-08-08")
+        expect(_col(page, "day").locator('[data-role="period-slide"]')).to_have_count(1)
         _col(page, "day").locator('[data-cap="period-mode"]').tap()
         expect(page.locator(SPANS)).to_have_count(1, timeout=5000)
     finally:
