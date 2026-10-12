@@ -23,18 +23,28 @@ export function takeOccurrence(id: string): GoalCard | null {
   return occurrence
 }
 
-/** Whether the occurrence is as the tick left it: not written to since (the server stamps every write), no steps added, no
- *  comment on it. */
-async function untouched(occurrence: GoalCard): Promise<boolean> {
-  const now = await getGoal(occurrence.id)
-  if (now.updated_at !== occurrence.updated_at || now.children.length > 0) return false
+/** The steps an occurrence came with, each with when it was last written, read as soon as the tick has made it. A goal with
+ *  steps comes back with them (`core/repeat.py`, docs/design/goal-menu.md), so they are the tick's own making. `null`: they
+ *  could not be read, and the occurrence is held to having come with none. */
+type CameWith = Promise<Map<string, string> | null>
+function cameWith(occurrence: GoalCard): CameWith {
+  return getGoal(occurrence.id).then((now) => new Map(now.children.map((child) => [child.id, child.updated_at])), () => null)
+}
+
+/** Whether the occurrence is as the tick left it: not written to since (the server stamps every write), its steps the ones it
+ *  came with and none of them written to, no comment on it. */
+async function untouched(occurrence: GoalCard, came: CameWith): Promise<boolean> {
+  const [now, steps] = await Promise.all([getGoal(occurrence.id), came])
+  const own = steps ?? new Map<string, string>()
+  if (now.updated_at !== occurrence.updated_at || now.children.length !== own.size) return false
+  if (now.children.some((child) => own.get(child.id) !== child.updated_at)) return false
   return (await fetchGoalComments(occurrence.id)).threads.length === 0
 }
 
 /** Sends the occurrence to the trash unless someone has touched it. `done`: it is gone, or was left on purpose. */
-async function takeBack(occurrence: GoalCard): Promise<Outcome> {
+async function takeBack(occurrence: GoalCard, came: CameWith): Promise<Outcome> {
   try {
-    if (!(await untouched(occurrence))) return 'done'
+    if (!(await untouched(occurrence, came))) return 'done'
   } catch (err) {
     return err instanceof ApiError && err.status === 404 ? 'done' : 'retry'
   }
@@ -47,19 +57,23 @@ async function takeBack(occurrence: GoalCard): Promise<Outcome> {
 export function withOccurrence(step: Step, first: GoalCard | null): Step {
   if (!first) return step
   let occurrence: GoalCard | null = first
+  let came = cameWith(first)
   const outcomeOf = (result: Outcome | Applied): Outcome => (typeof result === 'string' ? result : result.outcome)
   return {
     ...step,
     async undo(): Promise<Outcome | Applied> {
       const result = await step.undo()
       if (outcomeOf(result) !== 'done' || !occurrence) return result
-      const taken = await takeBack(occurrence)
+      const taken = await takeBack(occurrence, came)
       return typeof result === 'string' ? taken : { ...result, outcome: taken }
     },
     async redo(): Promise<Outcome | Applied> {
       const result = await step.redo()
       // The tick played again made its own occurrence, under its own id, or found the one a person kept.
-      if (outcomeOf(result) === 'done') occurrence = takeOccurrence(step.id)
+      if (outcomeOf(result) === 'done') {
+        occurrence = takeOccurrence(step.id)
+        if (occurrence) came = cameWith(occurrence)
+      }
       return result
     },
   }

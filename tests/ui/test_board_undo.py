@@ -363,6 +363,49 @@ def test_an_occurrence_with_a_comment_on_it_stays_too(ui_f2: UiSession) -> None:
         )
 
 
+def test_the_tick_of_a_repeating_goal_with_steps_takes_back_the_steps_it_brought(ui_f2: UiSession) -> None:
+    """A goal with steps repeats, and its next time comes with the steps (docs/design/goal-menu.md): they are the tick's own
+    making, so undo takes the occurrence back with them. A step written to since is a touch, and the occurrence stays."""
+    session = ui_f2
+    page = board(session)
+    box = '[data-goal-id="SYNDAY01"] > .goal-card__row [data-role="goal-affordance"]'
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        core_goals.update(conn, owner="t1", id="SYNDAY01", repeat={"frequency": "daily", "interval": 1})
+        page.reload()
+        page = board(session)
+        undo, redo = keys(page)
+        series = lambda: conn.execute(  # noqa: E731
+            "SELECT id, repeat_index, done_at IS NOT NULL FROM goals WHERE repeat_series_id = 'SYNDAY01' ORDER BY repeat_index"
+        ).fetchall()
+        steps = lambda occurrence: [row[0] for row in conn.execute(  # noqa: E731
+            "SELECT title FROM goals WHERE parent_id = %s ORDER BY position", (occurrence,)).fetchall()]
+
+        session.gestures.click(box)
+        wait_for(page, lambda: [row[1:] for row in series()], [(0, True), (1, False)], "the tick made the next occurrence")
+        made = series()[1][0]
+        assert steps(made) == ["Collect the sources", "Name the argument", "Cut the first pass"]
+        wait_for(page, lambda: len(writes(session)), 1, "the tick's answer is logged")
+
+        page.keyboard.press(undo)
+        wait_for(page, series, [("SYNDAY01", 0, False)], "undo reopens the goal and takes the occurrence it made away")
+        assert steps(made) == [], "its steps went with it"
+
+        played = len(session.request_log)
+        page.keyboard.press(redo)
+        wait_for(page, lambda: [row[1:] for row in series()], [(0, True), (1, False)], "redo makes the occurrence again")
+        wait_for(page, lambda: [w[0] for w in writes(session, played)], ["PATCH"], "the redo's own write is logged")
+        again = series()[1][0]
+        first_step = conn.execute("SELECT id FROM goals WHERE parent_id = %s ORDER BY position LIMIT 1", (again,)).fetchone()[0]
+        core_goals.update(conn, owner="t1", id=first_step, title="SYN a step renamed")  # touched since the tick
+        start = len(session.request_log)
+
+        page.keyboard.press(undo)
+        undone_and_looked_at(session, page, start, again, "")
+        assert [(row[1], row[2]) for row in series()] == [(0, False), (1, False)], "the goal is reopened, and nothing else"
+        assert series()[1][0] == again and steps(again)[0] == "SYN a step renamed", "a step written to keeps the occurrence"
+        assert [w[0] for w in writes(session, start)] == ["PATCH"], f"no delete: {write_log(session, start)}"
+
+
 def test_a_move_of_a_goal_with_subgoals_is_taken_back_with_the_subgoals_in_their_order(ui_f2: UiSession) -> None:
     """The subgoals nested in a card travel with it (D109) and come back in the order they were drawn in, the goal in its
     slot, the column as it was. Ids are what the server once numbered them by, so the drawn order is set against them."""
