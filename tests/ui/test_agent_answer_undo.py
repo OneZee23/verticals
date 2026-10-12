@@ -290,7 +290,8 @@ def test_the_pill_has_the_notices_own_look_and_stands_inside_the_field_in_both_i
         send(session, f'[tool:update {{"id": "SYNCOL05", "done": true}}] [slow] [say] Your report is ready. [SYN report](#doc/{doc})')
         page.wait_for_timeout(150)
         to_the_board(page)
-        expect(page.locator(".circle-field__answer--note")).to_contain_text("SYN report", timeout=20000)
+        # What an answer links stands under its words as chips (docs/design/agent-chips.md): that is the shape it takes.
+        expect(page.locator(".circle-field__answer--chips")).to_contain_text("SYN report", timeout=20000)
         inside("an answer that links a document")
 
 
