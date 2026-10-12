@@ -121,18 +121,23 @@ def kind(scratch_dir: Path) -> Iterator[tuple[object, _Host]]:
             sys.modules.pop(name, None)
 
 
-def test_the_agent_tells_a_bug_from_a_request_by_its_first_word(kind) -> None:
+def test_the_agent_tells_a_bug_from_a_request_by_the_word_its_first_line_has(kind) -> None:
     module, host = kind
-    for reply, wanted in (("bug", "bug"), ("Bug.", "bug"), (" REQUEST\n", "request"), ("request", "request"), ("**bug**", "bug")):
+    for reply, wanted in (("bug", "bug"), ("Bug.", "bug"), (" REQUEST\n", "request"), ("request", "request"), ("**bug**", "bug"),
+                          ("It is a bug.", "bug"), ("Request\n\nThey would like it to snap.", "request")):
         host.said("answer", reply)
         assert module.ask(host, "The card jumped back", {}) == wanted, reply
+    assert not any("why=" in line for line in host.lines.lines), "each of these was a clear answer"
 
 
 def test_when_it_cannot_tell_the_answer_is_a_request(kind) -> None:
     module, host = kind
-    for reply in ("It is hard to say from this.", "", "bugs", "It is a bug", "42"):
+    # Neither word, both words, a word that only starts with one, a number, nothing, or the word only after the first line.
+    replies = ("It is hard to say from this.", "Not a bug but a request", "bugs", "42", "", "Hmm\nbug")
+    for reply in replies:
         host.said("answer", reply)
         assert module.ask(host, "Something about Fridays", {}) == "request", reply
+    assert len(host.lines.lines) == len(replies)
     assert all(line.startswith("report_kind result=request why=unclear ms=") for line in host.lines.lines), host.lines.lines
 
 

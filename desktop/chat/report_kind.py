@@ -72,9 +72,12 @@ class Alone:
 
 
 def kind_of(reply: str) -> str | None:
-    """The kind an answer names: its first word, in any case and with any punctuation around it; None for anything else."""
-    first = re.match(r"\W*([a-z]+)", (reply or "").lower())
-    return first.group(1) if first and first.group(1) in (BUG, REQUEST) else None
+    """The kind an answer names: the one of the two words its first line has, in any case and with any punctuation around it
+    ("Bug.", "**request**", "It is a bug"). None when it has neither, or both ("not a bug but a request"): then it is a request
+    by default, not by the answer."""
+    lines = (reply or "").strip().splitlines()
+    named = set(re.findall(r"\b(bug|request)\b", lines[0].lower())) if lines else set()
+    return named.pop() if len(named) == 1 else None
 
 
 def ask(chat, words, settings=None, timeout: float = TIMEOUT) -> str:
