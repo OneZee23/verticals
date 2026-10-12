@@ -48,6 +48,7 @@ from verticals.core import goals as core_goals
 from verticals.core import markdown as core_markdown
 from verticals.core import moves as core_moves
 from verticals.core import search as core_search
+from verticals.core.pictures import from_agent
 from verticals.core.errors import VerticalError, ValidationError
 from verticals.mcp import comments as mcp_comments
 from verticals.mcp import docs as mcp_docs
@@ -93,11 +94,11 @@ assert core_goals.MAX_CHILDREN_DEPTH == 8
 # 750-line cap, which this module sat ten lines under before WP-33.
 TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="board", description="The whole day's board in one call: every column, direct children, ancestors and progress.", input_schema=BOARD_SCHEMA),
-    types.Tool(name="goal", description="One goal with its breadcrumb of ancestors and its direct children. Its docs field already includes every document linked to any ancestor, marked with inherited_from — no need to walk the breadcrumb yourself to find them. A doc link is plain markdown in body text ('[label](doc:path)'); doc_link/doc_unlink are the safe verbs for adding or removing one — never link a document an ancestor already links, since every descendant inherits it automatically.", input_schema=GOAL_SCHEMA),
+    types.Tool(name="goal", description="One goal with its breadcrumb of ancestors and its direct children. Its docs field already includes every document linked to any ancestor, marked with inherited_from — no need to walk the breadcrumb yourself to find them. A doc link is plain markdown in body text ('[label](doc:path)'); doc_link/doc_unlink are the safe verbs for adding or removing one — never link a document an ancestor already links, since every descendant inherits it automatically. A picture inside the body comes as [picture 1], [picture 2] and so on, never its data.", input_schema=GOAL_SCHEMA),
     types.Tool(name="outline", description="Render a subtree as one readable markdown outline, every node's id inline.", input_schema=OUTLINE_SCHEMA),
     types.Tool(name="search", description="Full-text and tag search over the owner's goals.", input_schema=SEARCH_SCHEMA),
     types.Tool(name="create", description="Create a goal, optionally with a nested plan of children, in one call.", input_schema=CREATE_SCHEMA),
-    types.Tool(name="update", description="Edit content (title/body/color/tags/done/foil/private/repeat) on one or many goals, or reorder one goal among its siblings. `private` hides a goal and its whole subtree from screenshots while privacy mode is on; it never shows in the app. A repeating goal's next occurrence is materialized when the current one is completed — never by the clock — under the completed row's parent, so a series follows wherever its last instance was moved.", input_schema=UPDATE_SCHEMA),
+    types.Tool(name="update", description="Edit content (title/body/color/tags/done/foil/private/repeat) on one or many goals, or reorder one goal among its siblings. `private` hides a goal and its whole subtree from screenshots while privacy mode is on; it never shows in the app. A repeating goal's next occurrence is materialized when the current one is completed — never by the clock — under the completed row's parent, so a series follows wherever its last instance was moved. A [picture N] placeholder kept in the body of one goal is that picture again.", input_schema=UPDATE_SCHEMA),
     types.Tool(name="schedule", description="Set or clear a goal's vertical and anchor date.", input_schema=SCHEDULE_SCHEMA),
     types.Tool(name="reparent", description="Move a goal under a new parent, or detach it to the root.", input_schema=REPARENT_SCHEMA),
     types.Tool(name="delete", description="Remove a goal. Refuses a non-empty subtree unless cascade is true.", input_schema=DELETE_SCHEMA),
@@ -557,6 +558,9 @@ def _handle_update(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -
         return ok(f"Moved {g.title!r} [{g.id}] after {after_id}", {"goal": goal_dict(g), "last_write_origin": "agent"})
 
     kwargs: dict[str, Any] = {f: args[f] for f in _CONTENT_FIELDS if f in args}
+    if id_ is not None and isinstance(kwargs.get("body"), str) and "[picture " in kwargs["body"]:
+        # The `goal` tool shows a picture as `[picture 1]`; one the agent kept is the picture it stood for (core/pictures.py).
+        kwargs["body"] = from_agent(kwargs["body"], core_goals.goal(conn, owner=owner, id=id_).goal.body)
     if "carryover_ignored_until" in kwargs:
         kwargs["carryover_ignored_until"] = _parse_optional_date(
             kwargs["carryover_ignored_until"], field="carryover_ignored_until"

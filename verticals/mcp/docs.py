@@ -45,6 +45,7 @@ from verticals.core import goals as core_goals
 from verticals.core.docs import MAX_DOC_BODY_BYTES, MAX_DOC_TITLE_CHARS, MAX_PATH_CHARS
 from verticals.core.errors import ValidationError
 from verticals.core.idem import MAX_CLIENT_TOKEN_CHARS
+from verticals.core.pictures import for_agent, from_agent
 from verticals.models import Doc, DocRevision, DocRevisionSummary, DocSummary, GoalLink
 from verticals.mcp.shapes import ok
 
@@ -191,8 +192,8 @@ DOC_UNLINK_SCHEMA: dict[str, Any] = {
 
 TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="doc_create", description="Create a document at a given path, revision 1. A duplicate path for this owner is refused, never silently overwritten. Links between goals and documents live as plain markdown in text — '[label](doc:path)' in a goal's body, '[label](goal:id)' in a document's body — but doc_link/doc_unlink are the safe verbs for editing a goal's side; use them instead of hand-writing the link. A goal already inherits every document its ancestors link (see the goal tool's inherited_from) — do not link the same document again on a descendant goal.", input_schema=DOC_CREATE_SCHEMA),
-    types.Tool(name="doc_get", description="Read one document in full, by id or by path, including every goal it links to or is linked from. linked_goals is derived from '[label](goal:id)' markdown links in this document's own body — doc_link/doc_unlink manage the same relationship from a goal's side, safely, without hand-editing text.", input_schema=DOC_GET_SCHEMA),
-    types.Tool(name="doc_save", description="Edit a document's title, body or path. Optimistically locked on expected_revision; every save appends a new revision, nothing is ever rewritten in place. A link a goal holds to this document lives in the GOAL's own body, not here, so it survives any doc_save untouched. A goal already inherits every document its ancestors link — do not link the same document again on a descendant goal.", input_schema=DOC_SAVE_SCHEMA),
+    types.Tool(name="doc_get", description="Read one document in full, by id or by path, including every goal it links to or is linked from. linked_goals is derived from '[label](goal:id)' markdown links in this document's own body — doc_link/doc_unlink manage the same relationship from a goal's side, safely, without hand-editing text. A picture inside the text comes as [picture 1], [picture 2] and so on, never its data; keep those where they are in a body you save and the pictures stay.", input_schema=DOC_GET_SCHEMA),
+    types.Tool(name="doc_save", description="Edit a document's title, body or path. Optimistically locked on expected_revision; every save appends a new revision, nothing is ever rewritten in place. A link a goal holds to this document lives in the GOAL's own body, not here, so it survives any doc_save untouched. A [picture N] placeholder you kept in the body is the document's Nth picture again. A goal already inherits every document its ancestors link — do not link the same document again on a descendant goal.", input_schema=DOC_SAVE_SCHEMA),
     types.Tool(name="doc_tree", description="Every document for this owner, flat and path-ordered — derive your own folder grouping from the '/' separators yourself.", input_schema=DOC_TREE_SCHEMA),
     types.Tool(name="doc_history", description="A document's revision list, oldest first: revision number, path, title and body length per revision — never the body text itself.", input_schema=DOC_HISTORY_SCHEMA),
     types.Tool(name="doc_revision", description="One past revision of a document in full, including its body text.", input_schema=DOC_REVISION_SCHEMA),
@@ -208,7 +209,10 @@ TOOLS: tuple[types.Tool, ...] = (
 # `doc_revision_to_json`/`doc_revision_detail_to_json` (S-33's own reasoning, carried over from
 # goals to docs by WP-1: a card never carries `body`; the one detail shape does). Datetimes go
 # through `.isoformat()`, matching `verticals/mcp/shapes.py::goal_dict` — JSON has no datetime
-# type, and the MCP wire is JSON same as HTTP's.
+# type, and the MCP wire is JSON same as HTTP's. One difference from HTTP: a picture inside a body
+# (a data URL, hundreds of kilobytes for a report's screenshots) comes as a short placeholder,
+# `[picture 1]`, and every word as it is (core/pictures.py); `handle_doc_save` turns a placeholder
+# the agent kept back into its picture.
 
 
 def _doc_summary_dict(d: DocSummary) -> dict[str, Any]:
@@ -220,7 +224,7 @@ def _doc_detail_dict(d: Doc, *, links: tuple[GoalLink, ...] = ()) -> dict[str, A
         "id": d.id,
         "path": d.path,
         "title": d.title,
-        "body": d.body,
+        "body": for_agent(d.body),
         "revision": d.revision,
         "created_at": d.created_at.isoformat(),
         "updated_at": d.updated_at.isoformat(),
@@ -233,7 +237,7 @@ def _doc_revision_summary_dict(r: DocRevisionSummary) -> dict[str, Any]:
 
 
 def _doc_revision_detail_dict(r: DocRevision) -> dict[str, Any]:
-    return {"doc_id": r.doc_id, "revision": r.revision, "path": r.path, "title": r.title, "body": r.body, "saved_at": r.saved_at.isoformat()}
+    return {"doc_id": r.doc_id, "revision": r.revision, "path": r.path, "title": r.title, "body": for_agent(r.body), "saved_at": r.saved_at.isoformat()}
 
 
 # --- handlers -----------------------------------------------------------------------------------
@@ -255,13 +259,18 @@ def handle_doc_get(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -
 
 
 def handle_doc_save(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
+    body = args.get("body")
+    if isinstance(body, str) and "[picture " in body:
+        # What the agent read showed each picture as `[picture N]`: one it kept is the picture it stood for in the text this
+        # save replaces (the save is locked on that text's revision), so editing words never costs a document its pictures.
+        body = from_agent(body, core_docs.get(conn, owner=owner, id=args["id"]).body)
     updated = core_docs.save(
         conn,
         owner=owner,
         id=args["id"],
         expected_revision=args["expected_revision"],
         title=args.get("title"),
-        body=args.get("body"),
+        body=body,
         path=args.get("path"),
     )
     return ok(f"Saved doc [{updated.doc.id}] as revision {updated.doc.revision}", {"doc": _doc_detail_dict(updated.doc)})
