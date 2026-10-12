@@ -5,6 +5,10 @@
 // a click anywhere else, ends it sooner, and the pointer on it holds the time (`lib/fieldNotice.ts`). It lives in its own
 // component so the field (`SearchBar.vue`) is not touched; the field is hidden while the notice is up, by one attribute on
 // the page, so the two never stand in the same place.
+// A question (⌘Z asking whose change it meant, docs/design/agent-answer-undo.md) is the same pill with "Take back" and the
+// candidates as pills. When that is wider than the window, "Take back" keeps a row of its own and the pills go under it, side
+// by side while they fit and one under the other when they do not; a pill is never wider than the notice, its goal's title is
+// cut with “…” and the words around the title never are, unless the words alone are too wide, and then they go on to a second line.
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editsText } from '../lib/boardHistory'
 import { dismiss, hold, notice, release, type NoticeChoice, type Segment } from '../lib/fieldNotice'
@@ -18,42 +22,83 @@ const choiceEls = ref<HTMLElement[]>([])
 /** The titles as the notice shows them, by the place of their segment (`L:2` in the line, `1:2` in the second pill): whole, or cut
  *  to fit. */
 const cuts = ref<Record<string, string>>({})
+/** A question that does not fit on one row: its words on a row of their own, the pills under them. */
+const stacked = ref(false)
+/** The pills (by their place) whose words go on to a second line, because they are too wide for the notice with their title
+ *  cut to its dots. */
+const wrapped = ref<Record<string, boolean>>({})
 let fitting = 0
 
-const overflows = (el: HTMLElement): boolean => el.scrollWidth > el.clientWidth
+/** Two lines at 15/22 with 9 px above and below: as tall as a pill whose words go on to a second line may be. */
+const TWO_LINES = 62
 
-/* A title that does not fit is cut in the text, so the “…” stands right after its last letter, with no space before it and
-   the quote right after it (the browser's ellipsis cuts at a pixel and leaves gaps). The pill is as wide as its words up to
-   its largest, so a line that overflows is one that is cut short: the longest start of the title that does not overflow is
-   found by halving. Everything runs before the next frame, so the whole title is never drawn. */
-async function fit(): Promise<void> {
-  const mine = (fitting += 1)
-  cuts.value = {}
-  await nextTick()
-  const spills = (): boolean => !!line.value && (overflows(line.value) || choiceEls.value.some(overflows))
-  if (mine !== fitting || !line.value || !spills()) return
-  const quotes = (segments: Segment[], where: string) =>
-    segments.flatMap((part, at) => ('quote' in part ? [{ key: `${where}:${at}`, text: part.quote, length: glyphs(part.quote).length }] : []))
-  const titles = [...quotes(notice.segments, 'L'), ...notice.choices.flatMap((choice, at) => quotes(choice.label, String(at)))]
+const overflows = (el: HTMLElement): boolean => el.scrollWidth > el.clientWidth
+const runsOver = (el: HTMLElement): boolean => (wrapped.value[el.dataset.choice ?? ''] ? el.scrollHeight > TWO_LINES : overflows(el))
+
+interface Title { key: string; text: string; length: number }
+
+/** The longest start of the titles that does not run over, found by halving. Two titles (“into”, “out of”) give up the same share of
+ *  their length. `false`: another notice has come, or this one has gone. */
+async function shorten(mine: number, titles: Title[], spills: () => boolean): Promise<boolean> {
   const longest = Math.max(0, ...titles.map((title) => title.length))
-  // Two titles (“into”, “out of”) give up the same share of their length.
   const cutTo = (keep: number): Record<string, string> =>
     Object.fromEntries(titles.map((title) => [title.key, cutTitle(title.text, Math.round((title.length * keep) / longest))]))
   let fits = 0
   let over = longest
   while (fits < over - 1) {
     const middle = Math.ceil((fits + over) / 2)
-    cuts.value = cutTo(middle)
+    cuts.value = { ...cuts.value, ...cutTo(middle) }
     await nextTick()
-    if (mine !== fitting || !line.value) return
+    if (mine !== fitting || !line.value) return false
     if (spills()) over = middle
     else fits = middle
   }
-  cuts.value = cutTo(fits)
+  cuts.value = { ...cuts.value, ...cutTo(fits) }
+  await nextTick()
+  return mine === fitting && !!line.value
+}
+
+/* A title that does not fit is cut in the text, so the “…” stands right after its last letter, with no space before it and
+   the quote right after it (the browser's ellipsis cuts at a pixel and leaves gaps). The pill is as wide as its words up to
+   its largest, so a line that overflows is one that is cut short: the longest start of the title that does not overflow is
+   found by halving. A question goes onto more rows before any title is cut, and then each pill is cut to its own row. Everything
+   runs before the next frame, so the whole title is never drawn. */
+async function fit(): Promise<void> {
+  const mine = (fitting += 1)
+  cuts.value = {}
+  stacked.value = false
+  wrapped.value = {}
+  await nextTick()
+  const spills = (): boolean => !!line.value && (overflows(line.value) || choiceEls.value.some(runsOver))
+  if (mine !== fitting || !line.value || !spills()) return
+  const quotes = (segments: Segment[], where: string): Title[] =>
+    segments.flatMap((part, at) => ('quote' in part ? [{ key: `${where}:${at}`, text: part.quote, length: glyphs(part.quote).length }] : []))
+  if (!notice.choices.length) {
+    await shorten(mine, quotes(notice.segments, 'L'), spills)
+    return
+  }
+  stacked.value = true
+  await nextTick()
+  for (const [at, choice] of notice.choices.entries()) {
+    const own = (): HTMLElement | undefined => choiceEls.value.find((el) => el.dataset.choice === String(at))
+    const runsOverAlone = (): boolean => !!own() && runsOver(own()!)
+    if (mine !== fitting) return
+    if (!runsOverAlone()) continue
+    const titles = quotes(choice.label, String(at))
+    if (!(await shorten(mine, titles, runsOverAlone))) return
+    // The words alone are wider than the notice, with the title down to its dots: they go on to a second line, and the title takes
+    // back the room that gives.
+    if (own() && overflows(own()!)) {
+      wrapped.value = { ...wrapped.value, [String(at)]: true }
+      await nextTick()
+      if (!(await shorten(mine, titles, runsOverAlone))) return
+    }
+  }
 }
 
 // `sync`: the field is shown again in the same task as the key that asks for it, or it could not take the focus (see below).
 watch(() => notice.open, (open) => document.documentElement.toggleAttribute('data-field-notice', open), { immediate: true, flush: 'sync' })
+watch(() => notice.seq, () => { stacked.value = false; wrapped.value = {}; cuts.value = {} }, { flush: 'pre' })
 watch(() => notice.seq, () => void fit(), { flush: 'post' })
 const refit = (): void => { if (notice.open) void fit() }
 
@@ -111,7 +156,11 @@ onBeforeUnmount(() => {
       v-if="notice.open"
       ref="pill"
       class="field-notice"
-      :class="{ 'field-notice--bare': !notice.action && !notice.choices.length, 'field-notice--question': notice.choices.length > 0 }"
+      :class="{
+        'field-notice--bare': !notice.action && !notice.choices.length,
+        'field-notice--question': notice.choices.length > 0,
+        'field-notice--stacked': stacked && notice.choices.length > 0,
+      }"
       data-role="field-notice"
       role="status"
       aria-live="polite"
@@ -130,7 +179,9 @@ onBeforeUnmount(() => {
         ref="choiceEls"
         type="button"
         class="field-notice__action field-notice__choice"
+        :class="{ 'field-notice__choice--wrapped': wrapped[at] }"
         data-role="field-notice-choice"
+        :data-choice="at"
         @click="pick(choice)"
       >
         <template v-for="(part, place) in choice.label" :key="place">
@@ -174,7 +225,16 @@ onBeforeUnmount(() => {
    not allow, so this stands on two classes. */
 .field-notice--question { gap: 12px; max-width: min(640px, calc(100vw - 32px)); }
 .field-notice--question .field-notice__line { flex: none; }
-.field-notice__action.field-notice__choice { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: pre; }
+.field-notice__action.field-notice__choice { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; white-space: pre; }
+/* A question wider than the window: "Take back" on a row of its own, the pills under it, side by side while they fit and one
+   under the other when they do not, every pill within the notice. Rows are 40 px, 8 px apart, 12 px from the edge, as the pill
+   stands 12 px from the edge of the single row. */
+.field-notice--stacked { flex-wrap: wrap; height: auto; min-height: 64px; gap: 8px; padding: 12px; }
+.field-notice--stacked .field-notice__line { flex: 0 0 100%; align-items: center; height: 40px; padding-left: 20px; }
+/* A pill whose words alone are too wide for the notice: they run on as text and go on to a second line. */
+.field-notice__action.field-notice__choice--wrapped { display: block; height: auto; min-height: 40px; padding-block: 9px; text-align: left; white-space: normal; }
+.field-notice__choice--wrapped .field-notice__quote { display: inline; }
+.field-notice__choice--wrapped .field-notice__title { white-space: normal; }
 /* Nothing in the line shrinks: a title too long for it is cut in the text by the component (so the “…” stands right after
    its last letter), and `overflow` only keeps a line that still does not fit, in a very narrow window, off the button. */
 .field-notice__line { display: flex; flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; white-space: pre; }
