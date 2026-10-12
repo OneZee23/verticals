@@ -591,6 +591,62 @@ def test_the_bars_are_buttons_named_by_the_columns_kind(ui_f2: UiSession) -> Non
             expect(column.get_by_role("button", name=name, exact=True)).to_have_count(1)
 
 
+# Where each of a column's three buttons and five bars stands, in px from the column's own top left.
+_GEOMETRY = """(vertical) => {
+  const col = document.querySelector(`[data-role="column-strip"] > [data-vertical="${vertical}"]`);
+  const box = col.getBoundingClientRect();
+  const rel = (el) => { const r = el.getBoundingClientRect(); return [r.left - box.left, r.top - box.top, r.width, r.height].map((v) => Math.round(v * 100) / 100); };
+  return {
+    width: box.width,
+    boxes: Object.fromEntries([...col.querySelectorAll('.column-bars__button')].map((b) => [b.dataset.cap, rel(b)])),
+    bars: [...col.querySelectorAll('.column-bars__bar')].map(rel),
+  };
+}"""
+
+
+def test_the_three_boxes_do_not_overlap_and_the_side_boxes_grow_outward(ui_f2: UiSession) -> None:
+    """The sign's marks stand as drawn and only the invisible boxes grow, outward from it: the left one to 24 px, the right
+    one to the column's own edge, which is as far as that edge allows (the sign stands 22 px from it), and the middle one
+    keeps its 18. All three are 28 px tall, the line's height, and none overlaps another."""
+    page = _open(ui_f2)
+    _hover(page, "week")
+    geometry = page.evaluate(_GEOMETRY, "week")
+    prev, mode, nxt = (geometry["boxes"][cap] for cap in ("period-prev", "period-mode", "period-next"))
+    left = lambda box: box[0]  # noqa: E731
+    right = lambda box: box[0] + box[2]  # noqa: E731
+    assert right(prev) <= left(mode) + 0.01 and right(mode) <= left(nxt) + 0.01, "none overlaps another"
+    assert (prev[2], mode[2]) == (24, 18) and nxt[2] == 19
+    assert right(nxt) == pytest.approx(geometry["width"], abs=0.01), "the right box stops at the column's edge, not beyond"
+    assert [box[3] for box in (prev, mode, nxt)] == [28, 28, 28] and [box[1] for box in (prev, mode, nxt)] == [0, 0, 0]
+    # every mark is inside its own box
+    bars = geometry["bars"]
+    for box, mark in ((prev, bars[0]), (mode, bars[1]), (mode, bars[2]), (mode, bars[3]), (nxt, bars[4])):
+        assert left(box) <= left(mark) and right(mark) <= right(box) + 0.01, (box, mark)
+
+
+def test_the_left_box_stops_where_the_words_of_the_kind_line_end(ui_f2: UiSession) -> None:
+    """A 1320 px window with the Quarter column open leaves the others 160 px, and Week's kind line, "Week · May ’27",
+    fills its room: it ends 4 px from the first bar. The left box grows no further left than that, so it never covers the
+    words, though it is smaller than 24 px there; Day's short "Day · ’27" leaves the whole 24 px."""
+    page = _open(ui_f2, "2027-05-12", width=1320)
+    expand_column(page, "quarter")
+    expect(_col(page, "week").locator(".column-header__sub-label")).to_have_text("Week · May ’27", timeout=5000)
+    page.wait_for_timeout(600)
+    ends = page.evaluate(
+        """() => Object.fromEntries(['day', 'week'].map((v) => {
+          const col = document.querySelector(`[data-role="column-strip"] > [data-vertical="${v}"]`);
+          const word = col.querySelector('[data-role="column-line-kind"]'); const range = document.createRange(); range.selectNodeContents(word);
+          return [v, [range.getBoundingClientRect().right - col.getBoundingClientRect().left, col.getBoundingClientRect().width]];
+        }))""")
+    assert ends["week"][1] == pytest.approx(160, abs=1.5), ends
+    week = page.evaluate(_GEOMETRY, "week")["boxes"]
+    assert week["period-prev"][0] >= ends["week"][0] - 0.5, f"the left box starts at {week['period-prev'][0]:.1f}, the words end at {ends['week'][0]:.1f}"
+    assert 8 <= week["period-prev"][2] < 24
+    assert (week["period-mode"][2], week["period-next"][2]) == (18, 19), "the others keep their sizes"
+    day = page.evaluate(_GEOMETRY, "day")["boxes"]
+    assert day["period-prev"][2] == 24 and day["period-prev"][0] >= ends["day"][0]
+
+
 def test_the_keyboard_reaches_every_bar_and_shows_them(ui_f2: UiSession) -> None:
     """Tab goes through a column's three bars, which come first in it, whether the pointer is there or not, and a bar in
     focus brings its sides into view; Enter pages, Space opens the mode, Esc leaves it."""
@@ -631,6 +687,8 @@ def test_on_touch_the_side_bars_stay_in_view(ui_f2: UiSession) -> None:
         bars = _wait_bars(page, "day", 5)
         assert [bar["color"] for bar in bars] == [LIGHT, LIGHT, INK, LIGHT, LIGHT], bars
         assert bars[-1]["right"] == pytest.approx(MARGIN, abs=0.01)
+        heights = {cap: box[3] for cap, box in page.evaluate(_GEOMETRY, "day")["boxes"].items()}
+        assert heights == {"period-prev": 44, "period-mode": 44, "period-next": 44}, "a finger's boxes are 44 px tall"
         _col(page, "day").locator('[data-cap="period-next"]').tap()
         expect(_col(page, "day")).to_have_attribute("data-period-key", "2026-08-09")
         _col(page, "day").locator('[data-cap="period-mode"]').tap()
