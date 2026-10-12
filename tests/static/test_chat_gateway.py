@@ -432,7 +432,7 @@ def test_a_log_that_cannot_be_opened_stops_nothing(scratch_dir) -> None:
     try:
         gateway.log.info("tool name=schedule")  # says nothing, and does not fail
         assert not gateway.log.handlers
-        assert (scratch_dir / "chat-mcp.json").exists()  # the gateway started
+        assert (scratch_dir / "chat-workspace").is_dir()  # the gateway started: its agents' folder is made last
     finally:
         gateway.shutdown()
 
