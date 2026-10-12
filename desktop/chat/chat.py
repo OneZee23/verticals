@@ -764,6 +764,8 @@ class Session:
         self.chat, self.id = chat, id
         self.agent = None
         self.events, self.seq = [], 0
+        self.flow = None                 # the morning report's turns, while there are several (morning_flow.py)
+        self.holding = None              # the flow keeps a turn's words here until it knows which turn is the last
         self.cond = threading.Condition()
         self.running = False
         self.queue = []                  # (text, context, settings) sent after the current turn
@@ -771,8 +773,6 @@ class Session:
         self.settings = {}
         self.started_at = None
         self.reply = ""                  # text of the agent's current reply, for handoffs
-        self.flow = None                 # the morning report's turns, while there are several (morning_flow.py)
-        self.holding = None              # the flow keeps a turn's words here until it knows which turn is the last
 
     # -- events
 
