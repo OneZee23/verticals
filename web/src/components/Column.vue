@@ -12,14 +12,20 @@ import type { SpanScale } from '../lib/spans'
 import { store } from '../store'
 import { playSound } from '../lib/sound'
 import type { PeriodDirection } from '../lib/periodNavigation'
-import type { GoalCardData } from '../types'
+import type { GoalCardData, NameForm } from '../types'
 import { filterActive } from '../lib/commandFilter'
 
 const props = withDefaults(
   defineProps<{
     vertical: string
+    /** The column's name, its period, in full (docs/design/column-names.md). */
     title: string
+    /** The kind, small above the name. */
     subLabel?: string
+    /** The name in shorter forms, longest first, for where the column's room is short: its header shows the first that fits. */
+    shorter?: NameForm[]
+    /** The accessible name: the full name with full years, whichever form is on screen. */
+    label?: string
     active?: boolean
     deckActive?: boolean
     deckMain?: boolean
@@ -34,7 +40,7 @@ const props = withDefaults(
     end?: string
   }>(),
   {
-    subLabel: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
+    subLabel: '', shorter: () => [], label: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
     periodDirection: 1, periodSwapId: 0, span: false, end: '',
   },
 )
@@ -62,6 +68,9 @@ function onAdd(title: string) {
 function onHeaderClick(): void {
   if (!props.span) store.toggleExpandedColumn(props.vertical)
 }
+/* The column's accessible name says the full name of its header, the kind first as they read, whichever form of it is on
+   screen (docs/design/column-names.md). A span has no forms, so its own words are its name. */
+const accessibleName = computed(() => props.label || [props.subLabel, props.title].filter(Boolean).join(', '))
 /* While a goal is dragged the dots take the period controls' place; a span has neither (S5.P2.017, .019). */
 const dragging = computed(() => store.state.drag.id !== null)
 
@@ -136,6 +145,7 @@ interface PeriodSlide {
   id: number
   title: string
   subLabel: string
+  shorter: NameForm[]
   goals: GoalCardData[]
   periodKey: string | null
   state: SlideState
@@ -147,6 +157,7 @@ function snapshot(state: SlideState): PeriodSlide {
     id: ++slideId,
     title: props.title,
     subLabel: props.subLabel,
+    shorter: props.shorter,
     goals: [...props.goals],
     periodKey: props.periodKey,
     state,
@@ -193,7 +204,7 @@ watch(
       return
     }
     if (props.periodKey === latest.periodKey) {
-      latest = { ...latest, title: props.title, subLabel: props.subLabel, goals: [...props.goals] }
+      latest = { ...latest, title: props.title, subLabel: props.subLabel, shorter: props.shorter, goals: [...props.goals] }
       if (slides.value.length === 1) slides.value = [latest]
       return
     }
@@ -232,7 +243,7 @@ watch(
 )
 
 watch(
-  () => [props.title, props.subLabel, props.goals, props.periodKey] as const,
+  () => [props.title, props.subLabel, props.shorter, props.goals, props.periodKey] as const,
   () => {
     if (slides.value.length !== 1) return
     /* Ordinary writes update the current slide without changing its key. Remounting the whole
@@ -241,6 +252,7 @@ watch(
       ...slides.value[0],
       title: props.title,
       subLabel: props.subLabel,
+      shorter: props.shorter,
       goals: [...props.goals],
       periodKey: props.periodKey,
       state: 'current',
@@ -289,6 +301,8 @@ onBeforeUnmount(() => swapAnimation?.cancel())
     }"
     :data-vertical="vertical"
     :data-period-key="periodKey ?? ''"
+    role="group"
+    :aria-label="accessibleName"
   >
     <ColumnDots v-if="dragging && vertical !== 'life' && vertical !== 'maybe' && !span" :vertical="vertical as SpanScale" />
     <div v-else-if="vertical !== 'life' && !span" class="column-period-controls" data-cap="period-nav">
@@ -333,6 +347,7 @@ onBeforeUnmount(() => swapAnimation?.cancel())
         <ColumnHeader
           :title="slide.title"
           :sub-label="slide.subLabel"
+          :shorter="slide.shorter"
           :end="end"
           :data-cap="span ? undefined : 'column-expand'"
           @click="onHeaderClick"

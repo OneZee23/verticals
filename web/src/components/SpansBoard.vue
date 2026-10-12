@@ -138,6 +138,8 @@ watch(() => spans.side, async () => {
         :vertical="floating.vertical"
         :title="floating.title"
         :sub-label="floating.subLabel"
+        :shorter="floating.shorter"
+        :label="floating.label"
         :goals="floating.goals"
         :period-key="floating.periodKey"
         :add-placeholder="floating.addPlaceholder"
