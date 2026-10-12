@@ -173,13 +173,11 @@ body.pattern-vertical-board__no-select * {
 }
 
 .pattern-vertical-board__drag-overlay {
-  /* `fixed`, not `absolute`: the overlay tracks the raw viewport pointer position `Board.tsx`'s
-     own `overlayStyle` computes, with no ancestor offset to account for. `pointer-events: none`
-     is load-bearing, not decorative — without it this element itself would be what `lib/
-     drag.ts::hitTest`'s `elementFromPoint` finds under the cursor on every frame, since it is
-     the topmost thing painted there. */
-  position: fixed;
-  z-index: 2147483647;
+  /* Fills the box dnd-kit's DragOverlay holds at the pointer (DragOverlay.tsx). `pointer-events: none` (on that box too) is
+     load-bearing: without it this element would be what `lib/drag.ts::hitTest`'s `elementFromPoint` finds under the
+     cursor on every frame, since it is the topmost thing painted there. */
+  position: absolute;
+  inset: 0;
   pointer-events: none;
   box-sizing: border-box;
   /* The card-look wrapper `cloneRenderedRow` builds BLEEDS the card's own padding beyond this
@@ -188,5 +186,4 @@ body.pattern-vertical-board__no-select * {
   overflow: visible;
   box-shadow: none;
   opacity: 1;
-  will-change: left, top, width, height;
 }

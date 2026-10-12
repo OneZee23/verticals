@@ -1,7 +1,9 @@
-/* The flying goal while it is dragged and while it settles: a pointer-transparent
-   clone of the rendered row at its grab offset, and the live measure of the drop preview. The clone is taken in a
-   `flush: 'sync'` watcher, at the change of the drag's id, before the board draws the source row as a ghost. */
-import { useCallback, type Ref as ReactRef } from 'react'
+/* The flying goal while it is dragged and while it settles, in dnd-kit's DragOverlay: a pointer-transparent clone of the
+   rendered row at its grab offset, and the live measure of the drop preview. The clone is taken in a `flush: 'sync'`
+   watcher, at the change of the drag's id, before the board draws the source row as a ghost. dnd-kit holds the overlay at
+   the pointer and keeps it through the landing, which flies it to where the goal settles (lib/dragSettle.ts). */
+import { DragOverlay as DndOverlay, type DropAnimationFunction, type Modifier } from '@dnd-kit/core'
+import { useCallback, type CSSProperties, type Ref as ReactRef } from 'react'
 import { computed, nextTick, shallowRef, watch, type Ref } from '../reactivity'
 import { store } from '../store'
 import { SETTLE_EASING } from '../lib/drag'
@@ -177,12 +179,62 @@ function renderedRowHeightAtWidth(id: string, width: number): number | null {
 }
 
 /** The root's own element ref and the parent's `ref` on one element, as one stable callback. */
+/** The clone waiting for the overlay's element, which dnd-kit draws once the drag has started. */
+let pendingClone: HTMLElement | null = null
+
 function useRootRef(own: Ref<HTMLElement | null>, outer: ReactRef<HTMLDivElement> | undefined): (node: HTMLDivElement | null) => void {
   return useCallback((node: HTMLDivElement | null) => {
     own.value = node
+    if (node && pendingClone) {
+      node.replaceChildren(pendingClone)
+      pendingClone = null
+    }
     if (typeof outer === 'function') outer(node)
     else if (outer) outer.current = node
   }, [own, outer])
+}
+
+/** The overlay's corner on the pointer; its own `translate` takes it back by the grab's share of its size. */
+const toPointer: Modifier = ({ transform, activatorEvent, activeNodeRect }) => {
+  if (!(activatorEvent instanceof PointerEvent) || !activeNodeRect) return transform
+  return {
+    ...transform,
+    x: activatorEvent.clientX + transform.x - activeNodeRect.left,
+    y: activatorEvent.clientY + transform.y - activeNodeRect.top,
+  }
+}
+
+/** The landing: from where it was let go to where it settles, in the settle's time and curve, growing into the box it
+ *  lands in. No settle (kept above the field), no flight. */
+const settle: DropAnimationFunction = async ({ dragOverlay, transform }) => {
+  const settling = store.state.drag.settling
+  if (!settling) return
+  const d = store.state.drag
+  const node = dragOverlay.node
+  const from = getComputedStyle(node)
+  const base = { left: parseFloat(from.left) || 0, top: parseFloat(from.top) || 0 }
+  const fx = d.width ? d.offsetX / d.width : 0
+  const fy = d.height ? d.offsetY / d.height : 0
+  const width = settling.width ?? d.width
+  const height = settling.height ?? d.height
+  node.animate([
+    { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, width: from.width, height: from.height },
+    {
+      transform: `translate3d(${settling.left + fx * width - base.left}px, ${settling.top + fy * height - base.top}px, 0)`,
+      width: `${width}px`,
+      height: `${height}px`,
+    },
+  ], { duration: settling.duration, easing: SETTLE_EASING, fill: 'forwards' })
+  // It stays, landed, until the goal's own row shows again (the settle's grace after the flight, or a press that ends it at
+  // once) and has been drawn: never a frame with neither, and the flight is not undone under it.
+  let stop: (() => void) | null = null
+  await new Promise<void>((resolve) => {
+    stop = watch(() => store.state.drag.settling, (now) => {
+      if (now !== settling) resolve()
+    }, { flush: 'sync' })
+  })
+  ;(stop as (() => void) | null)?.()
+  await new Promise((resolve) => requestAnimationFrame(resolve))
 }
 
 interface Props {
@@ -229,7 +281,8 @@ export const DragOverlay = tracked(function DragOverlay({ ref: outer, ...attrs }
         if (!id) return
         const clone = cloneFamily(id) ?? cloneRenderedRow(id)
         if (!clone) return
-        void nextTick(() => overlayHost.value?.replaceChildren(clone))
+        if (overlayHost.value) overlayHost.value.replaceChildren(clone)
+        else pendingClone = clone
       },
       { flush: 'sync' },
     )
@@ -292,56 +345,43 @@ export const DragOverlay = tracked(function DragOverlay({ ref: outer, ...attrs }
       { flush: 'post' },
     )
 
-    const overlayStyle = computed(() => {
+    // The box dnd-kit holds at the pointer: the goal takes the size of the slot under it before it lands, one flying with
+    // its subtasks keeps its own; the grab point is a share of the box, so it stays under the hand while the box changes size.
+    const overlayStyle = computed((): CSSProperties => {
       const d = store.state.drag
-      // The grab point is a share of the box, so it stays under the hand while the box changes size.
       const fx = d.width ? d.offsetX / d.width : 0
       const fy = d.height ? d.offsetY / d.height : 0
-      const grab = { translate: `${-fx * 100}% ${-fy * 100}%`, '--grab-x': `${fx * 100}%`, '--grab-y': `${fy * 100}%` }
-      if (d.settling) {
-        const { duration } = d.settling
-        // A pointer-up can beat the destination's measure; the settle carries the size too.
-        const width = d.settling.width ?? d.width
-        const height = d.settling.height ?? d.height
-        return {
-          ...grab,
-          left: `${d.settling.left + fx * width}px`,
-          top: `${d.settling.top + fy * height}px`,
-          width: `${width}px`,
-          height: `${height}px`,
-          transition: [
-            `left ${duration}ms ${SETTLE_EASING}`,
-            `top ${duration}ms ${SETTLE_EASING}`,
-            `width ${duration}ms ${SETTLE_EASING}`,
-            `height ${duration}ms ${SETTLE_EASING}`,
-          ].join(', '),
-        }
-      }
-      // A goal takes the size of the slot under it before it lands; one flying with its subtasks keeps its own.
       const sized = d.tailHeight === 0
       return {
-        ...grab,
-        left: `${d.x}px`,
-        top: `${d.y}px`,
+        pointerEvents: 'none',
+        boxSizing: 'border-box',
         width: `${sized ? d.previewWidth : d.width}px`,
         height: `${sized ? d.previewHeight : d.height}px`,
+        translate: `${-fx * 100}% ${-fy * 100}%`,
         transition: reducedMotion() ? 'none' : 'width 200ms var(--vt-ease-large), height 200ms var(--vt-ease-large)',
       }
     })
-    return { overlayHost, dragVisualId, light, overlayStyle }
+    const grab = computed(() => {
+      const d = store.state.drag
+      return { '--grab-x': `${d.width ? (d.offsetX / d.width) * 100 : 0}%`, '--grab-y': `${d.height ? (d.offsetY / d.height) * 100 : 0}%` }
+    })
+    return { overlayHost, dragVisualId, light, overlayStyle, grab }
   })
   const rootRef = useRootRef(s.overlayHost, outer)
-  if (!s.dragVisualId.value) return null
   const light = s.light.value
   return (
-    <div
-      {...fallthrough({
-        ref: rootRef,
-        className: cx('pattern-vertical-board__drag-overlay', { 'drag-overlay--melted': dots.melted, 'drag-overlay--lit': light }),
-        'data-role': 'drag-overlay',
-        'data-dnd-overlay': '',
-        style: sx(s.overlayStyle.value, light ?? {}),
-      }, attrs)}
-    />
+    <DndOverlay zIndex={2147483647} modifiers={[toPointer]} dropAnimation={settle} style={s.overlayStyle.value}>
+      {s.dragVisualId.value ? (
+        <div
+          {...fallthrough({
+            ref: rootRef,
+            className: cx('pattern-vertical-board__drag-overlay', { 'drag-overlay--melted': dots.melted, 'drag-overlay--lit': light }),
+            'data-role': 'drag-overlay',
+            'data-dnd-overlay': '',
+            style: sx(s.grab.value, light ?? {}),
+          }, attrs)}
+        />
+      ) : null}
+    </DndOverlay>
   )
 })

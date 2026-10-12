@@ -190,8 +190,10 @@ export async function glideThrough<T>(run: () => Promise<T>, lead: string | null
   const job = run().finally(() => { finished = true })
   job.catch(() => undefined)
   // The first look is in the task that made the change: a board that moved as the key was handled is read once it is drawn,
-  // before any frame, so no frame can show a card in its new place that the glide has not started from.
+  // before any frame, so no frame can show a card in its new place that the glide has not started from. The change comes a
+  // few microtasks after `run` starts (it reads the goal as the board holds it first), so the look waits for it in this task.
   await nextTick()
+  for (let hops = 0; hops < 20 && !finished && !moved(before); hops += 1) await nextTick()
   for (let frames = 0; frames < GIVE_UP_FRAMES; frames += 1) {
     if (moved(before)) {
       play(before, lead, departing)
