@@ -16,7 +16,7 @@ from verticals.core import comments as core_comments, goals as core_goals
 from tests.ui.conftest import UiSession, activate_column
 from tests.ui.views import switch_view
 from tests.ui.undo_helpers import (
-    ACTION, GRIP, column_ids, expect_no_notice, expect_notice, family, goal, keys, wait_for, writes,
+    ACTION, GRIP, column_ids, expect_no_notice, expect_notice, family, goal, keys, wait_for, write_log, writes,
 )
 
 TICK = '[data-goal-id="SYNCOL01"] > .goal-card__row label.checkbox'
@@ -268,6 +268,8 @@ def repeating_tick(session: UiSession) -> tuple[Page, psycopg.Connection, Callab
     ).fetchall()
     session.gestures.click(TICK)
     wait_for(page, lambda: [row[1:] for row in series()], [(0, True), (1, False)], "the tick made the next occurrence")
+    # The database has the tick before the page has logged its answer: a scenario that counts the writes after this waits for it.
+    wait_for(page, lambda: len(writes(session)), 1, "the tick's answer is logged")
     return page, conn, series
 
 
@@ -319,18 +321,25 @@ def test_an_occurrence_someone_touched_stays_when_the_tick_is_undone(ui_f2: UiSe
         assert [(row[1], row[2]) for row in series()] == [(0, False), (1, False)], "the goal is reopened, and nothing else"
         assert series()[1][0] == made, "the occurrence somebody wrote to is left alone"
         assert conn.execute("SELECT title FROM goals WHERE id = %s", (made,)).fetchone() == ("SYN occurrence renamed",)
-        assert [w[0] for w in writes(session, start)] == ["PATCH"], "one write: the reopening, and no delete"
+        assert [w[0] for w in writes(session, start)] == ["PATCH"], (
+            f"one write: the reopening, and no delete: {write_log(session, start)}"
+        )
 
         # Played again, the tick finds that occurrence there, so it made nothing and the next undo takes nothing.
+        played = len(session.request_log)
         page.keyboard.press(redo)
         wait_for(page, lambda: [(row[1], row[2]) for row in series()], [(0, True), (1, False)], "the tick is played again")
+        # The redo's own write is logged by the page after the database has it; counted from before it, it would be the undo's.
+        wait_for(page, lambda: [w[0] for w in writes(session, played)], ["PATCH"], "the redo's own write is logged")
         assert [row[0] for row in series()][1] == made and len(series()) == 2, "no second occurrence"
         start = len(session.request_log)
         page.keyboard.press(undo)
         wait_for(page, lambda: [(row[1], row[2]) for row in series()], [(0, False), (1, False)], "the goal is reopened again")
         page.wait_for_timeout(500)
         assert series()[1][0] == made, "the occurrence the tick did not make is not the tick's to take"
-        assert [w[0] for w in writes(session, start)] == ["PATCH"], "the second undo is one write too"
+        assert [w[0] for w in writes(session, start)] == ["PATCH"], (
+            f"the second undo is one write too: {write_log(session, start)}"
+        )
         assert not any(r["method"] == "GET" and r["url"].split("?")[0].endswith(f"/goals/{made}") for r in session.request_log[start:]), (
             "it did not even look at an occurrence it did not make"
         )
@@ -349,7 +358,9 @@ def test_an_occurrence_with_a_comment_on_it_stays_too(ui_f2: UiSession) -> None:
         undone_and_looked_at(session, page, start, made, "/comments")
         assert [(row[1], row[2]) for row in series()] == [(0, False), (1, False)], "the goal is reopened, and nothing else"
         assert series()[1][0] == made, "a comment is a touch"
-        assert [w[0] for w in writes(session, start)] == ["PATCH"], "one write: the reopening, and no delete"
+        assert [w[0] for w in writes(session, start)] == ["PATCH"], (
+            f"one write: the reopening, and no delete: {write_log(session, start)}"
+        )
 
 
 def test_a_move_of_a_goal_with_subgoals_is_taken_back_with_the_subgoals_in_their_order(ui_f2: UiSession) -> None:

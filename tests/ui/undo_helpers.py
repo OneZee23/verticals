@@ -45,6 +45,15 @@ def writes(session: Any, since: int = 0) -> list[tuple[str, str, int | None]]:
     ]
 
 
+def write_log(session: Any, since: int = 0) -> list[str]:
+    """The same writes as `writes`, each with what it carried, for the message of an assertion that counts them."""
+    return [
+        f"{r['method']} {r['url'].split('/api')[-1]} {r['status']} {r.get('body')}"
+        for r in session.request_log[since:]
+        if r["method"] != "GET"
+    ]
+
+
 def goal(conn: psycopg.Connection, goal_id: str) -> tuple | None:
     """The row a person would call the goal: its place, its state, its words."""
     return conn.execute(

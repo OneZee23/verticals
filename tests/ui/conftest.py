@@ -510,7 +510,8 @@ class UiSession:
     failed_requests: list[str] = field(default_factory=list)
     bad_responses: list[str] = field(default_factory=list)
     #: Every completed request this session's page has issued, in order:
-    #: `{"method", "url", "status", "headers"}`. Not part of E2E.md §6's teardown dump (that is
+    #: `{"method", "url", "status", "headers", "body"}` (`body`: what a write carried, cut at 400
+    #: characters, so a scenario that counts writes can say which ones it counted). Not part of E2E.md §6's teardown dump (that is
     #: `failed_requests`/`bad_responses` only) — this is a general request log so an individual
     #: scenario can assert its own exact request count/content (S-64's "exactly 1 request to
     #: `/api/goals`", S-65's create POST, S-125's `GET /api/search?q=cycl` and its Origin-header
@@ -563,6 +564,15 @@ _MORNING_ASKED_SCRIPT = """
   document.addEventListener('DOMContentLoaded', mark);
 })();
 """
+
+
+def _sent_body(req) -> str | None:
+    """What a request carried, as text and cut short: for a log that says which write it is, never for an assertion."""
+    try:
+        data = req.post_data_buffer
+    except Exception:  # noqa: BLE001 - a body that cannot be read is just not logged
+        return None
+    return data.decode("utf-8", "replace")[:400] if data else None
 
 
 def _make_ui_session(
@@ -629,6 +639,7 @@ def _make_ui_session(
                 "url": req.url,
                 "status": req.response().status if req.response() else None,
                 "headers": req.headers,
+                "body": _sent_body(req),
             }
         ),
     )
