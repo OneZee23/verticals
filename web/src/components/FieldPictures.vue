@@ -93,16 +93,19 @@ import { PICTURE_HEIGHT, pictures, removePicture, stackWidth, tapPicture, tileWi
   overflow: hidden;
   border-radius: 8px;
   background: #f2f2f4;
-  box-shadow: var(--vt-shadow-small);
+  /* A hairline to keep each picture's edge where they overlap, and a near shadow (the window's wide glow would pile up
+     under fourteen pictures into a cloud). */
+  box-shadow: 0 0 0 .5px rgba(var(--vt-ink), .14), 0 5px 14px -7px rgba(var(--vt-ink), .26);
   pointer-events: none;
   transform-origin: 50% 100%;
-  transition: transform var(--vt-dur-close) var(--vt-ease-large), box-shadow var(--vt-dur-close) var(--vt-ease-large);
+  transition: transform var(--vt-dur-close) var(--vt-ease-large), box-shadow var(--vt-dur-close) var(--vt-ease-large),
+    border-radius var(--vt-dur-close) var(--vt-ease-large);
 }
 .field-pictures__pic img { display: block; width: 100%; height: 100%; object-fit: contain; }
 /* The cross stands on the lifted picture's top right corner, where the lifted picture is (scaled from its bottom). */
 .field-pictures__remove {
   position: absolute;
-  top: calc(-1 * var(--h) * (var(--lift) - 1) - 11px);
+  top: calc(-1 * var(--h) * (var(--lift) - 1) - 6px - 11px);
   right: calc(-1 * var(--w) * (var(--lift) - 1) / 2 - 11px);
   z-index: 3;
   display: grid;
@@ -124,8 +127,11 @@ import { PICTURE_HEIGHT, pictures, removePicture, stackWidth, tapPicture, tileWi
 /* Lifted, a picture lies over the others (one stacking order for the whole row, so the rule is on the picture). */
 .field-pictures__item.is-picked .field-pictures__pic, .field-pictures__hit:focus-visible + .field-pictures__pic {
   z-index: 2;
-  transform: scale(var(--lift));
-  box-shadow: var(--vt-shadow-window);
+  transform: translateY(-6px) scale(var(--lift));
+  /* The picture is scaled, and so are its corners and its shadow: both are given as they are to look at, over the scale. */
+  border-radius: calc(10px / var(--lift));
+  box-shadow: 0 0 0 calc(.5px / var(--lift)) rgba(var(--vt-ink), .14),
+    0 calc(14px / var(--lift)) calc(30px / var(--lift)) calc(-10px / var(--lift)) rgba(var(--vt-ink), .32);
   transition-duration: var(--vt-dur-open);
 }
 .field-pictures__item.is-picked .field-pictures__remove { opacity: 1; pointer-events: auto; }
@@ -133,8 +139,10 @@ import { PICTURE_HEIGHT, pictures, removePicture, stackWidth, tapPicture, tileWi
 @media (hover: hover) and (pointer: fine) {
   .field-pictures__item:hover .field-pictures__pic {
     z-index: 2;
-    transform: scale(var(--lift));
-    box-shadow: var(--vt-shadow-window);
+    transform: translateY(-6px) scale(var(--lift));
+    border-radius: calc(10px / var(--lift));
+    box-shadow: 0 0 0 calc(.5px / var(--lift)) rgba(var(--vt-ink), .14),
+      0 calc(14px / var(--lift)) calc(30px / var(--lift)) calc(-10px / var(--lift)) rgba(var(--vt-ink), .32);
     transition-duration: var(--vt-dur-open);
   }
   .field-pictures__remove:hover { background: #2b2b2b; }

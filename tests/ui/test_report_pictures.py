@@ -81,7 +81,7 @@ def test_the_one_under_the_pointer_lifts_out_bigger_and_settles_back(ui_f2: UiSe
     lifted = box(page, PIC, 1)
     assert lifted["height"] == pytest.approx(56 * LIFT, abs=1.5) and lifted["width"] == pytest.approx(90 * LIFT, abs=1.5), lifted
     # It rises out of the row from its bottom edge and lies over its neighbours; they stay as they were.
-    assert lifted["y"] + lifted["height"] == pytest.approx(box(page, PIC, 0)["y"] + 56, abs=1.5)
+    assert lifted["y"] + lifted["height"] == pytest.approx(box(page, PIC, 0)["y"] + 56 - 6, abs=1.5)
     assert _heights(page)[0] == 56.0 and _heights(page)[2] == 56.0
     assert _z(page, 1) == "2" and _z(page, 0) == "auto" and _z(page, 2) == "auto"
     assert lifted["y"] > 0 and lifted["x"] > 0, "it is whole on the screen"
