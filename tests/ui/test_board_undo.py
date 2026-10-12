@@ -386,9 +386,12 @@ def test_the_tick_of_a_repeating_goal_with_steps_takes_back_the_steps_it_brought
         assert steps(made) == ["Collect the sources", "Name the argument", "Cut the first pass"]
         wait_for(page, lambda: len(writes(session)), 1, "the tick's answer is logged")
 
+        before_undo = len(session.request_log)
         page.keyboard.press(undo)
         wait_for(page, series, [("SYNDAY01", 0, False)], "undo reopens the goal and takes the occurrence it made away")
         assert steps(made) == [], "its steps went with it"
+        # The database shows the undo before the page has logged its answers; count the redo's writes only after them.
+        wait_for(page, lambda: sorted(w[0] for w in writes(session, before_undo)), ["DELETE", "PATCH"], "the undo's own writes are logged")
 
         played = len(session.request_log)
         page.keyboard.press(redo)
