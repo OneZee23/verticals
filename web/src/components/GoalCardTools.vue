@@ -9,6 +9,7 @@ import { store, todayIso } from '../store'
 import { agentChat as agentChatState } from '../lib/agentChat'
 import PopoverEngine from './PopoverEngine.vue'
 import RepeatPopover from './RepeatPopover.vue'
+import OpenInMenu from './OpenInMenu.vue'
 import MoveStep, { type MoveStepName } from './MoveStep.vue'
 import type { RepeatRule } from '../lib/api'
 
@@ -26,11 +27,16 @@ const emit = defineEmits<{
 
 const trigger = ref<HTMLButtonElement | null>(null)
 const open = ref(false)
-/* The Agent section: Discuss, only where an agent exists (docs/design-handoff S2.P1.023; docs/design/goal-menu.md). The
-   open card's facts line offers it already, so that card's menu leaves the section out. */
-const showAgent = computed(() => agentChatState.available && !props.open)
+/* The Agent section: Discuss, Start work and Open in, only where an agent exists (docs/design-handoff S2.P1.023;
+   docs/design/goal-menu.md, docs/design/task-sessions.md). The open card's facts line offers Discuss already, so that card's
+   section holds the other two. */
+const showAgent = computed(() => agentChatState.available)
 function discuss() {
   window.dispatchEvent(new CustomEvent('verticals:discuss-goal', { detail: { id: props.id } }))
+  closeMenu()
+}
+function startWork() {
+  window.dispatchEvent(new CustomEvent('verticals:start-work', { detail: { id: props.id } }))
   closeMenu()
 }
 const fixedSameVerticalParent = computed(() => store.sameVerticalParentId(props.id))
@@ -129,12 +135,21 @@ defineExpose({ openMenu })
       <div v-if="showAgent" class="goal-actions__section" data-menu-section="agent" role="group" aria-label="Agent">
         <p class="goal-actions__heading" aria-hidden="true">Agent</p>
         <button
+          v-if="!props.open"
           type="button"
           role="menuitem"
           class="dropdown__item goal-actions__item"
           data-menu-item="discuss"
           @click="discuss"
         >Discuss</button>
+        <button
+          type="button"
+          role="menuitem"
+          class="dropdown__item goal-actions__item"
+          data-menu-item="start-work"
+          @click="startWork"
+        >Start work</button>
+        <OpenInMenu :id="id" @done="closeMenu" />
       </div>
 
       <div v-if="showReschedule" class="goal-actions__section" data-menu-section="reschedule" role="group" aria-label="Reschedule">

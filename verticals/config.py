@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -31,6 +32,7 @@ _DEFAULT_MCP_BIND = "127.0.0.1:8081"
 _DEFAULT_POOL_MIN = 2
 _DEFAULT_POOL_MAX = 10
 _DEFAULT_LOG_LEVEL = "info"
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 class ConfigError(RuntimeError):
@@ -49,6 +51,9 @@ class Config:
     pool_min: int
     pool_max: int
     log_level: str
+    # The desktop app's loopback address, which the app hands this server as an argument, not through the environment contract:
+    # where the sessions of tasks are kept (docs/design/task-sessions.md). Empty anywhere else.
+    gateway_url: str = ""
 
 
 def _require(name: str) -> str:
@@ -71,6 +76,21 @@ def _optional_int(name: str, default: int) -> int:
         return int(value)
     except ValueError:
         raise ConfigError(f"{name} must be an integer, got {value!r}") from None
+
+
+def parse_gateway_url(value: str) -> str:
+    """The desktop app's address as the server was given it: empty, or `http://<loopback host>:<port>`. This server tells that
+    address which task a session belongs to, and sends nothing to any other."""
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if parsed.scheme != "http" or parsed.hostname not in _LOOPBACK_HOSTS or port is None:
+        raise ConfigError(f"--gateway-url must be 'http://127.0.0.1:<port>' (a loopback address), got {value!r}")
+    return value.rstrip("/")
 
 
 def load() -> Config:

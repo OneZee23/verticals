@@ -9,6 +9,7 @@ import { useGroupWash } from '../lib/goalWash'
 import { playSound } from '../lib/sound'
 import RepeatMark from './RepeatMark.vue'
 import GoalCardTools from './GoalCardTools.vue'
+import SessionMark from './SessionMark.vue'
 import GoalDetail from './GoalDetail.vue'
 import GoalFacts from './GoalFacts.vue'
 import SubgoalAddRow from './SubgoalAddRow.vue'
@@ -591,6 +592,7 @@ function onRowKeydown(event: KeyboardEvent) {
         :open="isInlineDetailHost"
         @open-change="onMenuOpenChange"
       />
+      <SessionMark v-if="!ghost" :goal-id="id" />
     </div>
   </KCard>
   <!-- An open goal is one piece top to bottom: its title and facts (the card above), its steps, "Add…", then its notes

@@ -23,8 +23,18 @@ launcher has its own ports, database, state directory and UI build.
   `api.log` and `mcp.log`: a small rotating file (three files of 200 kB at most) of what the agent was asked to be and did,
   that is, event kinds, tool names, flags, durations and exit details, never your words, the agent's, tool inputs or
   titles, so a bug report can carry its last lines.
-- `macos/` — `Verticals.swift` (native window, WKWebView), `Updater.swift` (checks, downloads and
-  installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
+- `chat/agent_sessions.py` — the sessions of tasks (docs/design/task-sessions.md). A session is a file its agent writes
+  (Claude Code's `projects/<folder>/<id>.jsonl`, Codex's `sessions/<y>/<m>/<d>/rollout-<time>-<id>.jsonl`, under
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`), and Verticals reads only its size and modified time:
+  never a byte of what is in it, no model, no token. The gateway keeps each task's sessions in `chat-sessions.json`
+  (`GET /__chat/sessions` is what the board polls), looks at their files every two seconds (a stat each), marks one that grew
+  while Verticals wasn't driving it as "continued in Claude/Codex", and opens one where it lives (`POST /__chat/open`: a Codex
+  thread by `codex://threads/<id>`, a Claude session in Terminal by `claude --resume <id>` from its folder). A session begun
+  from a task starts with its link, `verticals://goal/<id>`; the MCP tool `session_link` (the MCP server is told where the
+  gateway is by `--gateway-url`) ties a session begun in Claude Code or Codex to a task, and it is the only way one is linked.
+- `macos/` — `Verticals.swift` (native window, WKWebView), `AppLinks.swift` (the `verticals://goal/<id>` link and the lines
+  that connect Claude Code and Codex, no window in it, checked by `tests/static/test_app_links.py`), `Updater.swift` (checks,
+  downloads and installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
   (self-contained `Verticals.app` + `.dmg`).
 
 The agent picker follows Enjoy's (strings, model artwork).
@@ -47,10 +57,19 @@ Closing the window keeps Verticals running: PostgreSQL, the API and MCP stay up 
 icon goes away and the mascot stays in the menu bar. Its menu opens the window, says whether the
 board and MCP are running, and has:
 
-- Connect Claude Code — adds the `verticals-desktop` MCP server to Claude Code for every project
+- Use Verticals in Claude Code — adds the `verticals-desktop` MCP server to Claude Code for every project
   (`claude mcp add-json --scope user`), so terminal sessions work on this board. Its `headersHelper`
   reads the token from the owner-only `mcp-headers.json` in the state folder, so Claude Code's config
   holds no token.
+- Use Verticals in Codex — adds the `verticals` MCP server to Codex (`codex mcp add`): Codex starts
+  `chat/mcp_proxy.py` with the bundled Python, told the MCP address and the path of that same
+  `mcp-headers.json`, so Codex's config holds no token either.
+
+  The click on either is the consent: nothing is written into Claude Code's or Codex's settings before it, and the tick
+  beside the item is the app's own note that it was done (it does not read their settings). A click again replaces the
+  connection. Both need a full release of the app (a web-only update doesn't carry the menu).
+- A link `verticals://goal/<id>` — the app is registered for the `verticals` scheme: a click on one in Terminal or
+  Codex brings the window forward and opens that task (`board/#goal/<id>`); a link in the board's own page does the same.
 - Open at Login — a login item (`SMAppService`); at login Verticals starts in the menu bar only.
 - Quit Verticals — the only way, with ⌘Q, to stop the board and MCP.
 

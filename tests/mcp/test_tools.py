@@ -31,7 +31,10 @@ FORBIDDEN_SUBSTRINGS = ("assignee", "board_id", "bucket", "space", "invite")
 # are mutators, each with the same optional client_token (`comment_resolve`'s is accepted and
 # never read by `core.comments.set_resolved`, the same stance `doc_delete` already takes — see
 # `verticals/mcp/comments.py`'s own module docstring).
-EXPECTED_TOOL_NAMES = {"board", "goal", "outline", "search", "create", "update", "schedule", "reparent", "delete", "park", "evidence_update", "evidence_due", "tags", "tag_mark", "size_report", "due_ack", "doc_create", "doc_get", "doc_save", "doc_tree", "doc_history", "doc_revision", "doc_restore", "doc_delete", "doc_link", "doc_unlink", "comments", "comment_add", "comment_resolve", "privacy"}
+# Task sessions (docs/design/task-sessions.md): `session_link`, thirty to thirty-one, deliberately. It writes the desktop app's own
+# list of sessions and nothing on the board, and the same call twice is the same link, so it has no client_token and is not in
+# MUTATING_TOOLS below.
+EXPECTED_TOOL_NAMES = {"board", "goal", "outline", "search", "create", "update", "schedule", "reparent", "delete", "park", "evidence_update", "evidence_due", "tags", "tag_mark", "size_report", "due_ack", "doc_create", "doc_get", "doc_save", "doc_tree", "doc_history", "doc_revision", "doc_restore", "doc_delete", "doc_link", "doc_unlink", "comments", "comment_add", "comment_resolve", "privacy", "session_link"}
 MUTATING_TOOLS = {"create", "update", "schedule", "reparent", "delete", "park", "evidence_update", "tag_mark", "size_report", "due_ack", "doc_create", "doc_save", "doc_restore", "doc_delete", "doc_link", "doc_unlink", "comment_add", "comment_resolve", "privacy"}
 
 
@@ -42,10 +45,10 @@ async def _list_tools(f2_dsn: str, tmp_path: Path):
         return result.tools
 
 
-def test_s47_tool_surface_is_exactly_thirty_named_tools(f2_dsn: str, tmp_path: Path) -> None:
+def test_s47_tool_surface_is_exactly_thirty_one_named_tools(f2_dsn: str, tmp_path: Path) -> None:
     tools = anyio.run(_list_tools, f2_dsn, tmp_path)
     names = {t.name for t in tools}
-    assert len(tools) == 30, f"expected exactly 30 tools, got {len(tools)}: {sorted(names)}"
+    assert len(tools) == 31, f"expected exactly 31 tools, got {len(tools)}: {sorted(names)}"
     assert names == EXPECTED_TOOL_NAMES, f"tool set mismatch: {sorted(names)}"
 
 

@@ -271,14 +271,16 @@ let pendingGoal: GoalRef | null = null
  *  message (S3.P1.005). */
 let goalSince: number | null = null
 
-export function openThread(id: string, goal: GoalRef | null = null): void {
+/** `provider`: the agent a session already has, when this browser has not talked in it: a session begun in Claude or Codex is
+ *  resumed by its own agent, so what the agent knows is what the session holds (docs/design/task-sessions.md). */
+export function openThread(id: string, goal: GoalRef | null = null, provider?: string): void {
   pendingGoal = goal
   agentChat.current = id
   save(KEY.current, id)
   agentChat.history = load<ChatEvent[]>(KEY.events(id), [])
   agentChat.cursor = load(KEY.cursor(id), { boot: null, seq: 0 })
   const thread = agentChat.threads.find((x) => x.id === id)
-  let selection = thread?.selection ? { ...thread.selection } : defaultSelection(load(KEY.lastAgent, 'claude'))
+  let selection = thread?.selection ? { ...thread.selection } : defaultSelection(provider ?? load(KEY.lastAgent, 'claude'))
   if (agentChat.agents.length && !agentChat.agents.some((agent) => agent.id === selection.provider && agent.available)) {
     selection = defaultSelection(agentChat.agents.find((agent) => agent.available)?.id ?? 'claude')
   }
@@ -294,12 +296,18 @@ export function newThread(goal: GoalRef | null = null): void {
   openThread(crypto.randomUUID(), goal)
 }
 
+/** A new conversation about a goal with the agent chosen for it, in the settings the chat has for that agent: Start work. */
+export function newThreadWith(goal: GoalRef, provider: string): void {
+  goalSince = null
+  openThread(crypto.randomUUID(), goal, provider)
+}
+
 /** Discuss with agent: the goal's latest conversation, wherever it was started in Verticals, or a new one about it
  *  (S3.P1.002, .003). True when an earlier conversation goes on. */
 export async function openForGoal(goal: GoalRef): Promise<boolean> {
-  let latest: { session: string; lastTurnAt: number } | null = null
+  let latest: { session: string; lastTurnAt: number; provider?: string } | null = null
   try {
-    const { conversations } = await api<{ conversations?: { session: string; lastTurnAt: number }[] }>(`goal?id=${encodeURIComponent(goal.id)}`)
+    const { conversations } = await api<{ conversations?: { session: string; lastTurnAt: number; provider?: string }[] }>(`goal?id=${encodeURIComponent(goal.id)}`)
     latest = conversations?.[0] ?? null
   } catch {
     latest = null
@@ -307,7 +315,7 @@ export async function openForGoal(goal: GoalRef): Promise<boolean> {
   const local = agentChat.threads.filter((thread) => thread.goal?.id === goal.id).sort((a, b) => b.updatedAt - a.updatedAt)[0]
   const id = latest?.session ?? local?.id
   if (!id) { newThread(goal); return false }
-  openThread(id, goal)
+  openThread(id, goal, latest?.provider)
   goalSince = latest?.lastTurnAt ? latest.lastTurnAt * 1000 : local?.updatedAt ?? null
   return true
 }

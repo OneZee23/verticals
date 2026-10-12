@@ -615,7 +615,7 @@ def test_a_fresh_conversation_that_makes_a_task_becomes_the_tasks_conversation(u
     row = page.locator(f'[data-goal-id="{goal}"] > .goal-card__row').first
     row.hover()
     row.locator('[data-role="goal-actions-trigger"]').click()
-    page.locator('[data-role="goal-context-menu"] [data-menu-item="discuss"]').click()  # the menu's Agent section calls it Discuss (#39)
+    page.locator('[data-role="goal-context-menu"] [data-menu-item="discuss"]').click()
     expect(page.locator('.vt-window[data-window="goal"]')).to_have_count(1)
     expect(page.locator(f'{BALLOON}[data-who="you"]', has_text="Make me a task")).to_have_count(1, timeout=10000)
     assert json.loads(page.evaluate("localStorage.getItem('vt-chat:current')")) == session

@@ -1,8 +1,9 @@
-"""The twenty-nine MCP tools (ARCHITECTURE.md §5, docs/E2E.md S-47's original nine, plus WP-33's
+"""The thirty-one MCP tools (ARCHITECTURE.md §5, docs/E2E.md S-47's original nine, plus WP-33's
 `evidence_update`/`evidence_due` (docs/EVIDENCE.md §6), `park`, `tags`/`tag_mark`, `size_report`,
 `due_ack`, D250 WP-2's eight document tools plus D254's `doc_link`/`doc_unlink`
-(`verticals/mcp/docs.py`), and WP-A's three comment tools (docs/COMMENTS_SPEC.md,
-`verticals/mcp/comments.py`)) — schemas and dispatch. Only the original nine live whole in this
+(`verticals/mcp/docs.py`), WP-A's three comment tools (docs/COMMENTS_SPEC.md,
+`verticals/mcp/comments.py`), the privacy tool and `session_link`, which ties an agent's session
+to a task (`verticals/mcp/session.py`, docs/design/task-sessions.md)) — schemas and dispatch. Only the original nine live whole in this
 file; every tool added since owns its own family module (schema + handler together) and splices
 into `TOOLS`/`_HANDLERS` below — the same shape WP-33 set when it extracted
 `verticals/mcp/evidence.py` past S-90a's 750-line cap, repeated by every family since rather than
@@ -55,6 +56,7 @@ from verticals.mcp import due_ack as mcp_due_ack
 from verticals.mcp import evidence as mcp_evidence
 from verticals.mcp import park as mcp_park
 from verticals.mcp import privacy as mcp_privacy
+from verticals.mcp import session as mcp_session
 from verticals.mcp import sizes as mcp_sizes
 from verticals.mcp import tags as mcp_tags
 from verticals.mcp.shapes import (
@@ -101,7 +103,7 @@ TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="schedule", description="Set or clear a goal's vertical and anchor date.", input_schema=SCHEDULE_SCHEMA),
     types.Tool(name="reparent", description="Move a goal under a new parent, or detach it to the root.", input_schema=REPARENT_SCHEMA),
     types.Tool(name="delete", description="Remove a goal. Refuses a non-empty subtree unless cascade is true.", input_schema=DELETE_SCHEMA),
-) + mcp_evidence.TOOLS + mcp_park.TOOLS + mcp_tags.TOOLS + mcp_sizes.TOOLS + mcp_due_ack.TOOLS + mcp_docs.TOOLS + mcp_comments.TOOLS + mcp_privacy.TOOLS
+) + mcp_evidence.TOOLS + mcp_park.TOOLS + mcp_tags.TOOLS + mcp_sizes.TOOLS + mcp_due_ack.TOOLS + mcp_docs.TOOLS + mcp_comments.TOOLS + mcp_privacy.TOOLS + mcp_session.TOOLS
 
 _SCHEMAS: dict[str, dict[str, Any]] = {t.name: t.input_schema for t in TOOLS}
 
@@ -651,12 +653,16 @@ _HANDLERS: dict[str, Any] = {
     "comment_resolve": mcp_comments.handle_comment_resolve,
     "privacy": mcp_privacy.handle_privacy,
 }
+# Handlers that are also told where the desktop app is (`Config.gateway_url`): the link of a session to a task is the app's to keep.
+_GATEWAY_HANDLERS: dict[str, Any] = {"session_link": mcp_session.handle_session_link}
 
 
 # --- entrypoint --------------------------------------------------------------------------------
 
 
-def call_tool(conn: psycopg.Connection, *, owner: str, name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
+def call_tool(
+    conn: psycopg.Connection, *, owner: str, name: str, arguments: dict[str, Any] | None, gateway_url: str = ""
+) -> types.CallToolResult:
     """The one function `verticals/mcp/server.py` calls. Synchronous, matching `core/`'s own
     psycopg3-sync contract — the server offloads this to a thread (`anyio.to_thread.run_sync`),
     never runs it inline on the event loop. Never raises: every path — a bad schema, a refused
@@ -670,7 +676,10 @@ def call_tool(conn: psycopg.Connection, *, owner: str, name: str, arguments: dic
         return error_result(f"unknown tool {name!r}")
     try:
         validated = _validate_top_level(schema, arguments or {})
-        result = _HANDLERS[name](conn, owner, validated)
+        if name in _GATEWAY_HANDLERS:
+            result = _GATEWAY_HANDLERS[name](conn, owner, validated, gateway_url)
+        else:
+            result = _HANDLERS[name](conn, owner, validated)
         # AC-139 / the mcp-suite stream rule: stderr is *expected* non-empty, at least one
         # structured line per run — "a server that logs nothing is not one anybody can run in
         # anger." A tool call is the one event guaranteed to happen in every scenario in this
