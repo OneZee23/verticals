@@ -56,7 +56,7 @@ def app_version(app_root: Path) -> str:
 
 
 def system_line() -> str:
-    """The Mac, as a bug report names it: "macOS 15.2 (arm64)"."""
+    """The Mac, as a report names it: "macOS 15.2 (arm64)"."""
     mac = platform.mac_ver()[0]
     return f"macOS {mac} ({platform.machine()})" if mac else f"{platform.system()} {platform.release()} ({platform.machine()})"
 

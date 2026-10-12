@@ -46,7 +46,10 @@ def test_the_prompt_says_what_a_report_is_and_how_a_design_and_its_pull_request_
     prompt = " ".join(_chat().report_prompt(None, False, home=scratch_dir, code_root=scratch_dir / "nowhere").split())
     assert prompt.startswith("## Reports from the app")
     # What a report is, and not to read it: its pictures are inside the text.
-    assert "a document under reports/bugs/" in prompt and "Never read a report with doc_get" in prompt
+    assert "a document under reports/bugs/ or reports/requests/" in prompt and "Never read a report with doc_get" in prompt
+    # A bug has the logs, a request none: the agent is told which is which, and that either holds the words and the pictures.
+    assert "A bug is something that went wrong" in prompt and "a request is something that could be better" in prompt
+    assert "and holds none" in prompt
     # Improve it: one design document in plain words, saved and linked to the report's task, then two lines saying it waits.
     assert '"Improve it" asks for a design' in prompt and "design/<short-name>.md" in prompt
     assert "link it to the report's task with doc_link" in prompt and "answer in two short lines that you are waiting" in prompt

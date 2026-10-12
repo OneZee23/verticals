@@ -23,9 +23,10 @@ launcher has its own ports, database, state directory and UI build.
   `api.log` and `mcp.log`: a small rotating file (three files of 200 kB at most) of what the agent was asked to be and did,
   that is, event kinds, tool names, flags, durations and exit details, never your words, the agent's, tool inputs or
   titles, so a bug report can carry its last lines.
-- `chat/report_facts.py` and `chat/prompt-report.md` — what a report carries from the app (`GET /__report/facts`: the
-  version, the Mac, and the last lines of `app.log`, `api.log` and `agent.log` with every word of the board left out) and
-  what the agent is told about reports (docs/design/bug-reports.md; see Reports below).
+- `chat/report_facts.py`, `chat/report_kind.py` and `chat/prompt-report.md` — what a report carries from the app
+  (`GET /__report/facts`: the version, the Mac, and for a bug the last lines of `app.log`, `api.log` and `agent.log` with
+  every word of the board left out), whether the words are a bug or a request (`POST /__chat/report-kind`), and what the
+  agent is told about reports (docs/design/bug-reports.md; see Reports below).
 - `macos/` — `Verticals.swift` (native window, WKWebView), `Updater.swift` (checks, downloads and
   installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
   (self-contained `Verticals.app` + `.dmg`).
@@ -172,16 +173,23 @@ matching `.dmg` from the release page.
 
 ## Reports
 
-Pictures dropped on the window (or pasted into the field) wait above the field; with them there, what you type says what
-happened, and ↵ makes a report: a document under `reports/bugs/` with your words, the pictures, the version and the last
-lines of the app's and the agent's logs, and a task with no date that holds it (docs/design/bug-reports.md). No agent is
-asked. A document holds 512 KiB, so the pictures are drawn smaller as JPEGs until they fit with the words and logs.
+Something is wrong, or could be better: pictures dropped on the window (or pasted into the field) wait above the field, and with
+them there what you type says what you see and what you want. ↵ makes a report (docs/design/bug-reports.md): a document with
+your words, the pictures and the version, and a task with no date that holds it. There is nothing to pick: the agent tells
+which kind it is from your words, once, and gets the words alone (`chat/report_kind.py` asks the Claude Code the chat runs, in a
+conversation nobody sees, with no tools and no MCP servers; the pictures and the logs never go to a model). A bug, something that
+went wrong, is made under `reports/bugs/` and also holds the last lines of the app's and the agent's logs; a request, something
+that could be better, is made under `reports/requests/` and holds none (`GET /__report/facts?logs=0` opens no log). When the agent
+cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a request: that shape loses nothing. A document holds
+512 KiB, so the pictures are drawn smaller as JPEGs until they fit with the words and logs.
 
 - **Send to developers** is a link to a new GitHub issue on this repository, filled in with the report's text as the
-  document stands (the pictures cannot travel in a link: the issue ends with how many there were and to drag them in).
-  GitHub does not publish its link limit; a link is kept to 6,000 characters, the oldest log lines going first and the issue
-  saying how many. With ⌥ held it is an email draft with the same text, to no address (`DEVELOPERS_EMAIL` in
-  `web/src/lib/reportSend.ts` is empty; the repository publishes none).
+  document stands (the pictures cannot travel in a link: the issue ends with how many there were and to drag them in). It
+  reads as what it is: `labels=bug` for a bug and `labels=enhancement` for a request, the repository's own labels (GitHub
+  applies a label from a link only for someone who may label), and a request has no logs in it. GitHub does not publish its
+  link limit; a link is kept to 6,000 characters, the oldest log lines going first and the issue saying how many. With ⌥
+  held it is an email draft with the same text, to no address (`DEVELOPERS_EMAIL` in `web/src/lib/reportSend.ts` is empty;
+  the repository publishes none).
 - **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
   knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the
   Mac's user name; the number of entries left out is told in the report.
