@@ -728,8 +728,8 @@ class Chat:
     # -- the record of what each answer wrote (verticals/mcp/answers.py, docs/design/agent-answer-undo.md)
 
     def answers_call(self, route, body=None, timeout=3):
-        """A call to the MCP server's record of the answers. Best effort: without it an answer is not in the ⌘Z history, and the
-        conversation goes on as it did."""
+        """A call to the MCP server's record of the answers. Best effort: without it an answer has no Undo, and the conversation
+        goes on as it did."""
         request = urllib.request.Request(
             f"{self.answers_url}/answers/{route}", data=json.dumps(body or {}).encode(), method="POST",
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
@@ -746,11 +746,18 @@ class Chat:
         if answer:
             self.answers_call("close", {"answer": answer})
 
-    def claim_answers(self):
-        """The answers that have ended since the page last asked, each handed over once (what the page makes steps of)."""
-        got = self.answers_call("claim", timeout=10)
+    def recent_answers(self):
+        """The answers that have ended, the last few, each with what its writes changed (what the page makes its Undo of). Reading
+        takes nothing away: a window that opens later finds the answers given while it was closed."""
+        got = self.answers_call("recent", {"limit": 20}, timeout=10)
         answers = got.get("answers") if isinstance(got, dict) else None
         return answers if isinstance(answers, list) else []
+
+    def answer_state(self, answer, state):
+        """What became of an answer (`standing`, `undone`, `spent`): kept with it, so a page that opens again shows Redo where it
+        showed Redo."""
+        if isinstance(answer, str) and isinstance(state, str):
+            self.answers_call("state", {"answer": answer, "state": state})
 
     # -- persistence: agent session ids and a short transcript per conversation
 

@@ -31,7 +31,7 @@ SESSION = "00000000-0000-4000-8000-0000000000aa"
 class Standin:
     """A real HTTP server on a free port that remembers what it was asked and answers what it was told to."""
 
-    def __init__(self, reply: dict | None = None, claim: list | None = None, echo: bool = False) -> None:
+    def __init__(self, reply: dict | None = None, recent: list | None = None, echo: bool = False) -> None:
         self.requests: list[dict] = []
         standin = self
 
@@ -46,7 +46,7 @@ class Standin:
                 if echo:  # a JSON-RPC server: the answer carries the id of the request
                     payload = {"jsonrpc": "2.0", "id": body.get("id"), "result": {}}
                 else:
-                    payload = {"answers": claim or []} if self.path.endswith("/claim") else (reply or {"ok": True})
+                    payload = {"answers": recent or []} if self.path.endswith("/recent") else (reply or {"ok": True})
                 answer = json.dumps(payload).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -179,16 +179,23 @@ def test_an_agent_that_exits_during_a_turn_ends_its_answer(mcp_server: Standin, 
     assert exit_event["answer"] == "abc123" and mcp_server.requests[-1]["body"] == {"answer": "abc123"}
 
 
-def test_the_page_is_handed_what_the_server_says_ended(tmp_path: Path) -> None:
-    ended = [{"id": "a1", "session": SESSION, "writes": [{"seq": 1, "tool": "update", "changes": []}]}]
-    standin = Standin(claim=ended)
+def test_the_page_is_handed_what_the_server_says_ended_and_what_became_of_an_answer_is_told_to_it(tmp_path: Path) -> None:
+    ended = [{"id": "a1", "session": SESSION, "state": "standing", "writes": [{"seq": 1, "tool": "update", "changes": []}]}]
+    standin = Standin(recent=ended)
     try:
         chat = _chat().Chat(tmp_path, standin.url, "tok")
-        assert chat.claim_answers() == ended
-        assert standin.requests[-1]["path"] == "/answers/claim" and standin.requests[-1]["headers"]["authorization"] == "Bearer tok"
+        assert chat.recent_answers() == ended
+        assert chat.recent_answers() == ended, "reading takes nothing away"
+        assert standin.requests[-1]["path"] == "/answers/recent" and standin.requests[-1]["headers"]["authorization"] == "Bearer tok"
+        chat.answer_state("a1", "undone")
+        assert standin.requests[-1]["path"] == "/answers/state" and standin.requests[-1]["body"] == {"answer": "a1", "state": "undone"}
+        chat.answer_state(None, "undone")  # not an answer: nothing is sent
+        chat.answer_state("a1", 7)
+        assert standin.routes().count("state") == 1
     finally:
         standin.stop()
-    assert chat.claim_answers() == [], "no server, nothing handed over, and no error"
+    assert chat.recent_answers() == [], "no server, nothing handed over, and no error"
+    chat.answer_state("a1", "standing")  # and nothing raised
 
 
 def test_claude_connects_with_its_conversation_in_the_headers_in_a_private_file(tmp_path: Path) -> None:

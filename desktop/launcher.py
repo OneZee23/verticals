@@ -327,8 +327,10 @@ def make_gateway(token, chat):
                 elif action == "permission":
                     chat.decide(body.get("session"), body.get("requestId"), body.get("value"))
                 elif action == "answers":
-                    # The answers that have ended since the page last asked, each handed over once (docs/design/agent-answer-undo.md).
-                    return self.send_json({"answers": chat.claim_answers()})
+                    # The answers that have ended, for the page to show their Undo where they show (docs/design/agent-answer-undo.md).
+                    return self.send_json({"answers": chat.recent_answers()})
+                elif action == "answer-state":
+                    chat.answer_state(body.get("answer"), body.get("state"))
                 elif action == "stop":
                     chat.stop(body.get("session"))
                 elif action == "reset":
