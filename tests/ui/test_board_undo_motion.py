@@ -7,6 +7,7 @@ Traced frame by frame in the page, so a one-frame jump shows."""
 from __future__ import annotations
 
 import math
+import threading
 
 import psycopg
 import pytest
@@ -107,6 +108,21 @@ def rect(page: Page, goal_id: str) -> dict:
     )
 
 
+def trace_from_the_key(page: Page, recorder: str, key: str) -> None:
+    """Starts a recorder in the key's own event, ahead of everything the page does with the key, and presses the key. No frame from
+    before the key is in the trace. (Started in a call of its own, the recorder's first frame can come before the key does: the
+    key reaches the page a few milliseconds after the call returns, a frame is 16, and about one run in five had one frame of the
+    board as it was before the key, which is not the undo's.)"""
+    page.evaluate(
+        """(name) => {
+          const on = (e) => { if (e.key.toLowerCase() !== 'z') return; window.removeEventListener('keydown', on, true); window[name].start() }
+          window.addEventListener('keydown', on, true)
+        }""",
+        recorder,
+    )
+    page.keyboard.press(key)
+
+
 def away(a: dict, b: dict) -> float:
     return math.hypot(a["x"] - b["x"], a["y"] - b["y"])
 
@@ -122,15 +138,9 @@ def after_the_drop(session: UiSession) -> tuple[Page, str, dict, dict]:
     return page, keys(page)[0], rect(page, "SYNORD01"), rect(page, "SYNORD02")
 
 
-@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
-def test_undoing_a_drag_glides_the_goal_and_the_rows_around_it_as_one_movement(ui_f2: UiSession) -> None:
-    page, undo, was, neighbour_was = after_the_drop(ui_f2)
-    page.evaluate(ROWS, ["SYNORD01", "SYNORD02"])
-    page.evaluate("window.__undo.start()")
-    page.keyboard.press(undo)
-    page.wait_for_timeout(900)
-    frames = page.evaluate("window.__undo.stop()")
-    now, neighbour_now = rect(page, "SYNORD01"), rect(page, "SYNORD02")
+def check_the_glide(frames: list[dict], was: dict, neighbour_was: dict, now: dict, neighbour_now: dict) -> None:
+    """What the frames of an undone drag must show: the goal and the row that makes room start where they stood, as big as they were,
+    only move toward where they go, arrive together in about the board's 300 ms, and the goal is never nowhere."""
     assert away(now, was) > 100 and neighbour_now["y"] > neighbour_was["y"] + 10, "the goal moved columns and the next row made room"
 
     for who, start, end in (("SYNORD01", was, now), ("SYNORD02", neighbour_was, neighbour_now)):
@@ -157,12 +167,42 @@ def test_undoing_a_drag_glides_the_goal_and_the_rows_around_it_as_one_movement(u
     assert abs(ends[0] - ends[1]) < 50, f"the goal and the row that made room arrive {abs(ends[0] - ends[1]):.0f} ms apart"
 
 
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_undoing_a_drag_glides_the_goal_and_the_rows_around_it_as_one_movement(ui_f2: UiSession) -> None:
+    page, undo, was, neighbour_was = after_the_drop(ui_f2)
+    page.evaluate(ROWS, ["SYNORD01", "SYNORD02"])
+    trace_from_the_key(page, "__undo", undo)
+    page.wait_for_timeout(900)
+    frames = page.evaluate("window.__undo.stop()")
+    check_the_glide(frames, was, neighbour_was, rect(page, "SYNORD01"), rect(page, "SYNORD02"))
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_the_glide_starts_with_the_key_however_long_the_server_takes_to_answer(ui_f2: UiSession) -> None:
+    """The page asks the server what the goal holds before it writes (an agent may have changed it a moment ago, and the board hears
+    of that after a pause), and what the person sees does not wait for the answer. The server here is held up for 800 ms by
+    a lock on the goals table, which stops every read and write; the frames are the same as with a server that answers at once,
+    and the write goes when the server does."""
+    session = ui_f2
+    page, undo, was, neighbour_was = after_the_drop(session)
+    page.evaluate(ROWS, ["SYNORD01", "SYNORD02"])
+    with psycopg.connect(session.backend.dsn) as holder, psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        holder.execute("LOCK TABLE goals IN ACCESS EXCLUSIVE MODE")
+        release = threading.Timer(0.8, holder.commit)
+        release.start()
+        trace_from_the_key(page, "__undo", undo)
+        page.wait_for_timeout(900)
+        frames = page.evaluate("window.__undo.stop()")
+        release.join()
+        wait_for(page, lambda: goal(conn, "SYNORD01")[1], "week", "the goal is put back once the server answers", timeout=8)
+    check_the_glide(frames, was, neighbour_was, rect(page, "SYNORD01"), rect(page, "SYNORD02"))
+
+
 @pytest.mark.parametrize("ui_reduced_motion", ["reduce"], indirect=True)
 def test_with_reduced_motion_undo_puts_the_goal_back_without_a_glide(ui_f2: UiSession) -> None:
     page, undo, was, _ = after_the_drop(ui_f2)
     page.evaluate(ROWS, ["SYNORD01", "SYNORD02"])
-    page.evaluate("window.__undo.start()")
-    page.keyboard.press(undo)
+    trace_from_the_key(page, "__undo", undo)
     page.wait_for_timeout(700)
     frames = page.evaluate("window.__undo.stop()")
     assert not any(f["glides"] for f in frames), "nothing glides when motion is reduced"
@@ -180,8 +220,7 @@ def test_undoing_a_tick_adds_no_glide_of_its_own(ui_f2: UiSession) -> None:
         wait_for(page, lambda: goal(conn, "SYNCOL01")[4], True, "the tick is stored")
         page.wait_for_timeout(900)
         page.evaluate(ROWS, ["SYNCOL01", "SYNCOL02"])
-        page.evaluate("window.__undo.start()")
-        page.keyboard.press(undo)
+        trace_from_the_key(page, "__undo", undo)
         wait_for(page, lambda: goal(conn, "SYNCOL01")[4], False, "the tick is taken back")
         page.wait_for_timeout(600)
         frames = page.evaluate("window.__undo.stop()")
@@ -200,6 +239,7 @@ def test_the_notice_comes_up_with_the_field_fading_and_goes_the_same_way(ui_f2: 
     page.click('#dropdownPortal [data-move="tomorrow"]')
     expect(page.locator(NOTICE)).to_be_visible(timeout=5000)
     page.wait_for_timeout(600)
+    esc = page.evaluate("performance.now() - window.__pill.t0")  # the recorder's clock, as the key is sent
     page.keyboard.press("Escape")
     expect_no_notice(page)
     page.wait_for_timeout(300)
@@ -221,7 +261,9 @@ def test_the_notice_comes_up_with_the_field_fading_and_goes_the_same_way(ui_f2: 
     assert min(f["field"] for f in frames) == 0 and frames[-1]["field"] == 1, "the field fades out while the notice stands and comes back"
     leaving = [f for f in shown if f["t"] > shown[came]["t"] + 400]
     assert leaving and leaving[-1]["pill"]["opacity"] < 1, "the notice goes with a fade, not at once"
-    assert (leaving[-1]["t"] - leaving[0]["t"]) <= 220, "and a little quicker than it came"
+    # Timed from the key that dismissed it to the last frame it is drawn in, as the person feels it. (From the first frame past
+    # 400 ms, which came before the key by however long the test's own wait overshot, a loaded machine read 224 for 220.)
+    assert (leaving[-1]["t"] - esc) <= 220, "and a little quicker than it came"
 
 
 def test_undo_in_the_notice_is_reached_with_the_keyboard_too(ui_f2: UiSession) -> None:
@@ -255,8 +297,7 @@ def start_the_flight(session: UiSession) -> tuple[Page, dict, float]:
 def test_no_frame_of_the_flight_draws_the_goal_twice(ui_f2: UiSession) -> None:
     page, undo, _, _ = after_the_drop(ui_f2)
     page.evaluate(SHOWN, "SYNORD01")
-    page.evaluate("window.__shown.start()")
-    page.keyboard.press(undo)
+    trace_from_the_key(page, "__shown", undo)
     page.wait_for_timeout(900)
     frames = page.evaluate("window.__shown.stop()")
     flight = [i for i, f in enumerate(frames) if f["copy"]]
