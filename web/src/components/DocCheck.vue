@@ -10,7 +10,12 @@
    is out of the way while the conversation is open, a message is typed or a goal is moved. The count stays while the
    document has any comment, so a resolved one can still be reached: with none open it reads "3 resolved", grey and with no
    dot (the dot is the yellow of marked words, and resolved words are not marked), and its list is the resolved ones. Nothing
-   stands here for a document with no comment at all and nothing to hand over. */
+   stands here for a document with no comment at all and nothing to hand over.
+
+   A report (docs/design/bug-reports.md) has two more pills in the same row, black as Check again is: Send to developers, a link
+   that opens a GitHub issue filled in with the report (⌥ held, an email draft), and Improve it, which asks the agent for a
+   design in the report's task. They stand for the report in front, and for the one the field's answer has just made, so the row
+   stands without a document too (lib/reportActions.ts). */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import DocCommentList from './DocCommentList.vue'
 import { store } from '../store'
@@ -19,6 +24,7 @@ import { circle } from '../lib/circle'
 import { commandFilter } from '../lib/commandFilter'
 import { checkAgain, checkShown } from '../lib/checkAgain'
 import { docThreads, followFrontDoc, frontDocId, openThreads } from '../lib/docComments'
+import { altHeld, improveIt, improveShown, links, reportShown, sendShown } from '../lib/reportActions'
 
 const count = computed(() => openThreads.value.length)
 const resolved = computed(() => docThreads.value.length - count.value)
@@ -28,7 +34,8 @@ const hasThreads = computed(() => docThreads.value.length > 0)
 const label = computed(() => (resolvedOnly.value ? `${resolved.value} resolved` : `${count.value} ${count.value === 1 ? 'comment' : 'comments'}`))
 const name = computed(() => (resolvedOnly.value ? `${resolved.value} resolved ${resolved.value === 1 ? 'comment' : 'comments'}` : undefined))
 const out = computed(() => agentChat.open || !!commandFilter.text || circle.moving)
-const shown = computed(() => !!frontDocId.value && !out.value && (hasThreads.value || checkShown.value))
+const docPills = computed(() => !!frontDocId.value && (hasThreads.value || checkShown.value))
+const shown = computed(() => !out.value && (docPills.value || reportShown.value))
 const listOpen = computed(() => store.state.comments.listOpen)
 
 const stop = followFrontDoc()
@@ -98,6 +105,24 @@ onBeforeUnmount(() => {
           data-role="doc-check-again"
           @click="checkAgain"
         >Check again</button>
+        <a
+          v-if="sendShown && links"
+          key="send"
+          class="doc-check__pill doc-check__send"
+          data-role="report-send"
+          :href="altHeld ? links.mail : links.issue"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Opens a GitHub issue with this report for you to read and submit. Hold Option for an email draft."
+        >{{ altHeld ? 'Send by email' : 'Send to developers' }}</a>
+        <button
+          v-if="improveShown"
+          key="improve"
+          type="button"
+          class="doc-check__pill doc-check__improve"
+          data-role="report-improve"
+          @click="improveIt"
+        >Improve it</button>
       </TransitionGroup>
       <DocCommentList v-if="listOpen && hasThreads" />
     </div>
@@ -149,10 +174,11 @@ onBeforeUnmount(() => {
 .doc-check__dot { flex: none; width: 10px; height: 10px; border-radius: 5px; background: var(--color-goal-yellow, #ecce32); }
 /* Only resolved comments: grey words and no dot (60% black, 5.7 to 1 on white). */
 .doc-check__count--resolved { color: rgb(0 0 0 / 60%); }
-.doc-check__again { background: #000; color: #fff; }
+.doc-check__again, .doc-check__send, .doc-check__improve { background: #000; color: #fff; }
+.doc-check__send { text-decoration: none; }
 @media (hover: hover) and (pointer: fine) {
   .doc-check__count:hover, .doc-check__count[aria-expanded='true'] { background: #f5f5f7; }
-  .doc-check__again:hover { background: #2b2b2b; }
+  .doc-check__again:hover, .doc-check__send:hover, .doc-check__improve:hover { background: #2b2b2b; }
 }
 /* A pill comes in from 6 px under its place, as the tags do, and the other makes room by gliding. */
 .doc-check-pill-enter-active { transition: opacity var(--vt-dur-open) var(--vt-ease-large), transform var(--vt-dur-open) var(--vt-ease-large); }
