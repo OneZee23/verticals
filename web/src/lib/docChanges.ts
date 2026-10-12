@@ -4,7 +4,7 @@
 // before the agent's turn and the copy after it are both rendered the way the page renders a body, and compared block by
 // block (a paragraph, a list item, a cell, a heading); the blocks that differ are compared word by word. Only what the
 // new text has is lit. A passage the agent cut leaves nothing to light.
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { renderBodyElement } from './bodyMarkdown'
 import { wrapRange, type FlatTextNode } from './commentAnchor'
 

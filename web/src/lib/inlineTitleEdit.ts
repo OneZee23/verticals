@@ -1,17 +1,17 @@
 // The card row's inline title editor (D186/D187): one cohesive edit lifecycle — start, autosize,
-// draft, commit-once, cancel — extracted from `GoalCard.vue` when it neared the 750-line module
+// draft, commit-once, cancel — extracted from `GoalCard.tsx` when it neared the 750-line module
 // cap (ARCHITECTURE.md S-90a). Same composable shape as `lib/completionCelebration.ts`: the
-// component keeps its template bindings, this module owns the state machine.
+// component keeps its markup and refs, this module owns the state machine.
 
-import { nextTick, ref, type Ref } from 'vue'
+import { nextTick, ref, type Ref } from '../reactivity'
 
 export function useInlineTitleEdit(options: {
   /** The live committed title (a getter so the composable always compares against fresh props). */
   title: () => string
   /** Called once per edit with the trimmed, changed title. Never called for empty or unchanged. */
   commit: (next: string) => void
-  /** The textarea's template ref — declared by the component, like `completionCelebration`'s
-   *  layer/media refs, so the SFC keeps ownership of everything its template binds to. */
+  /** The textarea's element ref — declared by the component, like `completionCelebration`'s
+   *  layer/media refs, so the component keeps ownership of everything its markup binds to. */
   input: Ref<HTMLTextAreaElement | null>
 }) {
   const editing = ref(false)

@@ -7,8 +7,8 @@
 // `lib/boardRestore.ts`. Undo and redo write through the store's own verbs, never through `track`, so they record nothing.
 //
 // What a step says when its change leaves the view is `lib/historyWords.ts`; where it says it is `lib/fieldNotice.ts`.
-import { nextTick } from 'vue'
-import { toast } from '@konstantinopolskii/vue'
+import { nextTick } from '../reactivity'
+import { toast } from '../kit'
 import { findGoal } from './boardIndex'
 import { currentShot, holdings, settleShots, type Applied, type Outcome, type RestorePorts, type Target } from './boardRestore'
 import { changeBetween, changed, parentDiffers, placeDiffers, shotOf, shotsOf, slotDiffers, type Shot } from './boardShots'

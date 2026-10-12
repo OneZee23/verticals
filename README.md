@@ -1,6 +1,6 @@
 # Verticals
 
-Verticals goal board: Vue UI, Python API/MCP and PostgreSQL 16.
+Verticals goal board: React UI, Python API/MCP and PostgreSQL 16.
 Open source under the GNU Affero General Public License v3.0, see [License](#license).
 
 ## Native local startup
@@ -64,8 +64,8 @@ tests need sanitized fixtures first.
 ## License
 
 Verticals is licensed under the GNU Affero General Public License v3.0, see `LICENSE`.
-The two packages vendored in `web/vendor/` (`@konstantinopolskii/design-system` and
-`@konstantinopolskii/vue`, version 2.1.1) are under the same license.
+The package vendored in `web/vendor/` (`@konstantinopolskii/design-system`, version 2.1.1) is under the
+same license.
 Three parts keep their own terms:
 
 - `web/vendor/konstantinopolskii-design-system-2.1.1.tgz`: the Commissioner font inside it,

@@ -8,12 +8,12 @@
    there, once: they never change in the middle of a movement, and no frame shows a form that doesn't fit. The header
    decides again when the layout changes (a window resized, a column opened or closed) and when the title font arrives.
    The shortest form of a name, which is shown whether it fits or not, may take a few px of the padding beside the room
-   before the ellipsis shows (`--column-spill` in `ColumnHeader.vue`); the fit itself never counts on them.
+   before the ellipsis shows (`--column-spill` in `ColumnHeader.tsx`); the fit itself never counts on them.
 
    A canvas measures the text: it shapes it as the layout does, to within a 64th of a pixel (1111 labels compared in
    Chrome: at most 0.016 px narrower), without writing a probe into the page for every form of every column. */
 
-import { ref } from 'vue'
+import { ref } from '../reactivity'
 
 /** Counts the font loads: a width measured before a font arrived was another font's. */
 export const fontEpoch = ref(0)

@@ -1,10 +1,10 @@
 // A goal card's place in the open goal's family: whether it is the open goal here, a level stepped through, a step or a
 // relative lit further off; which steps it lists; what a click on it opens; how its list grows and folds. The card side
 // of flow 4 (going deeper) and of the opened goal it builds on; the board side is `familyView.ts`. Lifted out of
-// `GoalCard.vue` when flow 4 took it past the 750-line module cap (ARCHITECTURE.md S-90a), in the shape of
-// `inlineTitleEdit.ts`: the component keeps its template bindings, this module owns the logic behind them.
+// `GoalCard.tsx` when flow 4 took it past the 750-line module cap (ARCHITECTURE.md S-90a), in the shape of
+// `inlineTitleEdit.ts`: the component keeps its markup and refs, this module owns the logic behind them.
 
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from '../reactivity'
 import { store } from '../store'
 import type { GoalCardData } from '../types'
 import { DEEPEST } from './familyView'
@@ -126,7 +126,7 @@ export function useCardFamily(props: {
 
   /** Opening a goal starts from where it was clicked: a goal open above it closes, or its column widens and the cards
    *  above it grow, and either would throw it away from under the pointer in one frame (404 px down, low in Week). Returns
-   *  the step to run once it has opened; from there `GoalDetail.vue` scrolls it into view. */
+   *  the step to run once it has opened; from there `GoalDetail.tsx` scrolls it into view. */
   function holdPlace(): (() => void) | null {
     const card = rootElement()
     let scroller = card?.parentElement ?? null

@@ -13,7 +13,7 @@
 
 import { reducedMotion, timing } from './motion'
 
-const MOVE_MS = 200 // the box's height and colour take as long (carriedFilter.ts `ease`, CarriedGroup.vue)
+const MOVE_MS = 200 // the box's height and colour take as long (carriedFilter.ts `ease`, CarriedGroup.tsx)
 const LEAVE_MS = 120 // what leaves goes quicker than the rest moves
 const ARRIVE_AT_MS = 50 // what arrives waits for most of what leaves to be gone
 const STRIPPED = ['id', 'data-goal-id', 'data-row-key', 'data-role', 'data-parent-id'] // a copy is never taken for the thing
@@ -71,7 +71,7 @@ export function readBox(box: HTMLElement): BoxPicture {
 
 const slides = new WeakMap<HTMLElement, Animation>() // this module's slide on an element, so the next change can stop it
 
-/** The copies of what leaves, laid over the box (CarriedGroup.vue `.carried-ghosts`); the box holds them while they go. */
+/** The copies of what leaves, laid over the box (CarriedGroup.tsx `.carried-ghosts`); the box holds them while they go. */
 function layerOf(box: HTMLElement): HTMLElement {
   let layer = box.querySelector<HTMLElement>(':scope > .carried-ghosts')
   if (!layer) {

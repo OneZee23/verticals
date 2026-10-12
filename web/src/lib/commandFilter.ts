@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 import { store } from '../store'
 import type { BoardColumnData, GoalCardData } from '../types'
 import { asksServer, found, termsOf } from './finding'

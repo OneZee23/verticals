@@ -2,7 +2,7 @@
 // periods in a row at the regular columns' width, the last one's edge showing and this one next, with one column of the
 // regular board floating wide over them at a side. Spans render and load one beyond each edge, so stepping never shows
 // one loading or leaving (S5.P1.051).
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 import { fetchSpans, type BoardResponse, type GoalCard } from './api'
 import { toColumnData } from './boardProjection'
 import { ghostOf } from './ghost'

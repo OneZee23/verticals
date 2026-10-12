@@ -55,7 +55,7 @@ def _selectors(body: str) -> int:
 
 
 def _sources() -> Iterator[Path]:
-    yield from sorted(path for path in WEB_SRC_DIR.rglob("*") if path.suffix in {".css", ".vue"})
+    yield from sorted(path for path in WEB_SRC_DIR.rglob("*") if path.suffix in {".css", ".tsx"})
     yield from KIT_CSS
 
 
@@ -101,7 +101,7 @@ def test_scripts_ask_one_function_whether_motion_is_reduced() -> None:
     offenders = [
         path.relative_to(WEB_SRC_DIR).as_posix()
         for path in sorted(WEB_SRC_DIR.rglob("*"))
-        if path.suffix in {".ts", ".vue"} and path.name != "motion.ts" and asking.search(path.read_text(encoding="utf-8"))
+        if path.suffix in {".ts", ".tsx"} and path.name != "motion.ts" and asking.search(path.read_text(encoding="utf-8"))
     ]
     assert offenders == [], f"use reducedMotion() from lib/motion.ts instead of matchMedia in {offenders}"
 

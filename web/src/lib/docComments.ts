@@ -1,7 +1,7 @@
 // The comments of the document in front (docs/design/doc-comments-inline.md): which document the pills above the field
 // speak for, its threads and how many are open, and the one place that keeps the comments slice on it. The slice holds one
 // target at a time (`lib/comments.ts`); a document in front is that target.
-import { computed, watch } from 'vue'
+import { computed, watch } from '../reactivity'
 import { store } from '../store'
 import { frontWindow } from './windows'
 import type { CommentThread } from './api'

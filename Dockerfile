@@ -23,9 +23,9 @@
 # --------------------------------------------------------------------------------------------
 # Stage 1 — the frontend bundle.
 #
-# `@konstantinopolskii/{design-system,vue}` are not on a public registry (JC-02): package.json
-# resolves them from `web/vendor/*.tgz`, which are gitignored and packed locally from a
-# kk-agentic-ds checkout. This stage therefore builds only where those tarballs are present.
+# `@konstantinopolskii/design-system` is not on a public registry (JC-02): package.json
+# resolves it from `web/vendor/*.tgz`, which is gitignored and packed locally from a
+# kk-agentic-ds checkout. This stage therefore builds only where that tarball is present.
 # That is exactly the limitation AC-170 records, and the README states it in one sentence.
 # --------------------------------------------------------------------------------------------
 FROM node:22.14.0-bookworm-slim AS web

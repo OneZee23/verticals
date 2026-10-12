@@ -1,8 +1,8 @@
 // The notice in the field (docs/design/board-undo.md): a change that leaves your view is said in the place where the field
 // stands, and Undo is at its right end. It stays six seconds and the field comes back; Esc, or a click elsewhere, ends it
-// sooner. The pointer on it holds the time, so Undo never goes from under the hand. `components/FieldNotice.vue` draws it;
+// sooner. The pointer on it holds the time, so Undo never goes from under the hand. `components/FieldNotice.tsx` draws it;
 // this module is its state and its clock, and knows nothing of the board.
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 
 /** The line is a few pieces so the goal's title can be cut with “…” and the words around it can't be:
  *  `text` stays whole, `quote` is a title, shown in quotation marks and the one that shrinks. */

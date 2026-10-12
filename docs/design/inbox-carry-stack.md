@@ -4,7 +4,7 @@ On the board a goal let go over the field waits in the field as a small card: th
 
 ## Behaviour
 
-- A task carried onto the field in the Inbox waits in the field exactly as a goal does on the board: drawn by `MovingStack.vue`, the field saying "Find a goal", with Backspace, Tab, typing and dragging the card out all working.
+- A task carried onto the field in the Inbox waits in the field exactly as a goal does on the board: drawn by `MovingStack.tsx`, the field saying "Find a goal", with Backspace, Tab, typing and dragging the card out all working.
 - The big tile beside the field goes. `lib/inboxCarry.ts` keeps only the drag, which already hands the task to the board's Move (`lib/moving.ts`).
 
 ## Done when

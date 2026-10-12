@@ -1,0 +1,109 @@
+/* Out of focus for a window: under the conversation the window is itself at 1 px
+   and four still copies of it, each more blurred and shown from further down, so its name reads and its foot is soft;
+   its veil builds the same way in its own pale colour. At the side, its whole body below the name takes the strongest
+   step. The copies are pictures of the window taken as it steps back and again when its words change; they stay out of
+   the reader's selection and the find bar. */
+import { Fragment, type ReactNode, type Ref as ReactRef } from 'react'
+import { nextTick, onBeforeUnmount, ref, watch } from '../reactivity'
+import { bindRef, cx, fallthrough, sx } from '../bind'
+import { tracked } from '../tracked'
+import { useSetup, withDefaults } from '../setup'
+import './progressiveBlur.css'
+
+interface Props {
+  mode: 'none' | 'under' | 'side'
+  /** The window's pale colour, "r, g, b". */
+  pale?: string
+  /** How far down the name reaches, for the side's blur. */
+  head?: number
+  /** The element that scrolls the window, whose visible part the copies show. */
+  scroller?: HTMLElement | null
+  children?: ReactNode
+  ref?: ReactRef<HTMLDivElement>
+  className?: string
+}
+const DEFAULTS = { pale: '245, 245, 247', head: 64, scroller: null }
+
+const STEPS = [
+  { r: 'var(--vt-blur-1)', a: 0.06, b: 0.16 },
+  { r: 'var(--vt-blur-2)', a: 0.16, b: 0.3 },
+  { r: 'var(--vt-blur-3)', a: 0.3, b: 0.44 },
+  { r: 'var(--vt-blur-4)', a: 0.44, b: 0.6 },
+]
+
+export const ProgressiveBlur = tracked(function ProgressiveBlur(raw: Props) {
+  const { mode, pale, head, scroller, children, ...attrs } = withDefaults(raw, DEFAULTS)
+  const s = useSetup({ mode, pale, head, scroller }, (props) => {
+    const live = ref<HTMLElement | null>(null)
+    const copies = ref<HTMLElement[]>([])
+    const frame = ref({ top: 0, height: 0 })
+
+    let observer: MutationObserver | null = null
+    let pending = 0
+    function paint(): void {
+      pending = 0
+      const source = live.value
+      if (!source || props.mode === 'none') return
+      const scroller = props.scroller
+      frame.value = { top: scroller?.scrollTop ?? 0, height: scroller?.clientHeight ?? source.offsetHeight }
+      for (const copy of copies.value) {
+        const picture = source.cloneNode(true) as HTMLElement
+        picture.removeAttribute('data-live')
+        // A picture, not a second window: nothing in it may be found as a goal, a control or a link. What styles hang
+        // on (ids, roles, an editor's off state) stays, so the picture lies exactly over the window.
+        for (const el of [picture, ...picture.querySelectorAll<HTMLElement>('*')]) {
+          for (const name of ['data-goal-id', 'data-row-key', 'data-cap', 'data-doc', 'data-link']) el.removeAttribute(name)
+          if (el.isContentEditable || el.hasAttribute('contenteditable')) el.setAttribute('contenteditable', 'false')
+        }
+        picture.style.transform = `translateY(${-frame.value.top}px)`
+        copy.replaceChildren(picture)
+      }
+    }
+    function schedule(): void {
+      if (!pending) pending = requestAnimationFrame(paint)
+    }
+    watch(() => props.mode, async (mode) => {
+      observer?.disconnect()
+      observer = null
+      if (mode === 'none') return
+      await nextTick()
+      paint()
+      if (live.value && typeof MutationObserver !== 'undefined') {
+        observer = new MutationObserver(schedule)
+        observer.observe(live.value, { subtree: true, childList: true, characterData: true, attributes: true })
+      }
+    }, { immediate: true })
+    onBeforeUnmount(() => {
+      observer?.disconnect()
+      if (pending) cancelAnimationFrame(pending)
+    })
+    return { live, copies, frame }
+  })
+  const frame = s.frame.value
+  // A copy is kept once seen, never cleared on null.
+  const keep = (i: number) => (el: HTMLDivElement | null) => {
+    if (el) s.copies.value[i] = el
+  }
+  return (
+    <div {...fallthrough({
+      className: cx('pblur', `pblur--${mode}`),
+      style: sx({ '--pale': pale, '--pblur-top': `${frame.top}px`, '--pblur-height': `${frame.height}px`, '--pblur-head': `${head}px` }),
+    }, attrs)}>
+      <div ref={bindRef(s.live)} className="pblur__live" data-live="">{children}</div>
+      {mode === 'under' ? (
+        <Fragment key="under">
+          {STEPS.map((step, i) => (
+            <div key={i} ref={keep(i)} className="pblur__copy" style={sx({ '--r': step.r, '--a': step.a, '--b': step.b })} inert
+              aria-hidden="true"></div>
+          ))}
+          <div className="pblur__veil" aria-hidden="true"></div>
+        </Fragment>
+      ) : mode === 'side' ? (
+        <Fragment key="side">
+          <div ref={keep(0)} className="pblur__copy pblur__copy--side" inert aria-hidden="true"></div>
+          <div className="pblur__veil pblur__veil--side" aria-hidden="true"></div>
+        </Fragment>
+      ) : null}
+    </div>
+  )
+})

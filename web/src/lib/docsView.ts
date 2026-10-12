@@ -10,7 +10,7 @@
 // one piece of view state this file owns that has no server counterpart at all, session-only,
 // the same shape as `store.ts`'s own board `collapsed` id list.
 
-import { toast } from '@konstantinopolskii/vue'
+import { toast } from '../kit'
 import type { InternalLink } from './bodyMarkdown'
 import {
   ApiError,
@@ -163,7 +163,7 @@ export function createDocsView(state: { docs: DocsState }, deps: Deps) {
     state.docs.viewingRevision = null
   }
 
-  /** Reached from a goal detail's own doc chip (`GoalDetail.vue`) — switches the shell to Docs
+  /** Reached from a goal detail's own doc chip (`GoalDetail.tsx`) — switches the shell to Docs
    *  and opens the target in one call, the doc-side mirror of `navigateToGoal`. */
   function openDocFromGoal(id: string): void {
     deps.setView('docs')
@@ -211,7 +211,7 @@ export function createDocsView(state: { docs: DocsState }, deps: Deps) {
 
   /** One save call for title/body/path — `core.docs.save()`'s own "only the given fields land"
    *  contract, unchanged here. `id`/`expectedRevision` are explicit, never read off `state.docs.
-   *  current` implicitly: `DocDetail.vue`'s body editor debounces saves and is keyed/remounted
+   *  current` implicitly: `DocDetail.tsx`'s body editor debounces saves and is keyed/remounted
    *  per doc, so a save queued before a doc switch must still land on the RIGHT doc with the
    *  RIGHT revision even after the component that queued it has unmounted — the same reason
    *  `store.ts::updateGoal(id, patch)` takes an explicit id rather than "whichever goal is open".
@@ -241,7 +241,7 @@ export function createDocsView(state: { docs: DocsState }, deps: Deps) {
       if (state.docs.currentId === id) state.docs.current = fresh
       patchListEntry(fresh)
       // Check again is offered after an edit (lib/checkAgain.ts); a window showing this document takes the fresh copy
-      // (DocWindowBody.vue), its links too when they are known.
+      // (DocWindowBody.tsx), its links too when they are known.
       window.dispatchEvent(new CustomEvent('verticals:doc-edited', {
         detail: { id, title: fresh.title, path: fresh.path, doc: fresh, linksFresh },
       }))

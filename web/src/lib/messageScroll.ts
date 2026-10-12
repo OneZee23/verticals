@@ -3,7 +3,7 @@
 // the circle) and comes back when half of it is inside again. The check is on position, so it works both ways at any
 // speed. While you move the column it blurs a little, most at the start; following its growing end doesn't blur it. The
 // lines are drawn by the caller and the column scrolls past them, so no balloon is ever cut by an edge.
-import { onBeforeUnmount, watch, type Ref } from 'vue'
+import { onBeforeUnmount, watch, type Ref } from '../reactivity'
 import { reducedMotion } from './motion'
 import { defineKnobs, knob } from './tuning'
 

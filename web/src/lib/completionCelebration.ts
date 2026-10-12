@@ -1,11 +1,11 @@
 /** The all-subgoals-done celebration on a card: the sound, the overlay fade, the media sweep.
  *
- *  Lifted out of `GoalCard.vue` unchanged for ARCHITECTURE.md §2's 750-line module rule (S-90a).
+ *  Lifted out of `GoalCard.tsx` unchanged for ARCHITECTURE.md §2's 750-line module rule (S-90a).
  *  It is a self-contained side effect keyed on one boolean, so it moves whole: same constants,
  *  same keyframes, same durations, same teardown. The component keeps the three refs it renders.
  */
 
-import { nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch, type Ref } from '../reactivity'
 import { playSound } from './sound'
 import { reducedMotion } from './motion'
 
@@ -19,8 +19,8 @@ export const COMPLETION_LOTTIE = {
   lastFrame: 300.00001221925,
 } as const
 
-/** The two element refs stay OWNED BY THE COMPONENT and are passed in: they are template refs,
- *  bound by `ref="..."` in the markup, so they have to be top-level bindings there. */
+/** The two element refs stay OWNED BY THE COMPONENT and are passed in: its markup binds them to
+ *  its elements. */
 export function useCompletionCelebration(
   childrenAllDone: Ref<boolean>,
   completionLayer: Ref<HTMLElement | null>,

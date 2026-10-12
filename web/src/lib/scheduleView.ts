@@ -5,7 +5,7 @@
  *  available and not an arbitrary one. Behaviour is unchanged, imports moved.
  */
 
-import { computed, ref, type ComputedRef } from 'vue'
+import { computed, ref, type ComputedRef } from '../reactivity'
 import { buildScheduleGrid, type ScheduleGrid } from './schedule'
 
 /** Which decade/year/month the popover is currently SHOWING. `0` = follow today.

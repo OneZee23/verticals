@@ -1,7 +1,7 @@
 // One reactive board state tree; write helpers mutate records in place for immediate rendering.
 
-import { reactive, computed, type ComputedRef } from 'vue'
-import { toast } from '@konstantinopolskii/vue'
+import { reactive, computed, type ComputedRef } from './reactivity'
+import { toast } from './kit'
 import {
   fetchBoard,
   fetchTags,
@@ -335,7 +335,7 @@ function bumpAncestorProgress(id: string, delta: number): void {
  *  "create on any other visible column" (AC-110-adjacent: schedule the new goal into the column
  *  the inline-add row lives in) from the same call — `board.anchor_date` is, by construction, a
  *  date inside every one of the 7 real-scale columns currently on screen, since each column *is*
- *  "the period containing that anchor date" (`core/board.py`). `verticalBucket` is `Column.vue`'s
+ *  "the period containing that anchor date" (`core/board.py`). `verticalBucket` is `Column.tsx`'s
  *  own `vertical` prop, which already carries the literal `"maybe"` string for that column
  *  (`toColumnData` above) — so the caller never needs to special-case which column it is. */
 async function createGoalOn(verticalBucket: string, title: string): Promise<string | null> {
@@ -654,7 +654,7 @@ async function updateGoal(id: string, patch: UpdatePatch, keepalive = false): Pr
 
 // --- nav (app shell) ------------------------------------------------------------------------
 
-/** App.vue's nav calls this for its two wired items ("Inbox"/"Verticals") only — see App.vue's
+/** App.tsx's nav calls this for its two wired items ("Inbox"/"Verticals") only — see App.tsx's
  *  own header comment for why the other six nav items (Days..3 years) never call this: no doc
  *  (`docs/JOURNEYS.md`, `docs/E2E.md`) specifies a single-scale view for them, so clicking one is
  *  a no-op today rather than invented navigation. */

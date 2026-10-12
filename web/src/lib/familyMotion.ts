@@ -26,7 +26,7 @@
 // include the running animations, and what was on its way out keeps fading from where it is.
 // The clocks start together once the change's first frame is on screen (lib/startTogether.ts).
 
-import { shallowRef } from 'vue'
+import { shallowRef } from '../reactivity'
 import { placeAllWashes } from './goalWash'
 import { curve, reducedMotion } from './motion'
 import { contentTop, familyBlock, fitScroll } from './columnFit'
@@ -35,7 +35,7 @@ import { refreshLifts, releaseLifts } from './cardLift'
 import { clearLayers, copies, layer, place, stillCopy } from './stillCopy'
 import { startTogether, unlayer } from './startTogether'
 
-const DURATION = 360 // the opening's time and curve (GoalCard.vue's OPENING, goalDetail.css), one rhythm
+const DURATION = 360 // the opening's time and curve (GoalCard.tsx's OPENING, goalDetail.css), one rhythm
 const LEAVE_MS = 150 // what only was there fades out where it is, quicker than what arrives (exits are quicker),
 const ARRIVE = 0.25 // and what only is there now fades in from a quarter of the time, landing with everything else
 // A title that changes size or wraps differently hands over from its old look to its new one while both travel the same
@@ -50,11 +50,11 @@ const CROSS_IN = 0.45 // after the rows gliding past its new place have gone by
 let running: Animation[] = []
 let moveToken = 0
 let moving = false
-/** GoalCard.vue's lists skip their own grow and fold while the family moves: the move draws them. */
+/** GoalCard.tsx's lists skip their own grow and fold while the family moves: the move draws them. */
 export function familyMoving(): boolean {
   return moving
 }
-/** The same, for templates: the open card's parts switch at once while the family moves (their CSS transitions keep a
+/** The same, reactive, for drawing: the open card's parts switch at once while the family moves (their CSS transitions keep a
  *  leaving part in the page for two frames, and the move must read where everything ends up at once). */
 export const familyMovingNow = shallowRef(false)
 
@@ -290,7 +290,7 @@ export function scrollBack(place: ColumnPlace): void {
 /** A column whose rows a move redraws, as it was before the change. */
 interface Lane { column: HTMLElement; vertical: string; box: DOMRect; before: Map<string, Seen> }
 
-const ROOM = 8 // a column's clip reaches 8 px past its sides, room for a lifted card (Column.vue)
+const ROOM = 8 // a column's clip reaches 8 px past its sides, room for a lifted card (Column.tsx)
 const FRAME = 1000 / 60
 
 /** The board's columns, in order. */
@@ -388,7 +388,7 @@ async function move(plan: {
   moving = true
   familyMovingNow.value = true
   for (const column of columns) delete column.dataset.familyLane
-  for (const lane of lanes) lane.column.dataset.familyLane = '' // on the column itself: Vue rewrites its classes
+  for (const lane of lanes) lane.column.dataset.familyLane = '' // on the column itself: its drawing rewrites its classes
   document.body.dataset.familyMoving = lanes.map((lane) => lane.vertical).join(' ')
   const token = ++moveToken
   running.push(...leaving)

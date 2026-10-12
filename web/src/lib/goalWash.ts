@@ -25,7 +25,7 @@
 // moves: colour shows or hides a shape already in place. Positions come from layout boxes (offset*), which a lift's
 // transform does not touch.
 
-import { onBeforeUnmount, onMounted, watch, type Ref, type WatchSource } from 'vue'
+import { onBeforeUnmount, onMounted, watch, type Ref, type WatchSource } from '../reactivity'
 
 /** A mounted group: it measures its shapes, then writes them. */
 type Group = { measure: () => Measured | null; write: (measured: Measured) => void }

@@ -1,12 +1,12 @@
 // The light crossing the column's veil (KK, 4 Oct 2026: "everything ... as smooth as hover on green").
-import { queuePostFlushCb } from 'vue'
+import { queuePostFlushCb } from '../reactivity'
 
 interface Seen { opacity: number; filter: string; wash: number }
 interface Change { row: HTMLElement | null; seen: Seen | null; done: () => void }
 const pending: Change[] = []
 
-/** Vue has not patched this card yet. Keep an interrupted crossing's actual look, then start all changed cards
- *  together after the patch. The open goal uses reversible CSS transitions already; only crossings need this. */
+/** The card is not drawn anew yet. Keep an interrupted crossing's actual look, then start all changed cards
+ *  together after the drawing. The open goal uses reversible CSS transitions already; only crossings need this. */
 export function finishLightMove(card: HTMLElement | null, done: () => void): void {
   const row = card?.querySelector<HTMLElement>(':scope > .goal-card__row') ?? null
   let seen: Seen | null = null
@@ -16,7 +16,7 @@ export function finishLightMove(card: HTMLElement | null, done: () => void): voi
     seen = { opacity: Number(style.opacity), filter: style.filter, wash: Number(getComputedStyle(row, '::before').opacity) }
   }
   pending.push({ row, seen, done })
-  // Still inside Vue's render task, before mutation observers or other microtasks can start an expensive read.
+  // After the tick's drawing, still in its task, before mutation observers or other microtasks can start an expensive read.
   if (pending.length === 1) queuePostFlushCb(run)
 }
 
@@ -37,7 +37,7 @@ async function run(): Promise<void> {
   // Capture the promises before a reversal can cancel them. Reading `finished` after cancellation would wait forever
   // on the animation's next play, and leave the card above the veil.
   const finished = Promise.allSettled(animations.map((animation) => animation.finished))
-  // A layout read during Vue's patch can already assign a start time, even though no frame has been presented.
+  // A layout read during the drawing can already assign a start time, even though no frame has been presented.
   const fresh = animations.filter((animation) => animation.playState === 'running')
   const crossings = new Map<Element, { from: number; to: number; wash?: number }>()
   for (const animation of fresh) {

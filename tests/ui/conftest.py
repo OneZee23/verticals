@@ -55,6 +55,7 @@ from playwright.sync_api import (
 )
 
 from tests.harness.report import artifact, scenario_id_of
+from tests.harness.static_server import serve
 from tests.ui.gesture_counter import GestureCounter
 from tests.ui.undo_helpers import sent_body
 
@@ -423,7 +424,12 @@ def _static_server(api_base_url: str, tmp_path: Path) -> Iterator[str]:
     `/api` and `/healthz` proxy onto `api_base_url` via `VITE_API_PROXY_TARGET`
     (`web/vite.config.ts`'s `preview.proxy`). This is what makes the browser's requests
     same-origin (S-114/S-125's own CORS-closed assertion) without touching
-    `verticals/api/app.py`, which registers no `CORSMiddleware` on purpose."""
+    `verticals/api/app.py`, which registers no `CORSMiddleware` on purpose.
+    `VERTICALS_STATIC=python` serves the same way from the test process instead (tests/harness/static_server.py)."""
+    if os.environ.get("VERTICALS_STATIC") == "python":
+        with serve(WEB_DIR / "dist", api_base_url) as base_url:
+            yield base_url
+        return
     port = _free_port()
     log_path = tmp_path / "static.log"
     env = dict(os.environ)

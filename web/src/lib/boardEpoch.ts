@@ -10,7 +10,7 @@
 // 2026-08-18 23:38:43, `lib/dragActions.ts`) was exactly this race, papered over by forcing a
 // reload to happen between two writes instead of ever making a stale response harmless to land.
 
-import { watch } from 'vue'
+import { watch } from '../reactivity'
 
 let epoch = 0
 

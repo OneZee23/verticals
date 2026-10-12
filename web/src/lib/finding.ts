@@ -2,7 +2,7 @@
 // period and returns each match's parents; with shorter words only the board on screen is searched, and nothing is
 // asked. Matches from periods a column doesn't show stand under that period's headline: what is coming first, nearest
 // first, then what is closed, latest first.
-import { reactive, watch, type WatchStopHandle } from 'vue'
+import { reactive, watch, type WatchStopHandle } from '../reactivity'
 import { findGoals, type FindResponse, type GoalCard, type SearchParent } from './api'
 import { plannedPeriodLabel } from './schedule'
 import { defineKnobs, knob } from './tuning'

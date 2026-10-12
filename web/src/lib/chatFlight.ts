@@ -1,6 +1,6 @@
 // Words on their way into the conversation (docs/design-handoff S2.P3.019, S2.P4.016): where they stood in the field or
 // in the circle, so their balloon comes in from there instead of appearing in place.
-import { shallowRef } from 'vue'
+import { shallowRef } from '../reactivity'
 
 export type Flight = { kind: 'sent' | 'reply'; left: number; top: number; at: number }
 

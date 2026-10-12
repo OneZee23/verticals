@@ -9,7 +9,7 @@
 // optimistic commit), mirroring exactly what the same lines imported while they lived in
 // store.ts.
 
-import { nextTick, watch } from 'vue'
+import { nextTick, watch } from '../reactivity'
 import {
   patchGoal,
   reparentGoal as apiReparentGoal,
@@ -34,7 +34,7 @@ import { reorderPlacement, reparentPlacement, valueColor } from './boardPlacemen
 import { messageForError } from './scheduleFeedback'
 import { playSound } from './sound'
 import { verticalRank, type VerticalScale } from './periods'
-import { toast } from '@konstantinopolskii/vue'
+import { toast } from '../kit'
 
 export interface DragActionDeps {
   state: { drag: DragState; board: BoardResponse | null }
@@ -72,10 +72,10 @@ export interface DragActionDeps {
 }
 
 /** Wait for the DOM to catch up with a hover-driven layout change before trusting row
- *  rects again — `nextTick` (Vue's own patch), one `requestAnimationFrame` (paint settles), then
+ *  rects again — `nextTick` (the components' drawing), one `requestAnimationFrame` (paint settles), then
  *  either a real `transitionend` off the column strip or a timeout sized to the columns' own
  *  measured `transition-duration` (0 today — the flat/product board declares no width transition,
- *  see `Column.vue`'s own CSS — so this resolves right after the paint frame; a future transition
+ *  see `Column.tsx`'s own CSS — so this resolves right after the paint frame; a future transition
  *  is still honoured without this function changing). */
 const RECAPTURE_GRACE_MS = 50
 
@@ -126,7 +126,7 @@ export function createDragActions(deps: DragActionDeps) {
   })
 
   // Pointer drag, not HTML5 `draggable` (`docs/DEPENDENCIES.md` dep cap; `docs/PLANNER_DND.md`
-  // §0). `Board.vue` owns the window listener/timer lifecycle; these wrappers keep its mutations
+  // §0). `Board.tsx` owns the window listener/timer lifecycle; these wrappers keep its mutations
   // in the one state tree.
   function pointerDownCard(
     id: string,
@@ -200,7 +200,7 @@ export function createDragActions(deps: DragActionDeps) {
     if (parked) state.drag.settling = null
     dragHover.reset()
     // Only a goal that was in the hand ends or keeps a move. A click, on the field or on the goal waiting there, is no
-    // release: it leaves the goal waiting and the weeks open, and a tap picks the goal (S5.P4.017). `App.vue` calls this
+    // release: it leaves the goal waiting and the weeks open, and a tap picks the goal (S5.P4.017). `App.tsx` calls this
     // on every pointer-up, so the end of a drag is told from a click here.
     if (released) deps.onRelease?.(state.drag.settling?.duration ?? 0, parked)
     if (!released?.target) return

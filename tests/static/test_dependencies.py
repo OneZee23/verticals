@@ -25,6 +25,8 @@ from __future__ import annotations
 import re
 import tomllib
 
+import pytest
+
 from tests.harness.report import gate
 from tests.static.conftest import REPO_ROOT, WEB_DIR, npm_package_names, venv_dist_info_names
 
@@ -42,7 +44,8 @@ ANALYTICS_AND_UPDATERS = {"sentry", "posthog", "segment", "mixpanel", "analytics
 # hosts) plus the one vendor link this build's own `dist/` was empirically found to carry.
 ALLOWED_URL_PREFIXES = (
     "http://www.w3.org/",
-    "https://vuejs.org/error-reference/",
+    "https://react.dev/errors/",  # React's production build names an error by its page there
+    "https://github.com/mobxjs/mobx/blob/main/packages/mobx/src/errors.ts",  # and MobX's by its number in this file
     # Send to developers (docs/design/bug-reports.md, web/src/lib/reportSend.ts): the repository's own new-issue page, an
     # address the person opens by pressing a link and reading what it carries before they submit it. The page loads nothing
     # from it and sends nothing to it.
@@ -160,12 +163,16 @@ def test_dependencies_rule_catches_a_planted_foreign_url(scratch_dir):
     assert foreign == ["https://evil-telemetry.example.com/collect"], foreign
 
 
-def test_dependencies_rule_allows_the_declared_vue_error_reference_link(scratch_dir):
+@pytest.mark.parametrize("bundle", [
+    't="https://react.dev/errors/"+e',
+    't="Find the full error at: https://github.com/mobxjs/mobx/blob/main/packages/mobx/src/errors.ts"',
+])
+def test_dependencies_rule_allows_the_declared_error_links(scratch_dir, bundle):
     victim = scratch_dir / "bundle.js"
-    victim.write_text('t=`https://vuejs.org/error-reference/#runtime-${r}`')
+    victim.write_text(bundle)
     urls = re.findall(r"https?://[^\s\"'`)]+", victim.read_text(encoding="utf-8"))
     foreign = [u for u in urls if not u.startswith(ALLOWED_URL_PREFIXES)]
-    assert foreign == [], f"the declared vuejs.org allowance must not be flagged, got {foreign}"
+    assert foreign == [], f"a declared error-link allowance must not be flagged, got {foreign}"
 
 
 # --- the pins are only as good as the environment that honours them -------------------------

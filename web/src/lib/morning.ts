@@ -5,7 +5,7 @@
 // also reaches your own connected tools, read-only (desktop/chat/prompt-morning.md). The agent writes the report as one
 // document and links it to its task, the one open "Morning report" task, which the server has made or moved to today
 // (core/morning.py), then answers in two lines with the document linked; the answer
-// stands in the field with the report's page (SearchBar.vue). No rule writes a report: without an agent there is none.
+// stands in the field with the report's page (SearchBar.tsx). No rule writes a report: without an agent there is none.
 // In the desktop app a second agent then checks the report against the raw sources, and the answer is told only when that is
 // done (desktop/chat/morning_flow.py; docs/design/morning-quality.md): the field shows the step meanwhile. The comments you
 // left in the last report are on their tasks by then (the server's answer to `beginMorning`), and the ask lists them.

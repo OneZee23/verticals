@@ -20,7 +20,7 @@ import type { BoardResponse, GoalCard } from './api'
 
 /** One goal's live record from anywhere in the payload — a column card or a nested child.
  *  Returns the object *in* the payload, not a copy: `store.ts` mutates what this hands back and
- *  relies on that being the same object Vue's `reactive()` is tracking. */
+ *  relies on that being the same object the store's observable state is tracking. */
 export function findGoal(board: BoardResponse | null, id: string): GoalCard | undefined {
   if (!board) return undefined
   for (const col of board.columns) {

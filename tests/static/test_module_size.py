@@ -27,9 +27,8 @@ So: this file re-implements the *correct* per-file version natively, in Python, 
 module, not 750 divided across however many files `find` happens to enumerate first.
 
 `docs/IMPLEMENTATION.md`'s own WP-18 file table extends this file's scope past
-`ARCHITECTURE.md` §2's Python-only text to "Python + `.vue`/`.ts`" — `web/src/` now holds both
-(WP-12 landed it). AC-083/AC-181/S-90's own wording never mentions the frontend, so the
-`.vue`/`.ts` half below is this suite's own addition on top of the four-document contract, laid
+`ARCHITECTURE.md` §2's Python-only text to "Python + `.ts`/`.tsx`" — `web/src/` holds both. AC-083/AC-181/S-90's own wording never mentions the frontend, so the
+`.ts`/`.tsx` half below is this suite's own addition on top of the four-document contract, laid
 on as a second, clearly-separated assertion rather than folded into the Python one.
 
 A third assertion adds `tests/` itself, per the ruling recorded at `docs/PENDING_DOC_FIXES.md`
@@ -56,7 +55,7 @@ def _line_count(path: Path) -> int:
 
 
 def oversized(root: Path, patterns: tuple[str, ...]) -> list[tuple[Path, int]]:
-    """Every file under `root` matching any of `patterns` (`"*.py"`, `"*.vue"`, ...) whose own
+    """Every file under `root` matching any of `patterns` (`"*.py"`, `"*.tsx"`, ...) whose own
     line count exceeds `LIMIT` — the correct, per-file replacement for `ARCHITECTURE.md` §2's
     batched `awk` command. Discovered by `rglob`, never a hand-kept file list, so a module a
     sibling work package adds after this suite is written is in scope the next time it runs."""
@@ -81,12 +80,12 @@ def test_s90a_no_python_module_over_750_lines():
 
 def test_s90a_no_frontend_module_over_750_lines():
     """`docs/IMPLEMENTATION.md` WP-18's own scope extension: the identical budget applied to
-    `web/src/`'s `.vue` and `.ts` files. Gates rather than vacuously passing if `web/src/` is
+    `web/src/`'s `.ts` and `.tsx` files. Gates rather than vacuously passing if `web/src/` is
     ever absent — WP-12 owns creating it; this suite should not silently claim victory over a
     directory that was never generated."""
     if not WEB_SRC_DIR.is_dir():
         gate("web/src/ does not exist yet (WP-12 not landed)")
-    hits = oversized(WEB_SRC_DIR, ("*.vue", "*.ts"))
+    hits = oversized(WEB_SRC_DIR, ("*.ts", "*.tsx"))
     assert not hits, (
         f"{len(hits)} frontend module(s) over {LIMIT} lines: "
         + ", ".join(f"{p.relative_to(WEB_SRC_DIR.parent)}:{n}" for p, n in hits)
