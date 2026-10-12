@@ -13,11 +13,11 @@ The sign's helpers, the pinned day and the fixture that sets motion are `test_co
 from __future__ import annotations
 
 import pytest
-from playwright.sync_api import expect
+from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession
 from tests.ui.test_column_bars import (
-    _GEOMETRY, INK, LIGHT, PAGED, PERIODS, SPAN_HEADS, SPANS, STRIP, _col, _hover, _open, _rest, _step, _wait_bars,
+    _GEOMETRY, INK, LIGHT, PAGED, PERIODS, SPAN_HEADS, SPANS, STRIP, _blur, _col, _hover, _open, _rest, _step, _wait_bars,
     _wait_colours,
     ui_reduced_motion,  # noqa: F401  (the fixture)
 )
@@ -100,38 +100,62 @@ def test_the_boxes_and_the_bars_stand_in_the_same_places_in_both_looks(ui_f2: Ui
     assert page.evaluate(_GEOMETRY, "week") == holds
 
 
+_FADE_SAMPLER = """([week, light, ms]) => {
+  const bars = [...document.querySelectorAll(light)]; const col = document.querySelector(week); const t0 = performance.now(); const log = [];
+  window.__light = log;
+  const tick = () => { log.push([performance.now() - t0, ...bars.map((b) => parseFloat(getComputedStyle(b).opacity)), col.querySelectorAll('[data-role="period-slide"]').length]); if (performance.now() - t0 < ms) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}"""
+WEEK = f"{STRIP} > [data-vertical='week']"
+LIGHT_BARS = f"{WEEK} .column-bars__button--mode .column-bars__bar--outer"
+
+
+def _fade(page: Page, act, key: str, ends_at: float) -> None:
+    """Both light bars, every frame, from just before `act` until a second after the column is on `key`: they are never
+    apart, they start within 50 ms of the frame the column's slides swap, and they take 60 to 330 ms to get there (the
+    declared 150, on the app's strong ease-out)."""
+    page.evaluate(_FADE_SAMPLER, [WEEK, LIGHT_BARS, 1600])
+    page.wait_for_timeout(100)
+    act()
+    expect(_col(page, "week")).to_have_attribute("data-period-key", key)
+    page.wait_for_timeout(1000)
+    log = page.evaluate("window.__light")
+    assert all(abs(a - b) < 1e-9 for _, a, b, _ in log), "the two light bars are never apart"
+    swap = next(t for t, _, _, slides in log if slides >= 2)
+    moved = next(t for t, a, _, _ in log if 0.001 < a < 0.999)
+    assert abs(moved - swap) <= 50, f"the bars start {moved - swap:.0f} ms from the swap"
+    resting = next(t for t, a, _, _ in log if t > moved and (a <= 0.001 or a >= 0.999))
+    assert 60 <= resting - moved <= 330, f"the fade takes {resting - moved:.0f} ms, 150 by design"
+    assert log[-1][1] == ends_at
+
+
 @pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
 def test_the_two_light_bars_go_and_come_with_the_page_in_150_ms_together(ui_f2: UiSession) -> None:
     """One movement with the page's own change: both fade on opacity alone, in the title's 150 ms, from the frame the
-    column's slides swap, and they are never apart."""
+    column's slides swap, and they are never apart. They go when a side bar pages the column away, and come when a click
+    on the single bar, the pointer on it, brings the board back."""
     page = _open(ui_f2)
-    week = f"{STRIP} > [data-vertical='week']"
-    light = f"{week} .column-bars__button--mode .column-bars__bar--outer"
-    assert page.locator(light).count() == 2
-    props = page.locator(light).first.evaluate("el => [getComputedStyle(el).transitionProperty, getComputedStyle(el).transitionDuration]")
+    assert page.locator(LIGHT_BARS).count() == 2
+    props = page.locator(LIGHT_BARS).first.evaluate("el => [getComputedStyle(el).transitionProperty, getComputedStyle(el).transitionDuration]")
     assert "opacity" in props[0] and "0.15s" in props[1], props
     _hover(page, "week")
-    sampler = """([week, light, ms]) => {
-      const bars = [...document.querySelectorAll(light)]; const col = document.querySelector(week); const t0 = performance.now(); const log = [];
-      window.__light = log;
-      const tick = () => { log.push([performance.now() - t0, ...bars.map((b) => parseFloat(getComputedStyle(b).opacity)), col.querySelectorAll('[data-role="period-slide"]').length]); if (performance.now() - t0 < ms) requestAnimationFrame(tick); };
-      requestAnimationFrame(tick);
-    }"""
-    for step, key in ((1, "2026-W33"), (-1, "2026-W32")):
-        page.evaluate(sampler, [week, light, 1100])
-        page.wait_for_timeout(100)
-        page.locator(f"{week} [data-cap='period-{'next' if step == 1 else 'prev'}']").click()
-        expect(_col(page, "week")).to_have_attribute("data-period-key", key)
-        page.wait_for_timeout(1000)
-        log = page.evaluate("window.__light")
-        assert all(abs(a - b) < 1e-9 for _, a, b, _ in log), "the two light bars are never apart"
-        swap = next(t for t, _, _, slides in log if slides >= 2)
-        moved = next(t for t, a, _, _ in log if 0.001 < a < 0.999)
-        assert abs(moved - swap) <= 50, f"the bars start {moved - swap:.0f} ms from the swap"
-        resting = next(t for t, a, _, _ in log if t > moved and (a <= 0.001 or a >= 0.999))
-        took = resting - moved
-        assert 60 <= took <= 330, f"the fade takes {took:.0f} ms, 150 by design"
-        assert log[-1][1] == (0 if step == 1 else 1)
+    _fade(page, lambda: page.locator(f"{WEEK} [data-cap='period-next']").click(), "2026-W33", 0)
+    _fade(page, lambda: page.locator(f"{WEEK} [data-cap='period-today']").click(), "2026-W32", 1)
+
+
+@pytest.mark.parametrize("ui_reduced_motion", ["no-preference"], indirect=True)
+def test_the_light_bars_come_the_same_way_when_the_keyboard_brings_the_board_back(ui_f2: UiSession) -> None:
+    """A keyboard's focus on the single bar has its own look (the bars darken at once, nothing waits); the light bars still
+    fade in with the page, in the same 150 ms."""
+    page = _open(ui_f2)
+    _step(page, "week", "period-next", "2026-W33")
+    page.locator(f"{WEEK} [data-cap='period-today']").focus()
+
+    def press() -> None:
+        page.keyboard.press("Space")
+        assert page.evaluate("() => document.activeElement.matches(':focus-visible')"), "the keyboard's focus look is on during the fade"
+
+    _fade(page, press, "2026-W32", 1)
 
 
 def test_under_reduced_motion_the_light_bars_simply_go_and_come(ui_f2: UiSession) -> None:
@@ -142,6 +166,8 @@ def test_under_reduced_motion_the_light_bars_simply_go_and_come(ui_f2: UiSession
     assert float(page.locator(light).first.evaluate("el => parseFloat(getComputedStyle(el).transitionDuration)")) < 0.001
     _step(page, "week", "period-next", "2026-W33")
     _rest(page)
+    _blur(page)
     assert len(_wait_bars(page, "week", 1)) == 1
     page.keyboard.press("t")
-    assert len(_wait_bars(page, "week", 3)) == 3
+    expect(_col(page, "week")).to_have_attribute("data-period-key", "2026-W32")
+    assert [bar["color"] for bar in _wait_bars(page, "week", 3)] == [LIGHT, INK, LIGHT]

@@ -151,6 +151,12 @@ def _step(page: Page, vertical: str, cap: str, key: str) -> None:
     expect(column.locator('[data-role="period-slide"]')).to_have_count(1)
 
 
+def _blur(page: Page) -> None:
+    """A click on a bar leaves the focus on it, and the next key pressed (the `t` below) makes that a keyboard's focus, which
+    brings the side bars into view: the focus goes back to the page first, so `t` is pressed from the board."""
+    page.evaluate("() => document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+
+
 def test_every_column_but_life_shows_three_bars_at_rest(ui_f2: UiSession) -> None:
     """|||, the middle one dark, in each of the six columns that page; Life has none, and the dot that was "Today" is gone."""
     page = _open(ui_f2)
@@ -303,10 +309,11 @@ def test_t_still_goes_back_to_today(ui_f2: UiSession) -> None:
     page = _open(ui_f2)
     _step(page, "week", "period-next", "2026-W33")
     _rest(page)
+    _blur(page)
     assert len(_wait_bars(page, "week", 1)) == 1
     page.keyboard.press("t")
     expect(_col(page, "week")).to_have_attribute("data-period-key", "2026-W32")
-    assert len(_wait_bars(page, "week", 3)) == 3
+    assert [bar["color"] for bar in _wait_bars(page, "week", 3)] == [LIGHT, INK, LIGHT]
 
 
 def test_a_click_on_the_lines_words_does_what_a_click_on_the_header_does(ui_f2: UiSession) -> None:
@@ -385,7 +392,7 @@ def test_the_three_boxes_do_not_overlap_and_the_side_boxes_grow_outward(ui_f2: U
 
 def test_the_left_box_stops_where_the_words_of_the_kind_line_end(ui_f2: UiSession) -> None:
     """A 1320 px window with the Quarter column open leaves the others 160 px, and Week's kind line, "Week · May ’27",
-    fills its room: it ends 4 px from the first bar. The left box grows no further left than that, so it never covers the
+    fills its room: it ends about 3 px from the first bar. The left box grows no further left than that, so it never covers the
     words, though it is smaller than 24 px there; Day's short "Day · ’27" leaves the whole 24 px."""
     page = _open(ui_f2, "2027-05-12", width=1320)
     expand_column(page, "quarter")
