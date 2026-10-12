@@ -1,0 +1,155 @@
+"""What the chat tells its agent about the app's reports (docs/design/bug-reports.md, desktop/chat/prompt-report.md), and how it
+finds the checkout of Verticals' source that a pull request needs. Sample folders only, made under a scratch directory."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import sys
+import types
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _chat():
+    spec = importlib.util.spec_from_file_location("verticals_desktop_chat_reports", ROOT / "desktop" / "chat" / "chat.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _checkout(path: Path, name: str = "verticals") -> Path:
+    """A folder that is a checkout of Verticals' source as far as the chat can tell: a git repository with the project's
+    pyproject.toml and the desktop launcher in it."""
+    (path / ".git").mkdir(parents=True)
+    (path / "desktop").mkdir()
+    (path / "desktop" / "launcher.py").write_text("")
+    (path / "pyproject.toml").write_text(f'[project]\nname = "{name}"\nversion = "0.1.0"\n')
+    return path
+
+
+def _without_the_variable(chat, check):
+    """`check()` with VERTICALS_SOURCE out of the environment, and the environment as it was after."""
+    kept = os.environ.pop("VERTICALS_SOURCE", None)
+    try:
+        return check()
+    finally:
+        if kept is not None:
+            os.environ["VERTICALS_SOURCE"] = kept
+
+
+def test_the_prompt_says_what_a_report_is_and_how_a_design_and_its_pull_request_go(scratch_dir: Path) -> None:
+    prompt = " ".join(_chat().report_prompt(None, False, home=scratch_dir, code_root=scratch_dir / "nowhere").split())
+    assert prompt.startswith("## Reports from the app")
+    # What a report is, and not to read it: its pictures are inside the text.
+    assert "a document under reports/bugs/" in prompt and "Never read a report with doc_get" in prompt
+    # Improve it: one design document in plain words, saved and linked to the report's task, then two lines saying it waits.
+    assert '"Improve it" asks for a design' in prompt and "design/<short-name>.md" in prompt
+    assert "link it to the report's task with doc_link" in prompt and "answer in two short lines that you are waiting" in prompt
+    assert "If the task already has a design document, change that one" in prompt
+    # The person comments and presses Check again; only once they agree is the change made, with tests first, in a checkout.
+    assert "presses Check again" in prompt and "Only once they agree" in prompt
+    assert "on a new branch" in prompt and "tests first" in prompt and "see them fail" in prompt
+    assert "open a pull request with gh" in prompt and "so it joins the task's links" in prompt
+    # Without what it needs it says so and stops: the task and its documents stay, only the pull request waits.
+    assert "only the pull request waits" in prompt
+
+
+def test_the_reports_come_in_every_turn_but_the_unattended_morning_one() -> None:
+    chat = _chat()
+    chat.JsonProcess, chat.which = _Proc, lambda provider: "claude"
+    host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."))
+    for settings, wanted in (({"permission": "manual"}, True), ({"permission": "board"}, True), ({"sources": "connected"}, False)):
+        agent = chat.ClaudeAgent(host, _Session(), chat.clean_settings(settings), None)
+        args = agent.proc.args
+        prompt = args[args.index("--append-system-prompt") + 1]
+        assert ("## Reports from the app" in prompt) is wanted, settings
+    assert "## Reports from the app" in chat.codex_instructions(chat.clean_settings({"provider": "codex"}))
+    assert "## Reports from the app" not in chat.codex_instructions(chat.clean_settings({"provider": "codex", "sources": "connected"}))
+
+
+class _Proc:
+    def __init__(self, args, cwd, env, handle, exited):
+        self.args = args
+
+    def send(self, message):
+        pass
+
+
+class _Session:
+    def emit(self, event):
+        pass
+
+
+def test_the_checkout_is_found_from_the_persons_word_then_the_code_then_the_usual_folders(scratch_dir: Path) -> None:
+    chat = _chat()
+    home = scratch_dir / "home"
+    state = scratch_dir / "state"
+    state.mkdir()
+    nowhere = scratch_dir / "nowhere"
+
+    def found(**kw):
+        return _without_the_variable(chat, lambda: chat.find_source(state, home, code_root=kw.get("code_root", nowhere)))
+
+    assert found() is None
+    # The folders people clone into.
+    usual = _checkout(home / "Developer" / "verticals")
+    assert found() == usual
+    # The repository the gateway runs from, when it is one, comes before them.
+    code = _checkout(scratch_dir / "run-from-here")
+    assert found(code_root=code) == code
+    # The person's word for it comes first: `source` in the app's config.json (nothing else of that file is read) ...
+    elsewhere = _checkout(scratch_dir / "elsewhere" / "any name")
+    (state / "config.json").write_text(json.dumps({"token": "t-not-read", "password": "p-not-read", "source": str(elsewhere)}))
+    assert found(code_root=code) == elsewhere
+    # ... and VERTICALS_SOURCE before that.
+    named = _checkout(scratch_dir / "named")
+    os.environ["VERTICALS_SOURCE"] = str(named)
+    try:
+        assert chat.find_source(state, home, code_root=code) == named
+    finally:
+        del os.environ["VERTICALS_SOURCE"]
+    # A folder that is not Verticals' source is not a checkout, whatever it is called or holds.
+    (state / "config.json").write_text(json.dumps({"source": str(_checkout(scratch_dir / "other", name="something-else"))}))
+    assert found() == usual
+    (state / "config.json").write_text("not json")
+    assert found() == usual
+    assert not chat.is_checkout(scratch_dir / "missing") and not chat.is_checkout(scratch_dir / "other" / ".git")
+
+
+def test_the_prompt_says_where_the_checkout_is_or_that_there_is_none(scratch_dir: Path) -> None:
+    chat = _chat()
+    home = scratch_dir / "home"
+    home.mkdir()
+    nowhere = scratch_dir / "nowhere"
+    none = _without_the_variable(chat, lambda: chat.report_prompt(None, False, home=home, code_root=nowhere))
+    assert "No checkout of Verticals' source was found on this Mac. Ask where it is; if there is none, say the pull request must wait." in none
+    checkout = _checkout(home / "verticals")
+    there = _without_the_variable(chat, lambda: chat.report_prompt(None, False, home=home, code_root=nowhere))
+    assert f"The source of Verticals on this Mac is a git checkout at {checkout}." in there and "No checkout" not in there
+
+
+def test_shaping_skills_are_named_only_when_this_mac_has_them_and_the_agent_can_use_them(scratch_dir: Path) -> None:
+    chat = _chat()
+    home = scratch_dir / "home"
+    nowhere = scratch_dir / "nowhere"
+    generic = "Use the skills you have for shaping and design, if there are any."
+
+    def prompt(full: bool) -> str:
+        return " ".join(_without_the_variable(chat, lambda: chat.report_prompt(None, full, home=home, code_root=nowhere)).split())
+
+    # None here: generic words, and no name in the public repository's text.
+    assert generic in prompt(True)
+    for folder, name, with_file in ((".claude/skills", "team-shaping", True), (".agents/skills", "shaping", True),
+                                    (".claude/skills", "shaping-notes", False), (".claude/skills", "typography", True)):
+        (home / folder / name).mkdir(parents=True)
+        if with_file:
+            (home / folder / name / "SKILL.md").write_text("---\nname: x\n---\n")
+    assert chat.shaping_skills(home) == ["shaping", "team-shaping"]
+    # Named for an agent with its own tools, in the words the skill folder gives; not for one that has no tools to use them with.
+    assert "Use these skills for it: shaping, team-shaping." in prompt(True) and generic not in prompt(True)
+    assert generic in prompt(False) and "team-shaping" not in prompt(False)

@@ -95,7 +95,7 @@ def is_checkout(path):
         return False
 
 
-def find_source(state_dir=None, home=None):
+def find_source(state_dir=None, home=None, code_root=None):
     """A checkout of Verticals' source on this Mac, or None. The agent that makes a change and opens its pull request needs
     one; the installed app ships without. In this order: the person's word for it, `VERTICALS_SOURCE` or `source` in the app's
     config.json (nothing else of that file is read); the repository this code runs from, when it runs from a checkout; the
@@ -108,7 +108,7 @@ def find_source(state_dir=None, home=None):
     except (OSError, ValueError):
         pass
     candidates = [Path(n).expanduser() for n in named if isinstance(n, str) and n.strip()]
-    candidates += [HERE.parents[1], *(home / place for place in SOURCE_PLACES)]
+    candidates += [Path(code_root) if code_root else HERE.parents[1], *(home / place for place in SOURCE_PLACES)]
     return next((c for c in candidates if is_checkout(c)), None)
 
 
@@ -125,13 +125,13 @@ def shaping_skills(home=None):
     return sorted(found)
 
 
-def report_prompt(state_dir=None, full=False, home=None):
+def report_prompt(state_dir=None, full=False, home=None, code_root=None):
     """The chat's instructions for the reports the app makes, with the checkout it found and, in a conversation that has the
     agent's own tools, the shaping skills this Mac has (docs/design/bug-reports.md)."""
     skills = shaping_skills(home) if full else []
     use = (f"Use these skills for it: {', '.join(skills)}." if skills
            else "Use the skills you have for shaping and design, if there are any.")
-    source = find_source(state_dir, home)
+    source = find_source(state_dir, home, code_root)
     where = (f"The source of Verticals on this Mac is a git checkout at {source}." if source else
              "No checkout of Verticals' source was found on this Mac. Ask where it is; if there is none, say the pull request must wait.")
     return (HERE / "prompt-report.md").read_text().strip().replace("{skills}", use) + "\n\n" + where + "\n"
