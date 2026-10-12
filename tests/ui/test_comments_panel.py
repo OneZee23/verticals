@@ -5,6 +5,11 @@ suite exercises the frontend built against it: opening the panel from the icon, 
 trip, an anchored quote showing a highlight and clicking through it, a reply round trip, resolve
 collapsing a thread, and the doc-side mirror of the whole-card round trip.
 
+A DOCUMENT's comments left the panel (docs/design/doc-comments-inline.md): they stand on their words and open over them,
+their count stands above the field. `test_doc_comments_inline.py` and `test_doc_check_again.py` are their suites; the two
+document cases here keep the old names and check the same things the panel's did (a comment round trip in Documents; the
+window counting its comments) where they are now.
+
 WP-B2 turned the panel from a block rendered inline inside the card/doc it comments on into a
 single viewport-docked overlay (`App.vue`'s own mount) — every test that opens the panel now also
 calls `_assert_docked_overlay` (this module's own helper) to prove it: structurally NOT a
@@ -394,47 +399,45 @@ def test_resolve_collapses_and_unresolve_reopens(ui_f2: UiSession) -> None:
 
 
 def test_doc_comment_round_trip(ui_f2: UiSession) -> None:
+    """A document in Documents itself: select words, press Comment, write in the field that opens under them, Enter. The
+    comment is on exactly those words on the server, the words are marked, and the count above the field says one. No Comments
+    button in the header, no column on the window's edge."""
     session = ui_f2
     page = session.page
+    phrase = "an important quoted phrase"
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
-        doc_id = _create_doc(conn, "syn-comments/doc.md", title="SYN Doc Comments")
+        doc_id = _create_doc(conn, "syn-comments/doc.md", title="SYN Doc Comments", body=f"before {phrase} after")
 
     page.reload()
     _open_docs_and_doc(session, doc_id)
+    expect(page.locator('[data-cap="open-comments"]')).to_have_count(0)
+    expect(page.locator('[data-role="doc-check"]')).to_have_count(0)  # no comment yet, nothing to count
 
-    trigger = page.locator('[data-cap="open-comments"]')
-    expect(trigger).to_be_visible(timeout=10000)
-    trigger.click()
+    body_selector = '[data-cap="docs"] [data-role="doc-body"]'
+    _select_phrase(page, body_selector, phrase)
+    page.locator('[data-cap="comment-selection"]').click()
+    card = page.locator('[data-role="comment-card"]')
+    expect(card).to_be_visible(timeout=10000)
+    expect(page.locator('[data-role="comments-panel"]')).to_have_count(0)
+    card.locator('[data-role="comment-field"]').fill("SYN doc note")
+    page.keyboard.press("Enter")
+    expect(card).to_have_count(0, timeout=10000)
 
-    panel = page.locator('[data-role="comments-panel"]')
-    expect(panel).to_be_visible(timeout=10000)
-    # WP-B2: the old `comments-panel--sidebar` layout variant (a right-hand column laid out INSIDE
-    # `.doc-detail-layout`) is gone — there is only one panel shape now, the docked overlay, and it
-    # is not a descendant of the doc pane it comments on.
-    _assert_docked_overlay(page, panel, '[data-role="doc-detail"]')
-
-    composer = panel.locator('[data-role="comments-new"]')
-    composer.locator('.field__input').fill("SYN doc note")
-    composer.locator('button.button--primary').click()
-
-    row = panel.locator('[data-role="comment-thread-row"]')
-    expect(row).to_have_count(1, timeout=10000)
-    expect(row.locator('h3.t-title')).to_have_text("Whole document")
-    expect(row.locator('.comment-msg')).to_have_text("SYN doc note")
-
-    badge = page.locator('[data-role="comments-badge"]')
-    expect(badge).to_have_text("1")
+    expect(page.locator(f"{body_selector} mark.comment-highlight")).to_have_text(phrase, timeout=10000)
+    expect(page.locator('[data-role="doc-comments-count"]')).to_have_text("1 comment")
+    expect(page.locator('[data-role="comments-panel"]')).to_have_count(0)
 
     server = _api_doc_comments(session, doc_id)
     assert len(server["threads"]) == 1
     assert server["threads"][0]["doc_id"] == doc_id
-    assert server["threads"][0]["anchor"] is None
+    assert server["threads"][0]["anchor"]["quote"] == phrase
     assert server["threads"][0]["messages"][0]["body"] == "SYN doc note"
+    assert server["threads"][0]["messages"][0]["author"] == "human"
 
 
-def test_a_document_window_counts_its_comments_in_its_head(ui_f2: UiSession) -> None:
-    """A page opened from the desk is a window whose one-line head says "1 comment" (round 2, frame f2b, with the goal
-    card's own "1 comment" fact, GoalFacts.vue); a click opens the comments over the window."""
+def test_a_document_window_counts_its_comments_above_the_field(ui_f2: UiSession) -> None:
+    """A page opened from the desk is a window; its comments are counted above the field ("1 comment", the head says none of
+    it) and the count opens them as a list over the field."""
     session = ui_f2
     page = session.page
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
@@ -444,10 +447,12 @@ def test_a_document_window_counts_its_comments_in_its_head(ui_f2: UiSession) -> 
     page.reload()
     switch_view(page, "docs")
     open_page(page, doc_id)
-    count = page.locator('.vt-window[data-window="doc"] [data-role="doc-comments"]')
+    count = page.locator('[data-role="doc-check"] [data-role="doc-comments-count"]')
     expect(count).to_have_text("1 comment", timeout=10000)
+    expect(page.locator('.vt-window[data-window="doc"] [data-role="doc-comments"]')).to_have_count(0)
     count.click()
-    panel = page.locator('[data-role="comments-panel"]')
-    expect(panel).to_be_visible(timeout=10000)
-    expect(panel.locator('.comment-msg')).to_have_text("SYN seeded doc note")
+    listed = page.locator('[data-role="doc-comments-list"]')
+    expect(listed).to_be_visible(timeout=10000)
+    expect(listed).to_contain_text("SYN seeded doc note")
+    expect(page.locator('[data-role="comments-panel"]')).to_have_count(0)
     expect(count).to_have_attribute("aria-expanded", "true")

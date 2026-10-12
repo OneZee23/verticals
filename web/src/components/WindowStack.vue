@@ -92,26 +92,15 @@ function onWheel(event: WheelEvent): void {
   swiped = -Math.sign(swiped) * 1000
 }
 
-/* A document's head (round 2, frame f2b): its facts, then its versions and its open comments, each opening its own
-   place: history in Documents, the comments' sidebar. */
-type HeadPart = { text: string; act?: 'versions' | 'comments' }
+/* A document's head (round 2, frame f2b): its facts, then its versions, which open history in Documents. Its open comments
+   are counted above the field, once (DocCheck.vue, docs/design/doc-comments-inline.md). */
+type HeadPart = { text: string; act?: 'versions' }
 function headParts(win: VtWindow): HeadPart[] {
   const parts: HeadPart[] = (win.facts ?? []).map((text) => ({ text }))
   if ((win.versions ?? 0) > 1) parts.push({ text: `${win.versions} versions`, act: 'versions' })
-  const comments = store.unresolvedCommentCount('doc', win.target)
-  if (comments > 0) parts.push({ text: `${comments} ${comments === 1 ? 'comment' : 'comments'}`, act: 'comments' })
   return parts
 }
-function commentsOpenFor(win: VtWindow): boolean {
-  const c = store.state.comments
-  return c.open && c.targetType === 'doc' && c.targetId === win.target
-}
-function onHeadAct(win: VtWindow, act: 'versions' | 'comments'): void {
-  if (act === 'comments') {
-    if (commentsOpenFor(win)) store.closeCommentsPanel()
-    else store.openCommentsPanel('doc', win.target)
-    return
-  }
+function onHeadAct(win: VtWindow): void {
   closeWindow(win.key)
   void store.openHistoryOf(win.target)
 }
@@ -168,8 +157,7 @@ function onWindowClick(index: number, event: MouseEvent): void {
               <template v-for="(part, i) in headParts(win)" :key="i">
                 <span v-if="i" class="vt-window__sep">·</span>
                 <button v-if="part.act" type="button" class="vt-window__act" :data-role="`doc-${part.act}`"
-                  :aria-expanded="part.act === 'comments' ? commentsOpenFor(win) : undefined"
-                  @click.stop="onHeadAct(win, part.act)">{{ part.text }}</button>
+                  @click.stop="onHeadAct(win)">{{ part.text }}</button>
                 <template v-else>{{ part.text }}</template>
               </template>
             </p>

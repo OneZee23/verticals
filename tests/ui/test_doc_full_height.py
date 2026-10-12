@@ -139,37 +139,49 @@ def test_the_windows_beside_a_document_keep_their_200_px_and_a_goal_stays_a_card
     assert abs(card["y"] - 32) <= 1 and _near(card["w"], 720) and card["bottom"] < height - 200, card
 
 
-def test_the_comments_column_works_beside_a_full_height_document(ui_f2: UiSession) -> None:
-    """The comments open over the window's right edge, docked and as tall as the screen, and take a comment; the window
-    stands where it stood."""
+def test_a_comment_opens_over_its_words_in_a_full_height_document(ui_f2: UiSession) -> None:
+    """A document's comments stand on their words (docs/design/doc-comments-inline.md), so the window has no column beside it
+    to open: the comment opens right under its words, inside the window's box, and the window stays where it stood while it
+    is read and answered; the count stands above the field."""
     session = ui_f2
     page = session.page
     page.set_viewport_size(OWNER_WINDOW)
+    words = "SYN paragraph 2 of a long document"
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         doc_id = _doc(conn, "syn-full/comments.md", "SYN Comments Beside", LONG_BODY)
-        core_comments.create_thread(conn, owner="t1", goal_id=None, doc_id=doc_id, body="SYN seeded note", author="human", anchor=None)
+        core_comments.create_thread(
+            conn, owner="t1", goal_id=None, doc_id=doc_id, body="SYN seeded note", author="human",
+            anchor={"quote": words, "prefix": "", "suffix": ""},
+        )
     page.reload()
     switch_view(page, "docs")
+    page.mouse.move(8, 8)
     open_page(page, doc_id)
     before = _rect(page, DOC)
-    count = page.locator(f'{DOC} [data-role="doc-comments"]')
-    expect(count).to_have_text("1 comment", timeout=10000)
-    count.click()
-    panel = page.locator('[data-role="comments-panel"]')
-    expect(panel).to_be_visible(timeout=10000)
-    expect(panel.locator(".comment-msg")).to_have_text("SYN seeded note")
+    expect(page.locator(f'{DOC} [data-role="doc-comments"]')).to_have_count(0)  # no count in the head: it stands over the field
+    expect(page.locator('[data-role="doc-comments-count"]')).to_have_text("1 comment", timeout=10000)
 
-    # Docked at the right edge and as tall as the screen; the window has not moved or shrunk.
-    docked = _rect(page, '[data-role="comments-panel"]')
-    assert _near(docked["right"], OWNER_WINDOW["width"], 1) and _near(docked["y"], 0, 1) and _near(docked["h"], OWNER_WINDOW["height"], 1), docked
+    mark = page.locator(f"{DOC} mark.comment-highlight")
+    expect(mark).to_have_text(words, timeout=10000)
+    tick(page)
+    mark.click()
+    card = page.locator('[data-role="comment-card"]')
+    expect(card).to_be_visible(timeout=10000)
+    expect(card.locator('[data-role="comment-message"]')).to_have_text("SYN seeded note")
+    expect(page.locator('[data-role="comments-panel"]')).to_have_count(0)  # no column beside the window
+
+    # It stands in the window's box, just under its words, and the window has not moved or shrunk.
+    box = _rect(page, '[data-role="comment-card"]')
+    marked = _rect(page, f"{DOC} mark.comment-highlight")
+    assert before["x"] <= box["x"] and box["right"] <= before["right"] and before["y"] <= box["y"] and box["bottom"] <= before["bottom"], (box, before)
+    assert 0 <= box["y"] - (marked["y"] + marked["h"]) <= 12, (box, marked)
     assert _rect(page, DOC) == before
 
-    # A comment written there lands, and the window's head counts it.
-    composer = panel.locator('[data-role="comments-new"]')
-    composer.locator(".field__input").fill("SYN second note")
-    composer.locator("button.button--primary").click()
-    expect(panel.locator('[data-role="comment-thread-row"]')).to_have_count(2, timeout=10000)
-    expect(count).to_have_text("2 comments", timeout=10000)
+    # An answer written there lands on the same thread, and the window still has not moved.
+    tick(page)
+    card.locator('[data-role="comment-field"]').fill("SYN second note")
+    page.keyboard.press("Enter")
+    expect(card.locator('[data-role="comment-message"]')).to_have_count(2, timeout=10000)
     assert _rect(page, DOC) == before
 
 
@@ -285,13 +297,12 @@ def test_the_field_stands_over_a_documents_foot_on_a_white_fade(ui_f2: UiSession
 def test_a_documents_head_stands_under_the_desktop_apps_title_bar(ui_f2: UiSession) -> None:
     """The desktop app's transparent title bar takes a press at the top of the window for the window itself
     (Verticals.swift, `WebView.mouseDown`), and sets `--titlebar-height` for the page. The document window still reaches
-    the top edge, and its head, with the × and the head's actions, stands under the bar."""
+    the top edge, and its head, with the × and the facts, stands under the bar."""
     session = ui_f2
     page = session.page
     page.set_viewport_size(OWNER_WINDOW)
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         doc_id = _doc(conn, "syn-full/bar.md", "SYN Bar", LONG_BODY)
-        core_comments.create_thread(conn, owner="t1", goal_id=None, doc_id=doc_id, body="SYN bar note", author="human", anchor=None)
     page.reload()
     switch_view(page, "docs")
     open_page(page, doc_id)
@@ -299,9 +310,7 @@ def test_a_documents_head_stands_under_the_desktop_apps_title_bar(ui_f2: UiSessi
     page.wait_for_timeout(200)
     box = _rect(page, DOC)
     assert _near(box["y"], 0.5) and _near(box["bottom"], OWNER_WINDOW["height"] - 0.5), box
-    for selector in (
-        f"{DOC} .vt-window__head--doc .vt-window__button", f"{DOC} [data-role='doc-facts']", f"{DOC} [data-role='doc-comments']",
-    ):
+    for selector in (f"{DOC} .vt-window__head--doc .vt-window__button", f"{DOC} [data-role='doc-facts']"):
         part = _rect(page, selector)
         assert part["y"] >= 28, f"{selector} reaches into the title bar: top {part['y']}"
 

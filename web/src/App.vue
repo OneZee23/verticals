@@ -7,6 +7,7 @@ import GoalCard from './components/GoalCard.vue'
 import InboxView from './components/InboxView.vue'
 import DocsView from './components/DocsView.vue'
 import SearchBar from './components/SearchBar.vue'
+import DocCheck from './components/DocCheck.vue'
 import CommentsPanel from './components/CommentsPanel.vue'
 import DevColorPanel from './components/DevColorPanel.vue'
 import DevDeckPanel from './components/DevDeckPanel.vue'
@@ -265,6 +266,8 @@ onUnmounted(() => {
     <SearchBar id="verticals-command-bar" ref="searchBar" :agent-available="agentChat.available" @submit="onSubmit">
       <template #agent-tag><AgentTag /></template>
     </SearchBar>
+    <!-- Over the field while a document is in front: the count of its open comments, and Check again (docs/design/doc-comments-inline.md). -->
+    <DocCheck />
     <div class="app-content" :class="{ 'app-content--out-of-focus': outOfFocus, 'app-content--window': windows.list.length }">
       <!-- Mutually exclusive (`v-if`/`v-else`), not `v-show`: before ruling 1 (owner, 2026-08-09),
            `InboxView` rendered the same Maybe-bucket goals as Board's own eighth column
@@ -296,11 +299,11 @@ onUnmounted(() => {
   </div>
   <div id="dropdownPortal" aria-live="off"></div>
   <!-- docs/COMMENTS_SPEC.md WP-B2 (KK ruling 2026-08-25, D255): the comments panel is ONE instance
-       for the whole app, mounted here rather than by whichever surface (`GoalDetail.vue`,
-       `DocDetail.vue`) opened it — a viewport-docked overlay reads as "the sidebar" only if there
-       is exactly one of it, positioned against the window, not nested inside a board card or a
-       doc pane. It is entirely store-driven (`store.state.comments`) and takes no props; see
-       `CommentsPanel.vue`'s own header comment for the full story. -->
+       for the whole app, mounted here rather than by whichever surface (`GoalDetail.vue`) opened it — a
+       viewport-docked overlay reads as "the sidebar" only if there is exactly one of it, positioned against the
+       window, not nested inside a board card. It is entirely store-driven (`store.state.comments`) and takes no
+       props; see `CommentsPanel.vue`'s own header comment for the full story. A document's comments are not here:
+       they stand on their words (DocCommentCard.vue, docs/design/doc-comments-inline.md). -->
   <CommentsPanel />
   <template v-if="DEV_TUNING_ENABLED && devPanelsVisible">
     <DevColorPanel />

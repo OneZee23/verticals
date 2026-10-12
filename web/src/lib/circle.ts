@@ -7,10 +7,9 @@ import { commandFilter } from './commandFilter'
 import { agentChat, balloons, openAsk } from './agentChat'
 import { frontWindow, windows } from './windows'
 import { store } from '../store'
-import { goShown } from './go'
 
 export type CircleJob = 'board' | 'goal' | 'moving'
-export type CircleState = 'rest' | 'open' | 'typing' | 'working' | 'answer' | 'moving' | 'go'
+export type CircleState = 'rest' | 'open' | 'typing' | 'working' | 'answer' | 'moving'
 
 const CAPTIONS: Record<CircleJob, string> = {
   board: 'Find or ask',
@@ -64,8 +63,6 @@ export const circleState = computed<CircleState>(() => {
   if (circle.focused) return 'open'
   if (circleWords.value) return 'answer'
   if (agentChat.running) return 'working'
-  // After an edit in an open document the circle asks "Ready?" (lib/go.ts); pointing at it doesn't open the field.
-  if (goShown.value) return 'go'
   // Pointing at the circle doesn't open it either: it stays `rest` and the field widens it (docs/design/field-hover.md).
   if (inboxWriting.value) return 'open'
   return 'rest'

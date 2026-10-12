@@ -2,7 +2,9 @@
 """A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each
 message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[slow]` works
 for a second and a half, `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers
-with the words after it, and `[context]` with the app context Verticals sent."""
+with the words after it, and `[context]` with the app context Verticals sent. A message that opens with "Check again"
+(a document's comments and edits handed over, web/src/lib/checkAgain.ts) works for a second and a half, which is the
+time a test has to rewrite the document as the real agent would, then answers in two lines."""
 import json
 import re
 import sys
@@ -19,7 +21,12 @@ def read():
     return json.loads(line) if line.strip() else None
 
 
+CHECKED = "Check again"
+
+
 def answer_for(words):
+    if words.startswith(CHECKED):
+        return "Changed the words you commented on.\nLeft the rest as it was."
     if "[say]" in words:
         return words.split("[say]", 1)[1].strip()
     if "[long]" in words:
@@ -62,7 +69,7 @@ for msg in iter(read, None):
         time.sleep(0.3)
         out({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": f"tool-{name}", "content": "ok"}]}})
-    if "[slow]" in words:
+    if "[slow]" in words or words.startswith(CHECKED):
         time.sleep(1.5)
     if "[fail]" in words:
         out({"type": "result", "is_error": True, "result": "The fake agent failed on purpose."})
