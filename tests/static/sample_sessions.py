@@ -62,10 +62,12 @@ def homes(root: Path) -> Iterator[dict[str, Path]]:
                 os.environ[name] = value
 
 
-def claude_file(root: Path, folder: str, session: str, size: int = 2048, at: float | None = None) -> Path:
+def claude_file(root: Path, folder: str, session: str, size: int = 2048, at: float | None = None,
+                home: Path | None = None) -> Path:
     """A sample Claude transcript where Claude keeps it: the folder's name is the folder with every character that is not a
-    letter or a digit turned into a dash (code.claude.com/docs/en/sessions, "Where transcripts are stored")."""
-    path = root / "claude" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", folder) / f"{session}.jsonl"
+    letter or a digit turned into a dash (code.claude.com/docs/en/sessions, "Where transcripts are stored"). `home` is
+    Claude's own home when the gateway under test keeps it somewhere other than `<root>/claude`."""
+    path = (home or root / "claude") / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", folder) / f"{session}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"sample\n" * (size // 7))
     path.chmod(0)  # the gateway may stat it and may not read it
@@ -74,11 +76,22 @@ def claude_file(root: Path, folder: str, session: str, size: int = 2048, at: flo
     return path
 
 
-def codex_file(root: Path, thread: str, size: int = 4096, at: float | None = None, day: str = "2026/10/11") -> Path:
-    path = root / "codex" / "sessions" / day / f"rollout-2026-10-11T09-30-00-{thread}.jsonl"
+def codex_file(root: Path, thread: str, size: int = 4096, at: float | None = None, day: str = "2026/10/11",
+               home: Path | None = None) -> Path:
+    path = (home or root / "codex") / "sessions" / day / f"rollout-2026-10-11T09-30-00-{thread}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"sample\n" * (size // 7))
     path.chmod(0)
     if at is not None:
         os.utime(path, (at, at))
     return path
+
+
+def grow_file(path: Path, by: int, at: float | None = None) -> None:
+    """What an agent does when a session goes on: the file is bigger and newer. Still unreadable afterwards."""
+    path.chmod(0o600)
+    with open(path, "ab") as grown:
+        grown.write(b"sample\n" * (by // 7))
+    path.chmod(0)
+    if at is not None:
+        os.utime(path, (at, at))
