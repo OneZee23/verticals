@@ -124,7 +124,9 @@ const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWord
 const stopping = computed(() => state.value === 'working' && circle.pointed)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
-const holding = computed(() => carry.over || (state.value === 'moving' && (store.state.drag.id !== null || dots.landing)))
+const holding = computed(() => carry.over
+  // In the Inbox the card waiting above the field, carried out again, is held the same way (docs/design/inbox-carry-stack.md).
+  || (state.value === 'moving' && (store.state.drag.id !== null || dots.landing || carry.item !== null)))
 
 /* Open, the field is as wide as its caption (round 9: "size of the field should align with the text"). */
 const openWidth = computed(() => Math.min(maxWidth.value, Math.ceil(PAD_CAPTION + textWidth(circleCaption.value) + PAD_CAPTION)))
@@ -140,7 +142,9 @@ const width = computed(() => {
   }
   if (state.value === 'open') return openWidth.value
   if (holding.value) return 120
-  if (state.value === 'moving') return Math.min(circle.pointed ? 434 : 300, maxWidth.value)
+  // The buttons stand at the stack's left end whenever they are shown, pointed at or holding the keys, and the stack stands
+  // right of them (S5.P3.010, .012): the field is wide enough for both, with the hand on it or away.
+  if (state.value === 'moving') return Math.min(tagsShown.value ? 434 : 300, maxWidth.value)
   return mascot.pong ? 132 : CIRCLE
 })
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))

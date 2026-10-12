@@ -196,7 +196,10 @@ export function createDragActions(deps: DragActionDeps) {
     // A goal kept above the field is there already: no flight back to its row.
     if (parked) state.drag.settling = null
     dragHover.reset()
-    deps.onRelease?.(state.drag.settling?.duration ?? 0, parked)
+    // Only a goal that was in the hand ends or keeps a move. A click, on the field or on the goal waiting there, is no
+    // release: it leaves the goal waiting and the weeks open, and a tap picks the goal (S5.P4.017). `App.vue` calls this
+    // on every pointer-up, so the end of a drag is told from a click here.
+    if (released) deps.onRelease?.(state.drag.settling?.duration ?? 0, parked)
     if (!released?.target) return
     const { id, target } = released
     const goal = deps.findGoalById(id)
