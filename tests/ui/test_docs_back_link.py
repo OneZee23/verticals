@@ -30,9 +30,10 @@ TITLE = "SYN Back Link"
 BODY = "SYN a few words, so the document has something to show under its head."
 
 BACK = '[data-role="docs-back"]'
+# The head's parts. It has no Comments button any more: a document's comments stand on their words, and their count above the
+# field (docs/design/doc-comments-inline.md).
 HEAD = {
     "path": '[data-cap="docs"] [data-role="doc-path"]',
-    "Comments": '[data-cap="docs"] [data-cap="open-comments"]',
     "History": '[data-cap="docs"] [data-role="doc-history-trigger"]',
     "Delete": '[data-cap="docs"] [data-role="doc-delete"]',
     "close": '[data-cap="docs"] [data-role="doc-close"]',
