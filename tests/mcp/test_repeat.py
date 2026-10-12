@@ -39,3 +39,33 @@ def test_mcp_repeat_uses_the_shared_core_and_materializes(f2_dsn: str, tmp_path:
             (goal_id,),
         ).fetchone()
     assert count == 2
+
+
+async def _exercise_steps(f2_dsn: str, tmp_path: Path):
+    async with open_mcp_stdio(f2_dsn, tmp_path, label="repeat-steps") as (session, streams):
+        created = await session.call_tool(
+            "create",
+            {
+                "title": "MCP review", "vertical": "day", "anchor_date": "2026-08-10",
+                "children": [{"title": "First step"}, {"title": "Second step"}],
+            },
+        )
+        goal_id = created.structured_content["goal"]["id"]
+        configured = await session.call_tool("update", {"id": goal_id, "repeat": {"frequency": "daily"}})
+        completed = await session.call_tool("update", {"id": goal_id, "done": True})
+        streams.assert_hygiene(token=TEST_TOKEN)
+    return goal_id, configured, completed
+
+
+def test_mcp_a_goal_with_steps_repeats_and_its_steps_come_back_unticked(f2_dsn: str, tmp_path: Path) -> None:
+    """docs/design/goal-menu.md: the tool used to refuse a goal with steps ("must be scheduled and childless")."""
+    goal_id, configured, completed = anyio.run(_exercise_steps, f2_dsn, tmp_path)
+    assert configured.is_error is False
+    assert completed.is_error is False
+    with psycopg.connect(f2_dsn, autocommit=True) as conn:
+        steps = conn.execute(
+            "SELECT s.title, s.done_at FROM goals s JOIN goals g ON g.id = s.parent_id"
+            " WHERE g.owner = 't1' AND g.repeat_series_id = %s AND g.repeat_index = 1 ORDER BY s.position",
+            (goal_id,),
+        ).fetchall()
+    assert steps == [("First step", None), ("Second step", None)]

@@ -492,7 +492,6 @@ function fitIntoView(): void {
                 :period-key="goal.period_key"
                 :anchor-date="goal.anchor_date"
                 :repeat="goal.repeat"
-                :has-children="goal.children.length > 0"
                 :inline="true"
               >
                 <!-- `is-selectable`: the app's global `user-select: none` (style.css, owner

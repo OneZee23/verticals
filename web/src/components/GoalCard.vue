@@ -199,30 +199,9 @@ function openContextMenu(): void {
   tools.value?.openMenu()
 }
 
-function onAffordanceClick(event: MouseEvent): void {
-  if (!isParent.value) return
-  event.preventDefault()
-  event.stopPropagation()
-  openContextMenu()
-}
-
-/** Keyboard path (space on the focused checkbox) bypasses the click capture above, so the
- *  parent guard lives here too: a parent affordance never one-click completes. */
-function onAffordanceToggle(value: boolean): void {
-  if (isParent.value) {
-    openContextMenu()
-    return
-  }
-  onToggle(value)
-}
-
 function onCardContextMenu(event: MouseEvent): void {
   event.preventDefault()
   openContextMenu()
-}
-
-function completeParent(): void {
-  playSound('checked'); void store.completeGoal(props.id, true)
 }
 
 /* The compact row keeps its DOM identity while inline detail is open. Drag state may still hide
@@ -553,9 +532,6 @@ function onRowKeydown(event: KeyboardEvent) {
         class="goal-card__affordance-slot"
         data-role="goal-affordance"
         :data-affordance="isParent ? 'parent' : 'leaf'"
-        :role="isParent ? 'button' : undefined"
-        :aria-haspopup="isParent ? 'menu' : undefined"
-        @click.capture="onAffordanceClick"
       >
         <GoalAffordance
           :kind="hasMilestone ? 'ring' : 'square'"
@@ -563,7 +539,7 @@ function onRowKeydown(event: KeyboardEvent) {
           :done="progress?.done ?? 0"
           :total="progress?.total ?? 0"
           :color="color"
-          @toggle="onAffordanceToggle"
+          @toggle="onToggle"
         />
       </span>
       <div class="goal-card__text">
@@ -610,13 +586,9 @@ function onRowKeydown(event: KeyboardEvent) {
       <GoalCardTools
         ref="tools"
         :id="id"
-        :has-children="subgoalCount > 0"
-        :is-parent="isParent"
         :vertical="vertical"
         :repeat="repeat"
         :open="isInlineDetailHost"
-        @details="onOpenDetail"
-        @complete="completeParent"
         @open-change="onMenuOpenChange"
       />
     </div>
