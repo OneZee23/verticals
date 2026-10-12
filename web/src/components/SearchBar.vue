@@ -140,8 +140,9 @@ const chipWords = computed(() => (answerText.value ? Math.min(2, answerLines.val
 /* An ask says what it will change under its question: the goal and its date (lib/askDetail.ts). */
 const changesText = computed(() => (circleWords.value?.kind === 'ask' ? circleWords.value.changes : ''))
 const stopping = computed(() => state.value === 'working' && circle.pointed)
-/* With an ask waiting in the open conversation the circle only waits (no turning line, no step). */
-const stepShown = computed(() => state.value === 'working' && !openAsk.value)
+/* With an ask waiting in the open conversation the circle only waits (no turning line, no step). The step is a conversation's:
+   while a report is made from pictures the line turns with none (docs/design/bug-reports.md). */
+const stepShown = computed(() => state.value === 'working' && agentChat.running && !openAsk.value)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
 const holding = computed(() => carry.over

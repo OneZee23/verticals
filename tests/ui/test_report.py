@@ -181,6 +181,22 @@ def test_a_request_and_its_task_come_at_once_with_no_logs(ui_agent: UiSession, t
         assert word not in body, word
 
 
+def test_while_the_report_is_made_the_line_turns_with_no_step_of_a_conversation(ui_agent: UiSession) -> None:  # noqa: F811
+    """While the report is made the line turns, as while the agent works, in the field as wide as its pictures; the step of a
+    conversation (AgentStep.vue, docs/design/morning-quality.md) stays out, since no conversation is working: the agent is
+    only asked the kind and the name. `[slow]` keeps the stand-in agent at it for a second and a half."""
+    session = ui_agent
+    page = session.page
+    page.wait_for_selector(".goal-card__row")
+
+    _say(page, 2, f"{WORDS} [slow]")
+
+    expect(page.locator(".circle-field")).to_have_attribute("data-state", "working")
+    expect(page.locator(".circle-field__pivot")).to_have_class(re.compile(r"\bis-turning\b"))
+    assert page.locator('[data-role="agent-step"]').count() == 0, "no step: no conversation is working"
+    expect(page.locator(DOC_CHIP)).to_have_count(1, timeout=15000)
+
+
 def test_when_the_agent_cannot_tell_it_is_a_request(ui_agent: UiSession, tmp_path: Path) -> None:  # noqa: F811
     session = ui_agent
     page = session.page
