@@ -117,7 +117,7 @@ def write_report(scenario, api, words, ctx, tool, *, defects=True):
     for item in scenario.get("close", []):
         gid, title, why = (item, item, "the sources show it is done.") if isinstance(item, str) else (
             item["id"], item.get("title", item["id"]), item.get("evidence", "the sources show it is done."))
-        tool("update")
+        tool("update", {"id": gid, "done": True})
         api.call("PATCH", f"/api/goals/{gid}", {"done": True})
         tool("evidence_update")
         closed.append(f"- [{title}](goal:{gid}): {why}")

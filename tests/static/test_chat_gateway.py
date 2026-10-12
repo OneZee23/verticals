@@ -5,6 +5,7 @@ plans it was clicked on. Also what a Claude turn may reach under each permission
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -260,17 +261,39 @@ def test_the_morning_turn_writes_in_verticals_only_what_the_report_needs() -> No
     assert session.asked[-1] == "Allow Claude to use delete?" and len(session.asked) == 6
 
 
-def test_the_morning_turn_loads_none_of_the_owners_settings_files() -> None:
-    """The owner's own Claude Code settings may allow a tool outright (an allow rule), and an allowed tool never comes to this
-    gateway to be judged. The morning turn, which nobody watches, starts the CLI with no setting source at all; the owner's
-    other turns keep their settings, which the owner chose in the app."""
+def test_the_morning_turn_keeps_the_owners_settings_and_asks_the_gateway_about_every_mcp_tool() -> None:
+    """The owner's own Claude Code settings may allow a tool outright, and an allowed tool never comes to this gateway to be
+    judged. Cutting the settings off (`--setting-sources`) would also cut the owner's own servers, the sources' tools, so the
+    morning turns keep them and carry one `ask` rule for every MCP tool on the command line, where `--settings` ranks above the
+    user settings. The CLI evaluates deny, then ask, then allow. The owner's other turns carry no rule."""
     for mode in ("board", "manual", "bypassPermissions", "auto"):
         morning, _ = _claude({"permission": mode, "sources": "connected"}, sources=[])
-        args = morning.proc.args
-        assert args[args.index("--setting-sources") + 1] == "", mode
-        assert "--setting-sources" not in _claude({"permission": mode})[0].proc.args, mode
+        assert "--setting-sources" not in morning.proc.args and "--strict-mcp-config" not in morning.proc.args, mode
+        assert json.loads(_flag(morning, "--settings"))["permissions"] == {"ask": ["mcp__*"]}, mode
+        assert "permissions" not in json.loads(_flag(_claude({"permission": mode})[0], "--settings")), mode
     second, _ = _claude({"sources": "connected"}, sources=[], role="checker")
-    assert _flag(second, "--setting-sources") == ""
+    assert "--setting-sources" not in second.proc.args
+    assert json.loads(_flag(second, "--settings"))["permissions"] == {"ask": ["mcp__*"]}
+    # The rule asks, it does not allow: nothing is passed to run unasked but what the command line already lists.
+    assert "allow" not in json.loads(_flag(second, "--settings"))["permissions"]
+
+
+def test_every_mcp_tool_comes_to_the_gateway_and_a_declared_one_runs_with_no_question_to_the_reader() -> None:
+    """With the ask rule the CLI puts a declared tool to the gateway too. The tools the approved sources declare, Verticals'
+    reading tools and the report's own writes run with no question; any other tool is asked of the reader."""
+    agent, session = _claude({"permission": "bypassPermissions", "sources": "connected"}, sources=SOURCES)
+    for tool in (*TEAM_CHAT, "mcp__mail__search_mail", "mcp__mail__get_mail", "mcp__verticals__board", "mcp__verticals__doc_get",
+                 "mcp__verticals__sources", "mcp__verticals__doc_create", "mcp__verticals__doc_save", "mcp__verticals__doc_link",
+                 "mcp__verticals__evidence_update"):
+        _tool(agent, tool)
+        assert _decision(agent) == "allow", tool
+    assert not session.asked
+    # A tool no source lists, a source the reader has not approved, and a write beyond the report come to the reader.
+    for tool, title in (("mcp__chat__send_message", "mcp__chat__send_message"), ("mcp__calendar__list_events", "mcp__calendar__list_events"),
+                        ("mcp__verticals__create", "create"), ("mcp__verticals__schedule", "schedule")):
+        _tool(agent, tool)
+        assert session.asked[-1] == f"Allow Claude to use {title}?", tool
+    assert len(session.asked) == 4
 
 
 def test_the_second_agent_reads_what_the_sources_declare_and_is_declined_for_everything_else() -> None:
@@ -282,6 +305,10 @@ def test_the_second_agent_reads_what_the_sources_declare_and_is_declined_for_eve
         assert tool in allowed or f"mcp__verticals__{tool}" in allowed, tool
     for tool in ("doc_create", "doc_save", "doc_link", "evidence_update"):
         assert f"mcp__verticals__{tool}" not in allowed, tool
+    # The CLI asks about every MCP tool: what is on its command line runs, the rest is declined.
+    for name in (*TEAM_CHAT, "mcp__verticals__board", "mcp__verticals__doc_get", "mcp__verticals__sources"):
+        _tool(agent, name)
+        assert _decision(agent) == "allow", name
     for name, call in (("mcp__verticals__update", {"id": "SYN00001", "done": True}), ("mcp__verticals__doc_save", {"id": "x"}),
                        ("mcp__chat__send_message", {}), ("mcp__calendar__list_events", {})):
         _tool(agent, name, call)

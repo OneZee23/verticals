@@ -106,6 +106,13 @@ CONNECTED = "connected"
 MORNING_WRITES = ["doc_create", "doc_save", "doc_link", "evidence_update"]
 # The second agent's seat in the morning flow (morning_flow.py): it reads and answers, and writes nothing.
 CHECKER = "checker"
+# Every MCP tool a morning turn calls comes to this gateway to be judged, whoever allowed it. The turn keeps the owner's own
+# settings, servers and tools (the sources' tools are theirs), and `--settings` on the command line adds one `ask` rule that
+# matches all of them: `mcp__*` is the docs' glob for every MCP tool. Rule lists from several settings files are combined, and
+# the CLI checks deny rules first, then ask, then allow, the first match deciding (Claude Code docs: Settings, "Lists merge
+# instead of overriding"; Permissions, "Manage permissions"), so an allow rule in the owner's own files cannot let a tool run
+# on its own. A deny rule of the owner's still blocks. The gateway's judgement of each ask is `ClaudeAgent.handle`.
+MORNING_ASKS = ["mcp__*"]
 # A tool as Claude Code names it, `mcp__<server>__<tool>`: what a source's check block may name for reading it
 # (verticals/core/source_checks.py::reading_tools says it again at the server, where it is written).
 TOOL_NAME = re.compile(r"^mcp__([A-Za-z0-9][A-Za-z0-9_.\-]{0,80}?)__([A-Za-z0-9][A-Za-z0-9_.\-]{0,120})$")
@@ -394,16 +401,19 @@ class ClaudeAgent:
         # The morning report's turn (web lib/morning.ts) also reaches the owner's own connected tools, read-only, and
         # saves its document in Verticals without asking. Nobody watches it, so it never runs in the chat's mode:
         # "Bypass permissions" or "Auto" would let a tool of another server run before this gateway could judge it. It
-        # always asks first. It calls the tools its sources declare for reading them, which go on the command line
-        # (`declared_reads`), and judge() answers for the rest: a write in Verticals beyond the report, or any other tool,
-        # goes to the owner; the second agent has nobody to ask and is declined (docs/design/morning-quality.md).
-        # It also loads none of the owner's settings files (`--setting-sources ""`): an allow rule in the owner's own Claude
-        # Code settings would let a tool run without ever coming here to be judged.
+        # always asks first, and every MCP tool it calls comes here (`MORNING_ASKS`): handle() runs the tools its sources
+        # declare for reading them and Verticals' own reading tools, closes what is done, and puts any other tool to the
+        # owner; the second agent has nobody to ask and is declined (docs/design/morning-quality.md). It keeps the owner's
+        # own settings and servers, so the sources' tools are there to call.
         self.connected = settings.get("sources") == CONNECTED
         self.checker = self.connected and settings.get("role") == CHECKER
+        if self.connected:
+            claude_settings["permissions"] = {"ask": MORNING_ASKS}
         self.full = full_access(settings) and not self.connected
         self.reads = declared_reads(chat) if self.connected else {}
         allowed = READ_TOOLS + (MORNING_WRITES if self.connected and not self.checker else [])
+        # What this seat runs without a question: on the command line, and again in handle() for when the CLI asks anyway.
+        self.allowed = [f"mcp__verticals__{t}" for t in allowed] + list(self.reads)
         mode = ASK_FIRST if self.connected else settings.get("permission") or BOARD_ONLY
         brief = (CHECK_PROMPT if self.checker else MORNING_PROMPT) if self.connected else ACCESS_PROMPT[self.full]
         args = [which("claude"), "--print", "--verbose", "--include-partial-messages",
@@ -412,9 +422,8 @@ class ClaudeAgent:
                 "--permission-prompts", "host", "--permission-prompt-tool", "stdio",
                 *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_mcp),
                 "--settings", json.dumps(claude_settings),
-                *(["--setting-sources", ""] if self.connected else []),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
-                "--allowedTools", ",".join([f"mcp__verticals__{t}" for t in allowed] + list(self.reads)),
+                "--allowedTools", ",".join(self.allowed),
                 "--append-system-prompt", PROMPT + "\n" + brief,
                 "--resume" if resume_id else "--session-id", self.session_id]
         if settings.get("model") and settings["model"] != "default":
@@ -482,9 +491,14 @@ class ClaudeAgent:
             tool, tool_input = req.get("tool_name", ""), req.get("input", {})
             self.pending[rid] = tool_input
             if self.connected:
-                # The second agent has nobody to ask. The agent that writes the report closes what is done on its own; a tool
-                # of another server that no source lists, or a write in Verticals beyond the report, goes to the reader. It has
-                # no shell, files or web (`--tools ""`), so anything that is not an MCP tool is declined and not asked about.
+                # Every MCP tool of a morning turn comes here (`MORNING_ASKS`). What the seat may run is what is on its command
+                # line: Verticals' reading tools, the tools its approved sources declare, and for the agent that writes the
+                # report its own writes. That agent also closes what is done. The second agent has nobody to ask and is declined
+                # for anything else; the agent that writes puts a tool no source lists, or a write in Verticals beyond the
+                # report, to the reader. It has no shell, files or web (`--tools ""`), so anything that is not an MCP tool is
+                # declined and not asked about.
+                if tool in self.allowed:
+                    return self.decide(rid, "accept")
                 if self.checker or not tool.startswith("mcp__"):
                     return self.decide(rid, "decline")
                 if tool == "mcp__verticals__update" and closes_only(tool_input):

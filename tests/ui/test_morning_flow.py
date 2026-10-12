@@ -6,7 +6,8 @@ not what a model reads. Sample sources only ("Team chat", "Mail").
 What is pinned: each source starts where the last report stopped it; every item read is placed and counted; a check that fails
 holds the report back until it is fixed, and the app is told once; a count that does not add up fails whatever the second agent
 says; a second agent that gives no verdict, never answers, crashes or is stopped never leaves a report claiming a check; the
-second agent has a lower effort, reads and loads none of the owner's settings."""
+second agent has a lower effort and only reads; every MCP tool of a morning turn comes to the gateway, which runs a declared read
+without asking and puts any other tool to the reader (declines it for the second agent)."""
 
 from __future__ import annotations
 
@@ -104,6 +105,11 @@ class Morning:
 
     def ask(self, task: str, *, day: str = DAY, now: str = NOW, effort: str = "high") -> Run:
         """What the app sends for the morning (web lib/morning.ts), then every event until the answer ends."""
+        session = self.send(task, day=day, now=now, effort=effort)
+        return Run(self.events(session), session, self.base)
+
+    def send(self, task: str, *, day: str = DAY, now: str = NOW, effort: str = "high") -> str:
+        """What the app sends for the morning, and nothing read: for a test that answers the reader's questions as they come."""
         session = str(uuid.uuid4())
         text = (f'Make my morning report for {day}, following the morning report guide in your instructions. Save it as the '
                 f'document reports/morning/{day}.md titled "Morning report" and link it to its task, "Morning report" '
@@ -113,7 +119,7 @@ class Morning:
             "context": {"today": day, "tz": ZONE, "now": now, "morning": {"day": day, "task": task}},
             "settings": {"provider": "claude", "permission": "board", "effort": effort, "sources": "connected"}})
         assert sent.status_code == 200, sent.text
-        return Run(self.events(session), session, self.base)
+        return session
 
     def events(self, session: str, until: Callable[[dict], bool] | None = None, seconds: float = 90) -> list[dict]:
         until = until or (lambda e: (e["t"] == "done" and not e.get("next")) or e["t"] == "exit")
@@ -142,6 +148,11 @@ class Morning:
 
     def starts(self) -> list[list[str]]:
         return _cli_starts(self.tmp)
+
+    def decisions(self) -> list[dict]:
+        """What the gateway answered each time the fake agent's CLI asked about a tool (`fake_agent/claude`, `decisions.log`)."""
+        log = self.workspace / "decisions.log"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
 
 @pytest.fixture
@@ -234,14 +245,17 @@ def test_the_owner_hears_of_the_report_once_after_the_check_and_every_turn_befor
     assert not any(e["t"] == "tool" and e["name"] == "mcp__verticals__doc_get" for e in run.events), "the second agent's tools stay quiet"
 
 
-def test_the_second_agent_is_a_fresh_one_at_a_lower_effort_that_only_reads_and_loads_none_of_the_owners_settings(morning: Morning) -> None:
+def test_the_second_agent_is_a_fresh_one_at_a_lower_effort_that_only_reads_and_keeps_the_owners_servers(morning: Morning) -> None:
     morning.sources()
     morning.last_report()
     morning.scenario()
     morning.ask(morning.task(), effort="high")
     writer, checker = morning.starts()
     assert _flag(writer, "--effort") == "high" and _flag(checker, "--effort") == "medium"
-    assert _flag(writer, "--setting-sources") == "" and _flag(checker, "--setting-sources") == ""
+    # The owner's own settings and servers stay, so the sources' tools are there; one ask rule sends every MCP tool to the gateway.
+    for args in (writer, checker):
+        assert "--setting-sources" not in args and "--strict-mcp-config" not in args
+        assert json.loads(_flag(args, "--settings"))["permissions"] == {"ask": ["mcp__*"]}
     assert _flag(writer, "--session-id") != _flag(checker, "--session-id")
     wrote = set(_flag(writer, "--allowedTools").split(","))
     read = set(_flag(checker, "--allowedTools").split(","))
@@ -250,6 +264,37 @@ def test_the_second_agent_is_a_fresh_one_at_a_lower_effort_that_only_reads_and_l
     assert set(CHAT_READS) <= wrote and set(CHAT_READS) <= read
     assert "## This turn: the second check" in _flag(checker, "--append-system-prompt")
     assert "## This turn: the second check" not in _flag(writer, "--append-system-prompt")
+
+
+def test_every_mcp_tool_comes_to_the_gateway_a_declared_read_is_not_asked_and_any_other_tool_is(morning: Morning) -> None:
+    """The fake agent asks its host about every tool the command line's ask rule matches, as the CLI does, whatever the
+    command line allows. The tools the sources declare and Verticals' own reading tools and report writes run with no question
+    to the reader; a tool no source lists is put to the reader, from the agent that writes the report, and declined for the
+    second agent, which has nobody to ask and writes nothing."""
+    morning.sources()
+    morning.last_report()
+    task = morning.task()
+    morning.scenario(writer_tools=["mcp__chat__send_message"], checker_tools=["mcp__chat__send_message", "mcp__verticals__doc_save"])
+    session = morning.send(task)
+    # The writer's tool no source lists is asked of the reader, by name; nothing before it was.
+    seen = morning.events(session, until=lambda e: e["t"] in ("permission", "exit") or (e["t"] == "done" and not e.get("next")))
+    assert seen[-1]["t"] == "permission" and [e["t"] for e in seen].count("permission") == 1, "the first thing asked of the reader"
+    ask = seen[-1]
+    assert ask["title"] == "Allow Claude to use mcp__chat__send_message?" and ask["tool"] == "mcp__chat__send_message"
+    morning.gateway.post("/__chat/permission", json={"session": session, "requestId": ask["requestId"], "value": "decline"})
+    events = morning.events(session)
+    assert [e["t"] for e in events].count("permission") == 1, "no declared read, no report write and nothing of the second agent's was asked"
+    assert events[-1]["t"] == "done" and events[-1]["error"] is False and "[Morning report" in "".join(
+        e["text"] for e in events if e["t"] == "text")
+    decided = [(d["seat"], d["tool"], d["behavior"]) for d in morning.decisions()]
+    for seat, tool in (("writer", "mcp__verticals__sources"), ("writer", "mcp__chat__list_messages"),
+                       ("writer", "mcp__verticals__doc_create"), ("writer", "mcp__verticals__doc_link"),
+                       ("checker", "mcp__verticals__doc_get"), ("checker", "mcp__verticals__sources")):
+        assert (seat, tool, "allow") in decided, (seat, tool)
+    assert ("writer", "mcp__chat__send_message", "deny") in decided, "the reader declined it"
+    assert ("checker", "mcp__chat__send_message", "deny") in decided and ("checker", "mcp__verticals__doc_save", "deny") in decided
+    assert not [d for d in decided if d[0] == "checker" and d[2] == "allow" and d[1] in ("mcp__chat__send_message", "mcp__verticals__doc_save")]
+    assert first_line(morning.report()) == "Checked against the sources by a second agent: all 10 passed."
 
 
 # --- a failing check holds the report back ---------------------------------------------------------------------------

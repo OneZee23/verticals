@@ -8,7 +8,13 @@ folder, so a scenario can read what the gateway really asked of the CLI (its mod
 
 The morning report (docs/design/morning-quality.md) is played when `scenario.json` in the same folder says `"morning": true`:
 the seat the gateway started it in (the writer, or the second agent that checks the report) does what that seat does against
-the real server, as `fake_morning.py` says. Without the file, a morning ask is answered like any other message."""
+the real server, as `fake_morning.py` says. Without the file, a morning ask is answered like any other message.
+
+Like the CLI, it asks its host before it calls a tool that an `ask` rule on its command line matches (`--settings`, as the
+morning turns are started with `permissions.ask`: every MCP tool), whatever `--allowedTools` says; the rule wins, as the
+docs say. The host answers allow or deny, a denied call gets an error result, and each answer is appended to `decisions.log`.
+`writer_tools` and `checker_tools` in the scenario name tools that seat tries once, besides the ones its work calls."""
+import fnmatch
 import json
 import re
 import sys
@@ -39,12 +45,39 @@ ASKS = {
 }
 
 
-def tool_call(name):
-    """A tool use and its result, as the CLI streams them: Verticals' tools by their short name, another server's in full."""
+def ask_host(full, tool_input):
+    """The CLI's permission prompt, as it is made when a rule says ask: the host answers, and True is allow."""
+    global prompts
+    prompts += 1
+    out({"type": "control_request", "request_id": f"rule-{prompts}", "request": {
+        "subtype": "can_use_tool", "tool_name": full, "input": tool_input}})
+    while (reply := read()) is not None:
+        if reply.get("type") == "control_response":
+            return (reply.get("response", {}).get("response") or {}).get("behavior") == "allow"
+    return False
+
+
+def tool_call(name, tool_input=None):
+    """A tool use and its result, as the CLI streams them: Verticals' tools by their short name, another server's in full. A
+    tool an `ask` rule matches goes to the host first; one it denies comes back as an error."""
     full = name if name.startswith("mcp__") else f"mcp__verticals__{name}"
-    out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"tool-{name}", "name": full, "input": {}}]}})
+    tool_input = tool_input or {}
+    out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"tool-{name}", "name": full, "input": tool_input}]}})
+    allowed = True
+    if any(fnmatch.fnmatchcase(full, rule) for rule in ASK_RULES):
+        allowed = ask_host(full, tool_input)
+        with open("decisions.log", "a") as decisions:
+            decisions.write(json.dumps({"seat": ROLE, "tool": full, "behavior": "allow" if allowed else "deny"}) + "\n")
     time.sleep(0.05)
-    out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"tool-{name}", "content": "ok"}]}})
+    out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"tool-{name}", "is_error": not allowed,
+                                                  "content": "ok" if allowed else "The user declined this action."}]}})
+    return allowed
+
+
+def try_extra_tools():
+    """The tools the scenario has this seat try once, besides the ones its work calls (an undeclared tool, a write)."""
+    for name in SCENARIO.pop(f"{ROLE}_tools", []):
+        tool_call(name)
 
 
 def scripted(words, text):
@@ -59,6 +92,7 @@ def scripted(words, text):
             return fake_morning.write_report(SCENARIO, api, SCENARIO.get("ask", ""), ctx, tool_call, defects=False)
         if "Make my morning report" in words:
             SCENARIO["ask"] = words
+            try_extra_tools()
             written = fake_morning.write_report(SCENARIO, api, words, ctx, tool_call)
             return "[fail]" if SCENARIO.get("writer_mode") == "fail_after_write" else written
         return None
@@ -71,6 +105,7 @@ def scripted(words, text):
     if mode == "garbage" or (mode == "garbage_once" and not again):
         return "The report looks fine to me."
     time.sleep(SCENARIO.get("checker_delay", 0))
+    try_extra_tools()
     answer = fake_morning.check_report(SCENARIO, api, remembered, ctx, tool_call, rounds)
     rounds += 1
     return answer
@@ -95,7 +130,13 @@ SYSTEM = next((sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == 
 ROLE = ("checker" if "## This turn: the second check" in SYSTEM else "writer" if "## This turn: the morning report" in SYSTEM else None)
 SCENARIO, CONF = fake_morning.load("scenario.json"), fake_morning.load("fake-agent.json")
 SCRIPTED = bool(ROLE and SCENARIO and SCENARIO.get("morning") and CONF)
-rounds, remembered = 0, ""
+rounds, remembered, prompts = 0, "", 0
+# The `ask` rules the gateway put on this process's command line (`--settings`): what the CLI would ask its host about.
+SETTINGS = next((sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--settings"), "{}")
+try:
+    ASK_RULES = json.loads(SETTINGS).get("permissions", {}).get("ask", [])
+except ValueError:
+    ASK_RULES = []
 
 started = False
 asked = 0
