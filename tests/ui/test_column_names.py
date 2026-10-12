@@ -576,7 +576,7 @@ def test_the_columns_accessible_name_says_the_full_name(ui_f2: UiSession) -> Non
 
 
 def _step(page: Page, vertical: str, control: str, key: str) -> None:
-    """One click on a column's own period control, and the board settled on the period `key` (the swap's 350 ms done)."""
+    """One click on one of a column's side bars, and the board settled on the period `key` (the swap's 350 ms done)."""
     column = page.locator(f"{STRIP} > [data-vertical='{vertical}']")
     column.locator(f'[data-cap="{control}"]').click()
     page.wait_for_selector(f"{STRIP} > [data-vertical='{vertical}'][data-period-key='{key}']")
@@ -584,7 +584,7 @@ def _step(page: Page, vertical: str, control: str, key: str) -> None:
 
 
 def test_paging_a_column_renames_it(ui_f2: UiSession) -> None:
-    """The names follow the period the controls page to, not only the one a board opens on: Day goes from today to a
+    """The names follow the period the side bars page to, not only the one a board opens on: Day goes from today to a
     weekday of this week and on to a date next week."""
     page = _open(ui_f2, SATURDAY)
     activate_column(page, "day")

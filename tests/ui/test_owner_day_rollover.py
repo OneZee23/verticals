@@ -82,9 +82,9 @@ def test_owner_day_rollover_leaves_a_navigated_board_alone(ui_f2: UiSession) -> 
     page = session.page
 
     page.wait_for_selector('[data-goal-id]')
-    # One stepper per column, and the whole `.period-nav` row only renders on column hover
-    # (`Column.vue`: `display:none` until `.pattern-vertical-board__column:hover`). Hover first,
-    # then click — any column's stepper re-anchors the whole board.
+    # Each column has a bar at either side that steps it, and they come only while the pointer is on
+    # the column (`ColumnBars.vue`, docs/design/column-bars.md). Hover first, then click — any
+    # column's side bar re-anchors the whole board.
     column = page.locator('[data-vertical="week"]')
     activate_column(page, "week")
     column.locator('[data-cap="period-prev"]').click()

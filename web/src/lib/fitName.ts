@@ -37,7 +37,8 @@ export function fontOf(el: Element): string {
   return `${look.fontStyle} ${look.fontWeight} ${look.fontSize} ${look.fontFamily}`
 }
 
-function widthOf(text: string, font: string): number {
+/** The width of `text` in `font`, in px. */
+export function widthOf(text: string, font: string): number {
   const key = `${font}\n${text}`
   let width = widths.get(key)
   if (width === undefined) {

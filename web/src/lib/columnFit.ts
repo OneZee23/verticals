@@ -33,9 +33,15 @@ export function seenHeight(scroller: HTMLElement): number {
   return Math.min(scroller.clientHeight, window.innerHeight - scroller.getBoundingClientRect().top)
 }
 
+/** What the goals scroll under at the top of `scroller`: its padding, which lies under the desktop title bar (App.vue), and
+ *  the line pinned at its start, which holds that room and its own 28 px (ColumnLine.vue, docs/design/column-bars.md). */
+function under(scroller: HTMLElement): number {
+  const line = scroller.querySelector<HTMLElement>(':scope > [data-role="column-line"]')
+  return (parseFloat(getComputedStyle(scroller).paddingTop) || 0) + (line?.offsetHeight ?? 0)
+}
+
 /** The scroll at which the block from `top` to `bottom` (in `scroller`'s content) is seen whole, moving as little as
- *  possible from `from`. The column's top padding lies under the desktop title bar (App.vue): the block stops below it. */
+ *  possible from `from`. The block stops below what the goals scroll under at the top. */
 export function fitScroll(scroller: HTMLElement, top: number, bottom: number, from: number): number {
-  const under = parseFloat(getComputedStyle(scroller).paddingTop) || 0
-  return Math.max(0, Math.min(top - GAP - under, Math.max(from, bottom + GAP - seenHeight(scroller))))
+  return Math.max(0, Math.min(top - GAP - under(scroller), Math.max(from, bottom + GAP - seenHeight(scroller))))
 }

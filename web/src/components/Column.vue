@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { KCardStack } from '@konstantinopolskii/vue'
-import AppIcon from './AppIcon.vue'
+import ColumnBars from './ColumnBars.vue'
 import ColumnHeader from './ColumnHeader.vue'
+import ColumnLine from './ColumnLine.vue'
 import GoalCard from './GoalCard.vue'
 import InlineAdd from './InlineAdd.vue'
 import FindingSections from './FindingSections.vue'
@@ -11,6 +12,7 @@ import ColumnDots from './ColumnDots.vue'
 import type { SpanScale } from '../lib/spans'
 import { store } from '../store'
 import { playSound } from '../lib/sound'
+import { kindOf, kindTail, pluralOf } from '../lib/columnNames'
 import type { PeriodDirection } from '../lib/periodNavigation'
 import type { GoalCardData, NameForm } from '../types'
 import { filterActive } from '../lib/commandFilter'
@@ -38,16 +40,25 @@ const props = withDefaults(
     span?: boolean
     /** The span's end, small and light after its date (S5.P1.008-.014). */
     end?: string
+    /** The wide column that floats over the spans (SpansBoard.vue): it doesn't page, so it has neither the period bars nor
+     *  the line pinned at its top (docs/design/column-bars.md). */
+    floating?: boolean
+    /** The board is paged away from today and this column's period no longer holds it: its sign is the single bar that
+     *  brings the board back (docs/design/column-bars.md). */
+    away?: boolean
   }>(),
   {
     subLabel: '', shorter: () => [], label: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
-    periodDirection: 1, periodSwapId: 0, span: false, end: '',
+    periodDirection: 1, periodSwapId: 0, span: false, end: '', floating: false, away: false,
   },
 )
 
 const emit = defineEmits<{
   'period-step': [vertical: string, direction: PeriodDirection]
+  /** The single bar of a column that is away from today: the board goes back to it (Board.vue). */
   'period-today': []
+  /** The middle bar of a column that holds today: this column's spans, the mode a dragged goal opens on its corner (Board.vue). */
+  'period-mode': [vertical: string, periodKey: string | null]
 }>()
 
 function onAdd(title: string) {
@@ -71,8 +82,12 @@ function onHeaderClick(): void {
 /* The column's accessible name says the full name of its header, the kind first as they read, whichever form of it is on
    screen (docs/design/column-names.md). A span has no forms, so its own words are its name. */
 const accessibleName = computed(() => props.label || [props.subLabel, props.title].filter(Boolean).join(', '))
-/* While a goal is dragged the dots take the period controls' place; a span has neither (S5.P2.017, .019). */
+/* While a goal is dragged the dots take the period bars' place; a span has neither (S5.P2.017, .019). */
 const dragging = computed(() => store.state.drag.id !== null)
+/* The line pinned at the column's top holds the period bars (docs/design/column-bars.md). A span and the column floating
+   over the spans don't page, so they have neither; Life has the line and no bars, as it has no period to step. */
+const pinned = computed(() => !props.span && !props.floating)
+const paging = computed(() => pinned.value && props.vertical !== 'life' && props.vertical !== 'maybe')
 
 /** One props bag per top-level card, forwarded straight through — no face substitution, no
  *  children truncation. The D244 §5 chain-hover wash (`goal-card--ancestor-hover`, GoalCard.vue's
@@ -195,6 +210,35 @@ let latest = slides.value[0]
 let swapAnimation: Animation | null = null
 let swapVersion = 0
 
+/* The line pinned at the top of each slide says the header's own words: the kind at the column's top, the period once the
+   big name has scrolled under it, each in the form that slide's header chose for its room, which it reports
+   (docs/design/column-bars.md). Before it has, the full forms stand. */
+const forms = reactive<Record<number, NameForm>>({})
+function onForm(slide: PeriodSlide, form: NameForm): void {
+  forms[slide.id] = form
+}
+function formOf(slide: PeriodSlide): NameForm {
+  return forms[slide.id] ?? { name: slide.title, kind: slide.subLabel }
+}
+/* What the kind line carries beyond the kind, the month a short form moved up and the year of a period outside this one,
+   goes after the name on the line: "21–27 · Dec ’27", "January · ’27". */
+function nameOf(slide: PeriodSlide): string {
+  const form = formOf(slide)
+  return form.name + kindTail(form.kind)
+}
+/* Where each slide's words end on its line, in px from the column's left: the left box of the sign grows into the room
+   they leave (ColumnBars.vue), the longest of the slides on show while two swap. */
+const wordsEnds = reactive<Record<number, number>>({})
+function onWords(slide: PeriodSlide, end: number): void {
+  wordsEnds[slide.id] = end
+}
+const wordsEnd = computed(() => Math.max(0, ...slides.value.map((slide) => wordsEnds[slide.id] ?? 0)))
+watch(slides, (list) => {
+  const live = new Set(list.map((slide) => String(slide.id)))
+  for (const id of Object.keys(forms)) if (!live.has(id)) delete forms[Number(id)]
+  for (const id of Object.keys(wordsEnds)) if (!live.has(id)) delete wordsEnds[Number(id)]
+})
+
 watch(
   () => props.periodSwapId,
   async (swapId) => {
@@ -304,30 +348,19 @@ onBeforeUnmount(() => swapAnimation?.cancel())
     role="group"
     :aria-label="accessibleName"
   >
+    <!-- The period bars, | ||| |, on the line pinned at the top of the slide on show (docs/design/column-bars.md); while a
+         goal is dragged the dots stand in their place. They stay put while the slides swap, as the arrows did. -->
+    <ColumnBars
+      v-if="paging && !dragging"
+      :kind="kindOf(vertical)"
+      :plural="pluralOf(vertical)"
+      :away="away"
+      :words-end="wordsEnd"
+      @step="(direction) => emit('period-step', vertical, direction)"
+      @today="emit('period-today')"
+      @mode="emit('period-mode', vertical, periodKey)"
+    />
     <ColumnDots v-if="dragging && vertical !== 'life' && vertical !== 'maybe' && !span" :vertical="vertical as SpanScale" />
-    <div v-else-if="vertical !== 'life' && !span" class="column-period-controls" data-cap="period-nav">
-      <button
-        class="column-period-controls__arrow"
-        type="button"
-        aria-label="Previous period"
-        data-cap="period-prev"
-        @click="emit('period-step', vertical, -1)"
-      ><AppIcon name="arrow-left" :size="14" /></button>
-      <button
-        class="column-period-controls__today"
-        type="button"
-        aria-label="Today"
-        data-cap="period-today"
-        @click="emit('period-today')"
-      ><AppIcon name="today" :size="14" /></button>
-      <button
-        class="column-period-controls__arrow"
-        type="button"
-        aria-label="Next period"
-        data-cap="period-next"
-        @click="emit('period-step', vertical, 1)"
-      ><AppIcon name="arrow-right" :size="14" /></button>
-    </div>
     <div
       ref="periodTrack"
       class="period-track"
@@ -338,12 +371,21 @@ onBeforeUnmount(() => swapAnimation?.cancel())
         v-for="slide in slides"
         :key="slide.id"
         class="period-slide"
+        :class="{ 'period-slide--pinned': pinned }"
         data-role="period-slide"
         :data-state="vertical === 'life' ? undefined : slide.state"
         :data-period-key="slide.periodKey ?? ''"
       >
-        <!-- Header click = expand/unfold toggle (KK ruling 2026-08-17). The pager cluster is a
-             sibling of the header, so its own clicks never reach this handler. -->
+        <!-- The line pinned at the top of the slide, over the header's kind row and the goals that scroll under it; it
+             scrolls with its slide, which wheels and swaps as one. A click on its words is a click on the header. -->
+        <ColumnLine
+          v-if="pinned"
+          :kind="formOf(slide).kind"
+          :name="nameOf(slide)"
+          @words="(end) => onWords(slide, end)"
+          @click="onHeaderClick"
+        />
+        <!-- Header click = expand/unfold toggle (KK ruling 2026-08-17). -->
         <ColumnHeader
           :title="slide.title"
           :sub-label="slide.subLabel"
@@ -351,6 +393,7 @@ onBeforeUnmount(() => swapAnimation?.cancel())
           :end="end"
           :data-cap="span ? undefined : 'column-expand'"
           @click="onHeaderClick"
+          @form="(form) => onForm(slide, form)"
         />
         <div class="pattern-vertical-board__body">
           <CarriedGroup v-if="carriedGoals(slide).length" :vertical="vertical" :goals="carriedGoals(slide)" @replan="onReplan" />
@@ -403,70 +446,6 @@ onBeforeUnmount(() => swapAnimation?.cancel())
   position: relative;
   overflow: hidden;
 }
-.column-period-controls {
-  position: absolute;
-  z-index: 3; /* over the column's name, which stands over flow 4's veil at 2 (goalCard.css) and took every click here */
-  top: calc(6px + var(--board-under-bar, 0px));
-  right: 12px;
-  display: flex;
-  align-items: baseline;
-  gap: 1px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-hover) ease;
-}
-.pattern-vertical-board__column:hover .column-period-controls {
-  opacity: 1;
-  pointer-events: auto;
-}
-.column-period-controls__arrow {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 20px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: rgb(45 48 54 / 52%);
-  font: inherit;
-  font-size: var(--fs-caption, 15px);
-  line-height: 20px;
-  cursor: pointer;
-}
-.column-period-controls__arrow:hover,
-.column-period-controls__arrow:focus-visible {
-  background: rgb(45 48 54 / 8%);
-  outline: none;
-}
-.column-period-controls__arrow:active { background: rgb(45 48 54 / 14%); }
-.column-period-controls__today {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 20px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: rgb(45 48 54 / 52%);
-  font: inherit;
-  font-size: var(--fs-caption, 15px);
-  line-height: 20px;
-  cursor: pointer;
-}
-.column-period-controls__today:hover,
-.column-period-controls__today:focus-visible {
-  background: rgb(45 48 54 / 8%);
-  outline: none;
-}
-.column-period-controls__today:active { background: rgb(45 48 54 / 14%); }
 .pattern-vertical-board.pattern-vertical-board
   > .pattern-vertical-board__column.pattern-vertical-board__column--active {
   flex: 0 0 clamp(280px, calc(100% - 6 * 160px), 400px);
@@ -513,6 +492,11 @@ onBeforeUnmount(() => swapAnimation?.cancel())
 .period-slide > .pattern-vertical-board__body {
   padding: 88px 2px 80px;
 }
+/* A slide with the line pinned at its top (ColumnLine.vue) starts with it, in flow: the line holds the room the title
+   bar's padding held (App.vue) and its own 28 px, and sticks to the top of the scrollport when the slide scrolls, which a
+   padding could not do. The goals' own padding is the 88 px it was, less the line's, so they stand where they did. */
+.period-slide.period-slide--pinned { padding-top: 0; }
+.period-slide--pinned > .pattern-vertical-board__body { padding-top: calc(88px - var(--column-line)); }
 .period-track--swapping > .period-slide {
   flex: 0 0 50%;
 }

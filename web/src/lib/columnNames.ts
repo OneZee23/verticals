@@ -28,6 +28,17 @@ export interface ColumnNames {
 const KINDS: Record<string, string> = {
   day: 'Day', week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year', decade: 'Three years', life: 'Life',
 }
+/** A scale's kind, "Week": what a column's side bars are named by, "Previous week", "Next week"
+ *  (docs/design/column-bars.md). */
+export function kindOf(vertical: string): string {
+  return KINDS[vertical] ?? vertical
+}
+/** What a scale's mode shows, in the plural, "Weeks": the three bars are named "Weeks side by side"
+ *  (docs/design/column-bars.md). Three years is its own plural. */
+export function pluralOf(vertical: string): string {
+  const kind = kindOf(vertical)
+  return vertical === 'decade' ? kind : `${kind}s`
+}
 /** The scales whose name doesn't say its year; the kind line does, when it isn't this one. Year and three years are
  *  their years, and life has none. */
 const YEAR_IN_KIND = new Set(['day', 'week', 'month', 'quarter'])
@@ -45,10 +56,20 @@ function outsideYear(from: Date, to: Date, today: Date): number | null {
   return from.getFullYear() !== year && to.getFullYear() !== year ? from.getFullYear() : null
 }
 
+const TAIL = ' · '
 /** The kind line: "Month", "Month · ’27", and for a week whose month moved up into it, "Week · Dec", "Week · Dec ’27". */
 function kindLine(kind: string, month: string | null, year: number | null): string {
   const tail = [month, year === null ? null : shortYear(year)].filter(Boolean).join(' ')
-  return tail ? `${kind} · ${tail}` : kind
+  return tail ? `${kind}${TAIL}${tail}` : kind
+}
+
+/** What follows the kind on its line, " · Dec ’27", or nothing: the month a form moved up and the year of a period outside
+ *  this one. The line pinned at a scrolled column's top names the period without its kind, so it says this after the
+ *  name, "21–27 · Dec ’27": else a scrolled column would read as this year's, and a week as no month's
+ *  (docs/design/column-bars.md). */
+export function kindTail(kind: string): string {
+  const at = kind.indexOf(TAIL)
+  return at < 0 ? '' : kind.slice(at)
 }
 
 /** The kind in the accessible name, which speaks the whole year: "Month 2027". */
