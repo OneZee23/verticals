@@ -5,7 +5,7 @@
 // the tick made is the tick's to take back.
 import { ApiError, fetchGoalComments, getGoal, type GoalCard } from './api'
 import type { Step } from './boardHistory'
-import type { Outcome } from './boardRestore'
+import type { Applied, Outcome } from './boardRestore'
 import { sendAway } from './goalSteps'
 
 /** What the last tick of each goal made. The store notes the server's answer to every tick, those the person makes and those
@@ -47,17 +47,20 @@ async function takeBack(occurrence: GoalCard): Promise<Outcome> {
 export function withOccurrence(step: Step, first: GoalCard | null): Step {
   if (!first) return step
   let occurrence: GoalCard | null = first
+  const outcomeOf = (result: Outcome | Applied): Outcome => (typeof result === 'string' ? result : result.outcome)
   return {
     ...step,
-    async undo(): Promise<Outcome> {
-      const outcome = await step.undo()
-      return outcome === 'done' && occurrence ? takeBack(occurrence) : outcome
+    async undo(): Promise<Outcome | Applied> {
+      const result = await step.undo()
+      if (outcomeOf(result) !== 'done' || !occurrence) return result
+      const taken = await takeBack(occurrence)
+      return typeof result === 'string' ? taken : { ...result, outcome: taken }
     },
-    async redo(): Promise<Outcome> {
-      const outcome = await step.redo()
+    async redo(): Promise<Outcome | Applied> {
+      const result = await step.redo()
       // The tick played again made its own occurrence, under its own id, or found the one a person kept.
-      if (outcome === 'done') occurrence = takeOccurrence(step.id)
-      return outcome
+      if (outcomeOf(result) === 'done') occurrence = takeOccurrence(step.id)
+      return result
     },
   }
 }

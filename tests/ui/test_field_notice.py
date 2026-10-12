@@ -351,7 +351,8 @@ def test_the_keys_stay_the_fields_own_in_a_text_field(ui_f2: UiSession) -> None:
         page.keyboard.press("Escape")
         page.locator(FIELD_TEXT).blur()
 
-        # The keydown itself is left alone in a text field, and taken on a focused checkbox, which is no text field.
+        # The keydown is the field's own in the field (it does the field's undo itself, a run of typing at a time, so it holds the
+        # browser's), and the board's on a focused checkbox, which is no text field.
         press = """(args) => {
           const el = document.querySelector(args.selector); el.focus();
           const event = new KeyboardEvent('keydown', { key: 'z', metaKey: args.apple, ctrlKey: !args.apple, bubbles: true, cancelable: true });
@@ -359,7 +360,7 @@ def test_the_keys_stay_the_fields_own_in_a_text_field(ui_f2: UiSession) -> None:
           return event.defaultPrevented;
         }"""
         apple = undo.startswith("Meta")
-        assert page.evaluate(press, {"selector": FIELD_TEXT, "apple": apple}) is False, "the field keeps ⌘Z"
+        assert page.evaluate(press, {"selector": FIELD_TEXT, "apple": apple}) is True, "the field takes ⌘Z for its own undo"
         assert goal(conn, "SYNCOL01")[4] is True
         checkbox = '[data-goal-id="SYNCOL01"] > .goal-card__row input.checkbox__input'
         assert page.evaluate(press, {"selector": checkbox, "apple": apple}) is True, "a focused checkbox is not a text field"

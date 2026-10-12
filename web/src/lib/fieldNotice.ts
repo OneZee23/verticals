@@ -36,8 +36,8 @@ function arm(ms: number): void {
   timer = window.setTimeout(dismiss, ms)
 }
 
-/** Says `segments` in the field, with `action` at the right end. A notice already there is replaced. */
-export function say(segments: Segment[], action: NoticeAction): void {
+/** Says `segments` in the field, with `action` at the right end (none: the line alone). A notice already there is replaced. */
+export function say(segments: Segment[], action: NoticeAction | null): void {
   notice.segments = segments
   notice.action = action
   notice.seq += 1
