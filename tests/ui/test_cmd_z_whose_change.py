@@ -13,11 +13,12 @@ tests' own clock control (`page.clock`): nothing here waits for them, except the
 
 from __future__ import annotations
 
+import re
 import time
 
 import psycopg
 import pytest
-from playwright.sync_api import expect
+from playwright.sync_api import Page, expect
 
 from tests.ui.answer_support import (
     CHOICE, CIRCLE_ANSWER, ONE, TWO, UNDO, ask, ask_for_the_field, board_write_log, board_writes, choices, held, later, mcp_server,  # noqa: F401
@@ -30,6 +31,9 @@ from tests.ui.undo_helpers import NOTICE, expect_no_notice, goal, keys, notice_t
 
 OWN = "Completed “Color check yellow”"
 THE_AGENTS = "2 changes by the agent"
+#: Titles too long for a phone's width, for the question's pills to cut.
+LONG_OWN = "Write the whole long report about the quarter's groundwork and send it to everyone"
+LONG_THEIRS = "Rearrange the second quarter's planning sheet for the offsite"
 
 
 def own_change(session: UiSession, conn: psycopg.Connection) -> None:
@@ -252,6 +256,97 @@ def test_a_gateway_that_does_not_answer_does_not_hold_the_key(ui_answers: UiSess
             wait_for(page, lambda: goal(conn, "SYNCOL01")[4], False, "the tick is taken back without the gateway's word", timeout=3)
             assert time.monotonic() - pressed < 2.0, f"the key waited {time.monotonic() - pressed:.1f} s for the gateway"
         wait_for_reads(session, seen)  # the read that was held is answered now
+
+
+# --- the question in a narrow window ---------------------------------------------------------------------------------------
+
+
+def question_boxes(page: Page) -> tuple[dict, dict, list[dict]]:
+    """Where the question stands, as the browser laid it out: the notice, its words ("Take back"), and each pill."""
+    notice = page.locator(NOTICE).bounding_box()
+    line = page.locator(f"{NOTICE} [data-role=field-notice-line]").bounding_box()
+    pills = [page.locator(CHOICE).nth(i).bounding_box() for i in range(page.locator(CHOICE).count())]
+    assert notice and line and pills and all(pills)
+    return notice, line, pills
+
+
+def within(inner: dict, outer: dict) -> bool:
+    return (
+        inner["x"] >= outer["x"] - 0.5 and inner["y"] >= outer["y"] - 0.5
+        and inner["x"] + inner["width"] <= outer["x"] + outer["width"] + 0.5
+        and inner["y"] + inner["height"] <= outer["y"] + outer["height"] + 0.5
+    )
+
+
+def stands_in_the_window(page: Page, width: int, height: int = 844) -> list[dict]:
+    """The question is wholly in the window, its pills wholly in the question, and its words have a row of their own above them."""
+    notice, line, pills = question_boxes(page)
+    window = {"x": 0, "y": 0, "width": width, "height": height}
+    assert within(notice, window), f"the notice runs past the edge of a {width} px window: {notice}"
+    for pill in pills:
+        assert within(pill, notice), f"a pill runs past the notice: {pill} in {notice}"
+        assert pill["height"] <= 62.5, f"a pill is taller than two lines: {pill}"
+    assert line["y"] + line["height"] <= min(pill["y"] for pill in pills) + 0.5, "Take back keeps a row of its own"
+    return pills
+
+
+def test_a_question_wider_than_the_window_keeps_take_back_on_its_row_and_wraps_the_pills_under_it(ui_answers: UiSession) -> None:
+    session = ui_answers
+    page = board(session)
+    undo, _ = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        own_change(session, conn)
+        ask(session, TWO)
+        page.set_viewport_size({"width": 600, "height": 844})  # the row of 574 px does not fit in 568
+        page.wait_for_timeout(500)
+        later(page, 6)
+        asked(session, undo)
+
+        first, second = stands_in_the_window(page, 600)
+        assert abs(first["y"] - second["y"]) < 1, "the pills stand side by side while they fit"
+        assert choices(page) == [OWN, THE_AGENTS], "and nothing is cut while everything fits"
+
+
+@pytest.mark.parametrize("width", [390, 320])
+def test_the_question_fits_a_narrow_window_with_its_titles_cut_and_its_words_whole(ui_answers: UiSession, width: int) -> None:
+    session = ui_answers
+    page = board(session)
+    undo, _ = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        conn.execute("UPDATE goals SET title = %s WHERE id = 'SYNCOL01'", (LONG_OWN,))
+        conn.execute("UPDATE goals SET title = %s WHERE id = 'SYNORD02'", (LONG_THEIRS,))
+        order = goal(conn, "SYNORD02")
+        page.reload()
+        board(session)
+        own_change(session, conn)
+        ask(session, ONE)
+        page.set_viewport_size({"width": width, "height": 844})
+        page.wait_for_timeout(500)
+        later(page, 6)
+        page_width = page.evaluate("document.documentElement.scrollWidth")
+        start = len(session.request_log)
+        asked(session, undo)
+
+        first, second = stands_in_the_window(page, width)
+        assert first["y"] + first["height"] <= second["y"] + 0.5, "the pills stand one under the other when they do not fit side by side"
+        own, theirs = choices(page)
+        assert re.fullmatch(r"Completed “[^”]*[^ ”]…”", own), f"the title is cut, the dots right after its last letter: {own!r}"
+        assert re.fullmatch(r"Moved “[^”]*[^ ”]…” to this month by the agent", theirs), f"the title is cut, the words are not: {theirs!r}"
+        assert page.evaluate("document.documentElement.scrollWidth") <= max(page_width, width), "the question adds no width to the page"
+        for at in range(2):
+            page.locator(CHOICE).nth(at).click(trial=True)  # in reach of a finger: visible, still and not covered
+        assert board_writes(session, start) == [], "asking wrote nothing"
+
+        page.locator(CHOICE).nth(0).click()  # the person's own
+        wait_for(page, lambda: goal(conn, "SYNCOL01")[4], False, "the person's own tick is taken back")
+        assert goal(conn, "SYNORD02")[1] == "month", "and the answer's move stands"
+        expect_no_notice(page)  # the question has left, so the next one is the only one in the page
+
+        asked(session, undo)  # nothing of the person's own is left: the answer alone, under its words
+        [alone] = stands_in_the_window(page, width)
+        assert alone["x"] + alone["width"] <= width
+        page.locator(CHOICE).click()
+        wait_for(page, lambda: goal(conn, "SYNORD02"), order, "the answer is taken back from its pill")
 
 
 # --- an answer is not a step of the keys -----------------------------------------------------------------------------------
