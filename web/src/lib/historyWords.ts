@@ -84,3 +84,14 @@ export function putBackWords(title: string): Segment[] {
   return [{ text: 'Put back ' }, { quote: title }]
 }
 
+
+/** A step that could not be done whole because what it changed was changed since (an agent working in the background, another
+ *  window): the change stays as it is now. `kept` are the goals it stays on; `set` says whether anything else went back. */
+export function keptWords(direction: 'undo' | 'redo', title: string, kept: { title: string }[], set: boolean): Segment[] {
+  if (set) return [{ text: direction === 'undo' ? 'Put back ' : 'Redid ' }, { quote: title }, { text: '; what changed since stays' }]
+  const more = kept.length - 1
+  return [
+    { quote: kept[0]?.title ?? title },
+    { text: more > 0 ? ` and ${more} more changed since, so they stay` : ' changed since, so it stays' },
+  ]
+}

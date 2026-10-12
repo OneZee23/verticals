@@ -10,23 +10,29 @@
 import { nextTick } from 'vue'
 import { toast } from '@konstantinopolskii/vue'
 import { findGoal } from './boardIndex'
-import { currentShot, settleShots, type Outcome, type RestorePorts, type Target } from './boardRestore'
+import { currentShot, holdings, settleShots, type Applied, type Outcome, type RestorePorts, type Target } from './boardRestore'
 import { changeBetween, changed, parentDiffers, placeDiffers, shotOf, shotsOf, slotDiffers, type Shot } from './boardShots'
-import { dismiss, say, type Segment } from './fieldNotice'
-import { changeWords, putBackWords } from './historyWords'
+import { dismiss, say, type NoticeAction, type Segment } from './fieldNotice'
+import { changeWords, keptWords, putBackWords } from './historyWords'
 import { messageForError } from './scheduleFeedback'
 import { glideThrough } from './undoGlide'
 
 export interface Step {
   /** The goal the step is about. */
   id: string
+  /** Its title as the step knows it, for the line that says what could not be done. */
+  title?: string
   /** The words for a notice when the change leaves the view; `null` when there is nothing to say. `redo` is the change
    *  as it was first made, so it is also what is said when it was just made. */
   words(direction: 'undo' | 'redo'): Segment[] | null
   /** Whether goals move on the board when the step is applied, so the rows glide (`lib/undoGlide.ts`). */
   glides(direction: 'undo' | 'redo'): boolean
-  undo(): Promise<Outcome>
-  redo(): Promise<Outcome>
+  /** Looks at what the goals hold now, before the step is applied, so that the board can move in the same breath as the key
+   *  (`lib/boardRestore.ts`, `holdings`). */
+  prepare?(direction: 'undo' | 'redo'): Promise<void>
+  /** A step that holds goals against what they were left as (`lib/boardRestore.ts`) says what stayed; the others, how it went. */
+  undo(): Promise<Outcome | Applied>
+  redo(): Promise<Outcome | Applied>
 }
 
 export interface HistoryPorts extends RestorePorts {
@@ -104,16 +110,22 @@ export function seen(id: string): boolean {
 const frame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()))
 
 /** A change that leaves your view is said in the field; one you can see is not. The board has drawn the change by the
- *  time this looks, and the check is what is on the screen, so it holds for every kind of change. */
-async function announce(step: Step, direction: 'undo' | 'redo'): Promise<void> {
+ *  time this looks, and the check is what is on the screen, so it holds for every kind of change. What stayed because it was
+ *  changed since is always said: the person is looking at a goal that did not move. */
+async function announce(step: Step, direction: 'undo' | 'redo', applied: Applied | null = null): Promise<void> {
   await nextTick()
   await frame()
-  if (typeof document === 'undefined' || seen(step.id)) return
+  if (typeof document === 'undefined') return
+  const other: NoticeAction = direction === 'redo' ? { label: 'Undo', run: () => void undo() } : { label: 'Redo', run: () => void redo() }
+  if (applied?.kept.length) {
+    // With nothing set there is nothing to take back or play again from here: the line stands alone.
+    say(keptWords(direction, step.title ?? applied.kept[0]!.title, applied.kept, applied.set), applied.set ? other : null)
+    return
+  }
+  if (seen(step.id)) return
   const words = step.words(direction)
   if (!words) return
-  say(words, direction === 'redo'
-    ? { label: 'Undo', run: () => void undo() }
-    : { label: 'Redo', run: () => void redo() })
+  say(words, other)
 }
 
 // --- steps ---------------------------------------------------------------------------------------------------------
@@ -146,18 +158,24 @@ interface Pair {
 /** The step for goals that went from `before` to `after`. `mainId` is the one the gesture was about. */
 function editStep(pairs: Pair[], mainId: string): Step {
   const first = (targets: Target[]): Target[] => [...targets.filter((t) => t.shot.id === mainId), ...targets.filter((t) => t.shot.id !== mainId)]
-  const befores = pairs.map((p) => ({ shot: p.before, change: changeBetween(p.before, p.after) }))
-  const afters = pairs.map((p) => ({ shot: p.after, change: changeBetween(p.after, p.before) }))
+  // Each goal is held against what the step left it as (undo) or what undo left it as (redo): what changed since stays.
+  const befores = pairs.map((p) => ({ shot: p.before, change: changeBetween(p.before, p.after), expect: p.after }))
+  const afters = pairs.map((p) => ({ shot: p.after, change: changeBetween(p.after, p.before), expect: p.before }))
   const main = pairs.find((p) => p.before.id === mainId) ?? pairs[0]!
   const structural = pairs.some(({ before, after }) => parentDiffers(before, after) || placeDiffers(before, after) || slotDiffers(before, after))
+  let held: Map<string, Shot | null> | undefined
   return {
     id: mainId,
+    title: main.before.title,
     glides: () => structural,
+    prepare: async (direction) => {
+      held = await holdings(ports!, direction === 'undo' ? befores : afters).catch(() => undefined)
+    },
     words: (direction) => direction === 'undo'
       ? putBackWords(main.before.title)
       : changeWords(main.before, main.after, goalTitle),
-    undo: () => settleShots(ports!, first(befores), 'back'),
-    redo: () => settleShots(ports!, first(afters), 'forward'),
+    undo: () => settleShots(ports!, first(befores), 'back', held),
+    redo: () => settleShots(ports!, first(afters), 'forward', held),
   }
 }
 
@@ -232,10 +250,14 @@ async function apply(direction: 'undo' | 'redo'): Promise<void> {
   const step = from.pop()
   if (!step) return
   dismiss() // whatever a notice offered is being done now
-  const run = (): Promise<Outcome> => (direction === 'undo' ? step.undo() : step.redo())
+  await step.prepare?.(direction)
+  const run = (): Promise<Outcome | Applied> => (direction === 'undo' ? step.undo() : step.redo())
   let outcome: Outcome
+  let applied: Applied | null = null
   try {
-    outcome = step.glides(direction) ? await glideThrough(run, step.id) : await run()
+    const result = step.glides(direction) ? await glideThrough(run, step.id) : await run()
+    if (typeof result === 'string') outcome = result
+    else [outcome, applied] = [result.outcome, result]
   } catch (err) {
     toast(messageForError(err))
     outcome = 'retry'
@@ -245,9 +267,12 @@ async function apply(direction: 'undo' | 'redo'): Promise<void> {
     failures.set(step, tries)
     if (tries >= 2) outcome = 'drop'
   }
-  if (outcome === 'done') to.push(step)
+  // Everything the step changed has been changed since: there is nothing to take back or play again, so the step is spent
+  // and the line says so (the next ⌘Z goes on to the step before it).
+  const spent = outcome === 'done' && !!applied?.kept.length && !applied.set
+  if (outcome === 'done' && !spent) to.push(step)
   else if (outcome === 'retry') from.push(step)
-  if (outcome === 'done') await announce(step, direction)
+  if (outcome === 'done') await announce(step, direction, applied)
 }
 
 export function undo(): Promise<void> {

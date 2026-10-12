@@ -99,6 +99,7 @@ onBeforeUnmount(() => {
       v-if="notice.open"
       ref="pill"
       class="field-notice"
+      :class="{ 'field-notice--bare': !notice.action }"
       data-role="field-notice"
       role="status"
       aria-live="polite"
@@ -141,6 +142,7 @@ onBeforeUnmount(() => {
   color: #fff;
   font: 400 15px/22px var(--font-body);
 }
+.field-notice--bare { padding-right: 28px; }
 /* Nothing in the line shrinks: a title too long for it is cut in the text by the component (so the “…” stands right after
    its last letter), and `overflow` only keeps a line that still does not fit, in a very narrow window, off the button. */
 .field-notice__line { display: flex; flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; white-space: pre; }
