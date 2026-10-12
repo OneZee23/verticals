@@ -50,6 +50,12 @@ ONE = 'Move [tool:schedule {"id": "SYNORD02", "vertical": "month", "anchor_date"
 
 
 @pytest.fixture
+def ui_reduced_motion(request: pytest.FixtureRequest) -> str:
+    """These scenarios run with the motion the app has (no preference), as the person sees it, unless a test asks for another."""
+    return getattr(request, "param", "no-preference")
+
+
+@pytest.fixture
 def mcp_server(f2_dsn: str, tmp_path: Path) -> Iterator[McpHttpServer]:
     """A real MCP server (`python -m verticals.mcp.server --transport http`) on the test's database, for the owner F2 belongs to."""
     with mcp_http_subprocess(f2_dsn, tmp_path, owner=F2_OWNER, token=TEST_TOKEN) as server:
@@ -97,10 +103,29 @@ def wait_for_reads(session: UiSession, more_than: int) -> None:
     raise AssertionError("the page did not read the answer when it ended")
 
 
+def reads_since_the_window_opened(session: UiSession) -> int:
+    """The reads made since the page was last loaded: its own, when it opens, and the ones its conversation's past turns ask for."""
+    log = session.request_log
+    opened = max((i for i, r in enumerate(log) if r["method"] == "GET" and r["url"].rstrip("/") == session.base_url.rstrip("/")), default=-1)
+    return sum(1 for r in log[opened + 1:] if r["method"] == "POST" and r["url"].endswith(READ))
+
+
+def settle(session: UiSession) -> None:
+    """Waits until the window has made the reads it makes on its own when it opens, and has stopped: a read still on its way would
+    be taken for the one an answer's end asks for."""
+    before = -1
+    for _ in range(200):
+        now = reads_since_the_window_opened(session)
+        if now and now == before:
+            return
+        before = now
+        session.page.wait_for_timeout(250)
+    raise AssertionError("the window did not finish its first reads")
+
+
 def send(session: UiSession, words: str) -> int:
-    """Writes to the agent the way a person does. Returns how many times the page had asked for answers by then (the first of
-    its asks is made when the window opens, so it is waited for here)."""
-    wait_for_reads(session, 0)
+    """Writes to the agent the way a person does. Returns how many times the page had asked for answers by then."""
+    settle(session)
     seen = reads(session)
     session.page.keyboard.press("Control+k")
     session.page.locator(FIELD).fill(words)

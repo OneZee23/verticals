@@ -14,12 +14,11 @@ from playwright.sync_api import Page, expect
 from verticals.core import docs as core_docs, goals as core_goals
 from tests.ui.answer_support import (
     BALLOON, CIRCLE_ANSWER, ONE, THREE, UNDO, answer_without_a_page, ask, ask_for_the_field, look, send, to_the_board,
-    ui_answers, mcp_server,  # noqa: F401  (the fixtures)
+    ui_answers, ui_reduced_motion, mcp_server,  # noqa: F401  (the fixtures)
 )
 from tests.ui.conftest import F2_OWNER, UiSession, activate_column
 from tests.ui.test_board_undo import board
 from tests.ui.undo_helpers import ACTION, expect_no_notice, expect_notice, family, goal, wait_for
-from tests.ui.views import FIELD
 
 MADE = "Made by the answer"
 #: The conversation an answer is given in while the window is closed (the gateway's conversations are UUIDs).
@@ -56,6 +55,8 @@ def test_an_answer_on_its_message_is_taken_back_by_its_undo_and_played_again_by_
         wait_for(page, lambda: goal(conn, "SYNORD01"), order, "the goal is back in its week, in its place")
         wait_for(page, lambda: made_id(conn), None, "the goal the answer made is gone")
         expect(pill).to_have_text("Redo")
+        expect_notice(page, "Put back “Order one” and 2 more")  # the made goal left the view, and the board is behind the conversation
+        expect(page.locator(ACTION)).to_have_count(0)  # the message's own pill is the Redo: the notice has no second one
 
         pill.click()
         wait_for(page, lambda: goal(conn, "SYNCOL01")[4], True, "the answer is played again: the tick")
@@ -177,6 +178,7 @@ def test_the_tick_of_a_repeating_goal_goes_back_with_the_occurrence_it_made_and_
         page.locator(CIRCLE_ANSWER).locator(UNDO).click()
         wait_for(page, lambda: goal(conn, "SYNCOL04")[4], False, "the tick is taken back")
         wait_for(page, lambda: series(), (1, None), "and the occurrence it made goes with it")
+        expect_notice(page, "Removed “Color check blue” and 1 more")  # the occurrence left the view; Esc ends the notice once it is up
         page.keyboard.press("Escape")
 
         page.locator(CIRCLE_ANSWER).locator(UNDO).click()
@@ -285,12 +287,11 @@ def test_the_pill_has_the_notices_own_look_and_stands_inside_the_field_in_both_i
         page.keyboard.press("Escape")  # the answer goes
         page.locator(CIRCLE_ANSWER).wait_for(state="detached")
 
-        seen = send(session, f'[say] Your report is ready. [SYN report](#doc/{doc}) [tool:update {{"id": "SYNCOL05", "done": true}}] [slow]')
+        send(session, f'[tool:update {{"id": "SYNCOL05", "done": true}}] [slow] [say] Your report is ready. [SYN report](#doc/{doc})')
         page.wait_for_timeout(150)
         to_the_board(page)
         expect(page.locator(".circle-field__answer--note")).to_contain_text("SYN report", timeout=20000)
         inside("an answer that links a document")
-        assert seen is not None
 
 
 def test_what_became_of_an_answer_is_kept_for_the_window_that_opens_later(ui_answers: UiSession) -> None:

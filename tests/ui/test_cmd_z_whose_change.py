@@ -17,18 +17,17 @@ import time
 
 import psycopg
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import expect
 
 from tests.ui.answer_support import (
     CHOICE, CIRCLE_ANSWER, ONE, TWO, UNDO, ask, ask_for_the_field, board_write_log, board_writes, choices, held, later, mcp_server,  # noqa: F401
-    outside_agent, reads, sent_to_the_agent, ui_answers, wait_for_reads,
+    outside_agent, reads, sent_to_the_agent, ui_answers, ui_reduced_motion, wait_for_reads,  # noqa: F401
 )
 from tests.ui.conftest import UiSession
 from tests.ui.test_board_undo import TICK, board
 from tests.ui.test_cmd_z_in_text import PLACES, TYPED, text_of
-from tests.ui.undo_helpers import NOTICE, LINE, expect_no_notice, goal, keys, notice_text, wait_for
+from tests.ui.undo_helpers import NOTICE, expect_no_notice, goal, keys, notice_text, wait_for
 
-WEEK_ORDER_TWO = ("week", "2026-08-05", "2026-W32")
 OWN = "Completed “Color check yellow”"
 THE_AGENTS = "2 changes by the agent"
 
@@ -76,14 +75,14 @@ def test_inside_any_text_cmd_z_is_the_texts_own_and_never_asks(ui_answers: UiSes
         later(page, 6)  # outside text, this is a question: an answer came after a change of the person's that is 6 seconds old
 
         target = reach(session, conn)
-        held = text_of(target)
+        before_typing = text_of(target)
         start = len(session.request_log)
         page.keyboard.type(TYPED)
         assert TYPED in text_of(target), f"{place}: the words were typed"
 
         page.keyboard.press(undo)
         page.wait_for_timeout(300)
-        assert text_of(target) == held, f"{place}: the typing is undone, by the text's own ⌘Z (got {text_of(target)!r})"
+        assert text_of(target) == before_typing, f"{place}: the typing is undone, by the text's own ⌘Z (got {text_of(target)!r})"
         expect_no_notice(page)
         page.keyboard.press(redo)
         page.wait_for_timeout(300)
