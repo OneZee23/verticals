@@ -97,7 +97,8 @@ def _turn(chat_module, standin: Standin, tmp_path: Path):
     chat = chat_module.Chat(tmp_path, standin.url, "tok")
     chat_module.which = lambda provider: "claude"
     seen: list = []
-    chat_module.AGENT_CLASSES = {"claude": lambda c, s, settings, resume: _Agent(seen, standin, c, s, settings, resume)}
+    # The gateway starts an agent in its session's folder (`cwd`, `rebuild_prompt`: docs/design/task-sessions.md).
+    chat_module.AGENT_CLASSES = {"claude": lambda c, s, settings, resume, **_: _Agent(seen, standin, c, s, settings, resume)}
     chat_module.AGENT_CLASSES["claude"].signature_of = staticmethod(lambda settings: {})
     session = chat.session(SESSION)
     emitted = session.emit
@@ -153,7 +154,7 @@ def test_a_turn_that_cannot_start_is_closed_too(mcp_server: Standin, tmp_path: P
     chat_module = _chat()
     chat = chat_module.Chat(tmp_path, mcp_server.url, "tok")
 
-    def broken(c, s, settings, resume):
+    def broken(c, s, settings, resume, **_):
         raise chat_module.ChatError("The agent is not running")
 
     chat_module.which = lambda provider: "claude"
