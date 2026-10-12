@@ -1,6 +1,6 @@
 # A report from pictures, its task, and the PR with the change
 
-Something looks wrong: the person drops pictures on the field and says what happened. The report comes first, then, if asked, a design and a PR, all inside one task.
+Something is wrong, or could be better: the person drops pictures on the field and says what they see and what they want. The report comes first, then, if asked, a design and a PR, all inside one task.
 
 ## Behaviour
 
