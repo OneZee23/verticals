@@ -17,6 +17,7 @@ from typing import TypeVar
 
 from playwright.sync_api import Page, expect
 
+from tests.harness.report import gate
 from tests.static.sample_sessions import CLAUDE_SESSION, CODEX_THREAD, OTHER_CLAUDE, claude_file, codex_file, grow_file
 from tests.ui.conftest import PINNED_CLOCK_ISO, UiSession
 from tests.ui.test_agent_conversation import CONVERSATION, _answered, _send, ui_agent  # noqa: F401  (the fixture)
@@ -150,6 +151,9 @@ def test_start_work_runs_in_the_permission_mode_the_chat_is_set_to(ui_agent: UiS
 def test_start_work_goes_to_an_agent_that_is_there_when_the_one_the_task_last_worked_with_is_not(ui_agent: UiSession, tmp_path: Path) -> None:
     """The newest session of the task is Codex's, and there is no Codex on this computer: Claude takes the task, and the task has both."""
     desk, page = Desktop(ui_agent, tmp_path), ui_agent.page
+    agents = page.evaluate("() => fetch('/__chat/agents').then(r => r.json())")["agents"]
+    if next(agent for agent in agents if agent["id"] == "codex")["available"]:
+        gate("Codex is installed on this computer, and Start work would run it")
     desk.codex_thread(ago=60)
     desk.link("codex", CODEX_THREAD)
     page.reload()
