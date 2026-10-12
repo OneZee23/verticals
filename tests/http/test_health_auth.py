@@ -39,6 +39,8 @@ EXPECTED_OPERATIONS = {
     ("POST", "/api/goals/{id}/park"),
     ("POST", "/api/goals/{id}/due_ack"),
     ("DELETE", "/api/goals/{id}"),
+    # Undo (docs/design/board-undo.md): what a delete took away comes back.
+    ("POST", "/api/goals/{id}/restore"),
     ("GET", "/healthz"),
     ("POST", "/api/docs"),
     ("GET", "/api/docs"),

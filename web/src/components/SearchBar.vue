@@ -10,6 +10,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { store } from '../store'
 import { commandFilter, filterText } from '../lib/commandFilter'
+import { historyKey } from '../lib/boardHistory'
+import { fieldUndo } from '../lib/fieldUndo'
 import { circle, circleCaption, circleState, circleWords, inboxWriting } from '../lib/circle'
 import { carry } from '../lib/inboxCarry'
 import { agentChat, decide, openAsk, stop } from '../lib/agentChat'
@@ -325,8 +327,23 @@ function reply(): void {
   focusField()
 }
 
+/* ⌘Z in the field is the field's own, a run of typing at a time (`lib/fieldUndo.ts`): the browser's would take a letter. */
+const words = fieldUndo({
+  get: () => commandFilter.text,
+  set: (text) => {
+    commandFilter.text = text
+    void nextTick(() => {
+      input.value?.setSelectionRange(text.length, text.length)
+      moved()
+    })
+  },
+})
+watch(() => commandFilter.text, (now) => words.changed(now))
 function onInput(event: Event): void {
-  commandFilter.text = (event.target as HTMLTextAreaElement).value
+  const value = (event.target as HTMLTextAreaElement).value
+  words.typing(commandFilter.text, (event as InputEvent).inputType ?? '')
+  commandFilter.text = value
+  words.typed(value)
   moved()
 }
 function focusField(): void {
@@ -362,6 +379,13 @@ function send(): void {
 }
 function onKeyDown(event: KeyboardEvent): void {
   if (event.isComposing) return
+  const history = historyKey(event)
+  if (history) {
+    // Inside the field the key is the field's own, and never the board's (`lib/boardHistory.ts`).
+    event.preventDefault()
+    words.step(history)
+    return
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     send()
@@ -444,7 +468,9 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   if (anyMenuOpen() || store.state.drag.id || store.state.drag.pending) return
   event.preventDefault()
   if (circleWords.value?.kind === 'answer') reply()
+  words.typing(commandFilter.text, 'insertText')
   commandFilter.text += event.key
+  words.typed(commandFilter.text)
   focusField()
 }
 function onShapeClick(): void {
@@ -527,6 +553,7 @@ onBeforeUnmount(() => {
             autocomplete="off"
             spellcheck="false"
             :style="{ height: `${shownLines * LINE}px`, overflowY: lines > shownLines ? 'auto' : 'hidden' }"
+            @beforeinput="words.history($event as InputEvent)"
             @input="onInput"
             @keydown="onKeyDown"
             @keyup="moved"

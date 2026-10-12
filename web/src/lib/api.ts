@@ -355,8 +355,12 @@ export function getGoal(id: string, prefetch = false): Promise<GoalDetail> {
   )
 }
 
-export function patchGoal(id: string, patch: UpdatePatch, keepalive = false): Promise<GoalCard> {
-  return request<GoalCard>(`/api/goals/${encodeURIComponent(id)}`, {
+/** The answer to a patch. A tick of a repeating goal also names the occurrence it made (`next_occurrence`), so the page can
+ *  take that one back with the tick (docs/design/board-undo.md); a replay, which finds it there, names none. */
+export type PatchedGoal = GoalCard & { next_occurrence?: GoalCard }
+
+export function patchGoal(id: string, patch: UpdatePatch, keepalive = false): Promise<PatchedGoal> {
+  return request<PatchedGoal>(`/api/goals/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
     keepalive,
@@ -451,11 +455,17 @@ export function beginMorning(date: string): Promise<{ asked: boolean; task_id: s
 
 /** `DELETE /api/goals/{id}?cascade=`. Without `cascade`, a non-empty subtree is `core.goals.
  *  delete`'s own `HasChildren` (409) — the caller decides whether to retry with cascade, this
- *  function never guesses. `store.ts::removeSample` is the one caller today. */
+ *  function never guesses. `lib/goalDelete.ts` is its caller. */
 export function deleteGoal(id: string, cascade = false): Promise<void> {
   return request<void>(`/api/goals/${encodeURIComponent(id)}${qs({ cascade })}`, {
     method: 'DELETE',
   })
+}
+
+/** Brings a deleted goal back with its subgoals under the same ids (`POST /api/goals/{id}/restore`); `restored` counts the
+ *  goals that came back, the goal itself included. A goal that was never deleted, or deleted too long ago, is a 404. */
+export function restoreGoal(id: string): Promise<GoalCard & { restored: number }> {
+  return request<GoalCard & { restored: number }>(`/api/goals/${encodeURIComponent(id)}/restore`, { method: 'POST' })
 }
 
 /** D237: open the SSE change feed. Raw `fetch`, not `request()` — the body is an endless

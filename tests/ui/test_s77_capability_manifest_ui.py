@@ -538,8 +538,9 @@ def test_s77_capability_manifest_ui(ui_f2: UiSession) -> None:
         observed,
     )
 
-    # Leaf delete succeeds directly. Subtree delete intentionally receives one 409 first; that
-    # is how the UI reveals its explicit `Delete all` action instead of guessing cascade intent.
+    # A leaf goes with a plain DELETE. A goal with subgoals goes with all of them in one cascading DELETE: the delete is a
+    # step of the board's history now, the notice in the field offers Undo, and the server's trash brings the goal and its
+    # subgoals back under the same ids (docs/design/board-undo.md). It no longer asks first by answering a 409.
     _open_card_menu(page, "day", "SYNCOL03")
     _activate_row(
         session,
@@ -548,14 +549,11 @@ def test_s77_capability_manifest_ui(ui_f2: UiSession) -> None:
         observed,
     )
 
-    session.expects_network_failures = True
     _open_card_menu(page, "day", "SYNDAY01")
-    page.click('#dropdownPortal [data-action="delete"]')
-    page.get_by_role("button", name="Delete all", exact=True).wait_for(timeout=5000)
     _activate_row(
         session,
         by_cap["delete_subtree"],
-        lambda: page.get_by_role("button", name="Delete all", exact=True).click(),
+        lambda: page.click('#dropdownPortal [data-action="delete"]'),
         observed,
     )
 
@@ -581,16 +579,6 @@ def test_s77_capability_manifest_ui(ui_f2: UiSession) -> None:
     ]
     assert off_manifest == [], f"unmanifested mutating route shape(s): {off_manifest}"
 
-    # The single error is deliberate discovery of subtree state. Assert it narrowly here because
-    # the fixture teardown's opt-out is coarse and otherwise suppresses all network/console checks.
-    assert len(session.bad_responses) == 1, "subtree delete must produce exactly one intentional 409"
-    assert session.bad_responses[0].startswith("409 DELETE "), (
-        "subtree delete's intentional response must be a DELETE 409"
-    )
     assert session.failed_requests == [], "activation pass produced a failed network request"
-    assert len(session.console_errors) == 1, (
-        "subtree delete must produce exactly one intentional browser console error"
-    )
-    assert "409 (Conflict)" in session.console_errors[0], (
-        "subtree delete's intentional console error must describe its DELETE 409"
-    )
+    assert session.bad_responses == [], "no activation produced an error answer: a subtree delete is no longer refused first"
+    assert session.console_errors == [], "no activation produced a browser console error"

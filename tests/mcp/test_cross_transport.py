@@ -393,16 +393,21 @@ _READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "do
 # should read and the agent writes the source document and runs its check once beside the raw output; the owner's own
 # hands on a source are the document (the ordinary /api/docs routes) and Approve, which has no tool by design.
 _AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report", "session_link", "source"}
-# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. Three are there. The morning's
+# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. Four are there. The morning's
 # one ask a day (docs/design/agent-fixes.md): the app asks once its morning hour has come and the server answers whether
 # this morning's report is still to be asked for; the report itself is the agent's, made when that ask reaches it. The second
 # agent's verdict (docs/design/morning-quality.md): the desktop gateway runs a second agent that only reads and hands what it
 # answered to the server, which writes it into the report; no tool writes a verdict, so the agent that made the report
-# cannot grade itself. And the Sources Approve button: the owner approves the exact command or file a source will run, and by
-# design no tool can (docs/design/sources.md: the agent proposes, the owner approves). The daily carry-over task is the
-# agent's, made when the owner asks (Inbox and Documents redesign, final page). A new one goes here with its reason.
+# cannot grade itself. The Sources Approve button: the owner approves the exact command or file a source will run, and by
+# design no tool can (docs/design/sources.md: the agent proposes, the owner approves). And the undo of a delete, below. The
+# daily carry-over task is the agent's, made when the owner asks (Inbox and Documents redesign, final page). A new one goes
+# here with its reason.
 _APP_ONLY_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/morning"), ("POST", "/api/morning/check"), ("POST", "/api/sources/{id}/approve"),
+    # Undo (docs/design/board-undo.md): the page brings back what its own Delete took a moment ago, by the id it kept in
+    # its history. The agent's delete also lands in the trash, but taking back the agent's mistake is the person's call
+    # through the page; an MCP twin waits for the day the agent has a reason to undo.
+    ("POST", "/api/goals/{id}/restore"),
 }
 
 # capabilities.json's `mcp_args` values are placeholders (`"<title>"`, `"<id>"`, ...), not literal

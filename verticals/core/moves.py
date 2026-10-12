@@ -353,6 +353,11 @@ def schedule(
     rank violator, so the two predicates land on the same destination and the union stays one
     statement. Known edge, accepted in D109: legacy decade-keyed rows nest by column bounds,
     not by equal `period_key`, so they do not family-follow.
+
+    The family keeps its order (docs/design/board-undo.md). The rows travel parents first, and
+    within a depth by the position they had: the order the card draws them in. They were
+    numbered by `path`, whose ids are random letters, so every family move shuffled the
+    subgoals among themselves and a move taken back by ⌘Z could not put them back.
     """
     owner = _require_str(owner, "owner")
     id = _require_str(id, "id")
@@ -441,7 +446,7 @@ def schedule(
             clamped_rows = conn.execute(
                 """
                 WITH clamp_rows AS (
-                    SELECT id, row_number() OVER (ORDER BY depth, path, id) AS position_offset
+                    SELECT id, row_number() OVER (ORDER BY depth, position, id) AS position_offset
                       FROM goals
                      WHERE owner = %(owner)s
                        AND path LIKE %(pattern)s ESCAPE '\\'

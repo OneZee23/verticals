@@ -17,6 +17,7 @@ import calendar
 import secrets
 import string
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import psycopg
@@ -218,6 +219,16 @@ def _existing(conn: psycopg.Connection, *, owner: str, series_id: str, index: in
     return tree._to_goal(row) if row is not None else None
 
 
+@dataclass(frozen=True)
+class Occurrence:
+    """The occurrence `materialize_next` stands on. `created` tells this call's own work from a replay: the page takes an
+    occurrence back with the tick that made it (docs/design/board-undo.md), and one that was already there is not that
+    tick's to take."""
+
+    goal: Goal
+    created: bool
+
+
 def _step_place(
     step: Goal, *, completed: Goal, occurrence: Goal
 ) -> tuple[str | None, date | None, str | None]:
@@ -287,9 +298,11 @@ def _bring_back_steps(
             raise ValidationError("could not generate a unique step id", field="id")
 
 
+
+
 def materialize_next(
     conn: psycopg.Connection, *, owner: str, completed: Goal
-) -> Goal | None:
+) -> Occurrence | None:
     """Materialise index N+1 on completion; replay returns the already-created occurrence.
 
     The new time comes with the steps of the finished one, unticked (`_bring_back_steps`), in the same transaction."""
@@ -305,7 +318,7 @@ def materialize_next(
         conn, owner=owner, series_id=completed.repeat_series_id, index=next_index
     )
     if existing is not None:
-        return existing
+        return Occurrence(existing, created=False)
     anchor = next_anchor(completed.anchor_date, completed.repeat_rule)
     raw_end = completed.repeat_rule.get("end_date")
     if raw_end is not None and anchor > date.fromisoformat(str(raw_end)):
@@ -341,10 +354,10 @@ def materialize_next(
         )
         if created is not None:
             _bring_back_steps(conn, owner=owner, completed=completed, occurrence=created)
-            return created
+            return Occurrence(created, created=True)
         existing = _existing(
             conn, owner=owner, series_id=completed.repeat_series_id, index=next_index
         )
         if existing is not None:
-            return existing
+            return Occurrence(existing, created=False)
     raise ValidationError("could not generate a unique occurrence id", field="id")

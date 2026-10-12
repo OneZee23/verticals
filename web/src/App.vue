@@ -8,6 +8,7 @@ import InboxView from './components/InboxView.vue'
 import DocsView from './components/DocsView.vue'
 import SearchBar from './components/SearchBar.vue'
 import DocCheck from './components/DocCheck.vue'
+import FieldNotice from './components/FieldNotice.vue'
 import CommentsPanel from './components/CommentsPanel.vue'
 import DevColorPanel from './components/DevColorPanel.vue'
 import DevDeckPanel from './components/DevDeckPanel.vue'
@@ -18,6 +19,7 @@ import DevZoomPanel from './components/DevZoomPanel.vue'
 import './lib/look'
 import { DEV_TUNING_ENABLED } from './lib/devTuning'
 import { isPrivacyHotkey, togglePrivacy } from './lib/privacy'
+import { startHistoryKeys } from './lib/boardHistory'
 import { store, todayIso } from './store'
 import { commandFilter } from './lib/commandFilter'
 import { agentChat, currentThread, newThread, openForGoal, openThread, send, startAgentChat } from './lib/agentChat'
@@ -42,6 +44,7 @@ import { pictures, reporting } from './lib/reportPictures'
    would otherwise come back to yesterday's board. See `store.ts`'s own rollover comment. */
 let stopDayRollover: (() => void) | null = null
 let stopLiveBoard: (() => void) | null = null
+let stopHistoryKeys: (() => void) | null = null // ⌘Z / ⇧⌘Z take the board's last change back (lib/boardHistory.ts)
 const devPanelsVisible = ref(false)
 const searchBar = ref<InstanceType<typeof SearchBar> | null>(null)
 
@@ -110,6 +113,7 @@ function onWindowKeyUp(event: KeyboardEvent) {
 onMounted(() => {
   stopDayRollover = store.startDayRollover()
   stopLiveBoard = store.startLiveBoard()
+  stopHistoryKeys = startHistoryKeys()
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('pointercancel', onWindowPointerCancel)
@@ -121,6 +125,8 @@ onUnmounted(() => {
   stopDayRollover = null
   stopLiveBoard?.()
   stopLiveBoard = null
+  stopHistoryKeys?.()
+  stopHistoryKeys = null
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerCancel)
@@ -276,6 +282,7 @@ onUnmounted(() => {
     <div class="app-veil" :class="{ 'is-shown': outOfFocus, 'app-veil--window': windows.list.length }" data-role="out-of-focus" aria-hidden="true" @click="onVeilClick"></div>
     <WindowStack />
     <AgentConversation @link="onConversationLink" />
+    <FieldNotice />
     <SearchBar id="verticals-command-bar" ref="searchBar" :agent-available="agentChat.available" @submit="onSubmit">
       <template #agent-tag><AgentTag /></template>
     </SearchBar>

@@ -8,7 +8,6 @@ import {
   createGoal,
   patchGoal,
   scheduleGoal,
-  deleteGoal,
   reparentGoal as apiReparentGoal,
   parkGoal as apiParkGoal,
   type BoardResponse,
@@ -26,7 +25,10 @@ import {
 import * as viewState from './lib/boardViewState'
 import { createDetailSurface } from './lib/detailSurface'
 import { createFamilyView } from './lib/familyView'
-import { createGoalDelete } from './lib/goalDelete'
+import { bindBoardHistory, track } from './lib/boardHistory'
+import { createGoalDelete, SAMPLE_TAG } from './lib/goalDelete'
+import { noteOccurrence } from './lib/repeatSteps'
+import { trackedWrites } from './lib/trackedWrites'
 import { createDocsView, createInitialDocsState, type DocsState } from './lib/docsView'
 import { createCommentsPanel, createInitialCommentsState, type CommentsState } from './lib/comments'
 import { isoDate, localDate } from './lib/schedule'
@@ -63,7 +65,6 @@ import { afterRelease, beforeRelease, bindSpansDrag, onDragMove } from './lib/sp
 export function todayIso(): string {
   return isoDate(new Date())
 }
-const SAMPLE_TAG = 'sample'
 
 interface State {
   board: BoardResponse | null
@@ -305,6 +306,7 @@ async function completeGoal(id: string, done: boolean): Promise<void> {
   bumpAncestorProgress(id, delta)
   try {
     const updated = await patchGoal(id, { done })
+    noteOccurrence(id, updated.next_occurrence)
     if (completionVersions.get(id) !== version) return
     goal.done_at = updated.done_at
     // Reconcile: if the server landed somewhere other than the optimistic guess, correct the
@@ -315,7 +317,7 @@ async function completeGoal(id: string, done: boolean): Promise<void> {
     if (completionVersions.get(id) !== version) return
     goal.done_at = previous
     bumpAncestorProgress(id, -delta)
-    toast(messageForError(err), { action: 'Retry', onAction: () => void completeGoal(id, done) })
+    toast(messageForError(err), { action: 'Retry', onAction: () => void store.completeGoal(id, done) })
   }
 }
 
@@ -336,18 +338,20 @@ function bumpAncestorProgress(id: string, delta: number): void {
  *  "the period containing that anchor date" (`core/board.py`). `verticalBucket` is `Column.vue`'s
  *  own `vertical` prop, which already carries the literal `"maybe"` string for that column
  *  (`toColumnData` above) — so the caller never needs to special-case which column it is. */
-async function createGoalOn(verticalBucket: string, title: string): Promise<void> {
+async function createGoalOn(verticalBucket: string, title: string): Promise<string | null> {
   const trimmed = title.trim()
-  if (!trimmed) return
+  if (!trimmed) return null
   const payload =
     verticalBucket === 'maybe'
       ? { title: trimmed }
       : { title: trimmed, vertical: verticalBucket, anchor_date: state.board?.anchor_date ?? todayIso() }
   try {
-    await createGoal(payload)
+    const created = await createGoal(payload)
     await reloadBoard()
+    return created.id
   } catch (err) {
     toast(messageForError(err))
+    return null
   }
 }
 
@@ -440,28 +444,6 @@ async function parkGoal(id: string): Promise<void> {
     placement?.reconcile()
   } catch (err) {
     placement?.rollback()
-    toast(messageForError(err))
-  }
-}
-
-/** S-62: one gesture, no confirmation (pinned, §10-D12 — a confirm dialog would fail the modal-
- *  record assertion outright), removing only the sample chain. Finds the sample root by content
- *  (`tags @> {sample}` and no parent) rather than hardcoding `SAMPLE01`, then issues one
- *  `DELETE ?cascade=true` — `core.goals.delete`'s own body is a single `DELETE ... WHERE id = $1
- *  OR path LIKE $2` inside one `conn.transaction()` (verified in `verticals/core/goals.py`), which
- *  is what makes this "ordered leaf-first inside one transaction" without this file doing any
- *  ordering itself. No-op if no sample root is on the board (button should not be visible then —
- *  see `hasSampleData` — but a stale click racing a second removal must not throw). */
-async function removeSample(): Promise<void> {
-  if (!state.board) return
-  const root = state.board.columns
-    .flatMap((c) => c.goals)
-    .find((g) => g.parent_id === null && g.tags.includes(SAMPLE_TAG))
-  if (!root) return
-  try {
-    await deleteGoal(root.id, true)
-    await reloadBoard()
-  } catch (err) {
     toast(messageForError(err))
   }
 }
@@ -585,6 +567,7 @@ const {
   onRelease: afterRelease,
   beforeRelease,
   quietReload,
+  track,
   expandedVertical: () => state.expandedVertical,
   openFamily: (path, vertical) => family.openFamily(path, vertical), // bound late: the family view is made below
 })
@@ -597,7 +580,7 @@ bindSpansDrag({
 
 // --- delete --------------------------------------------------------------------------------------
 
-const { removeGoal } = createGoalDelete(state) // `lib/goalDelete.ts`
+const { removeGoal, removeSample } = createGoalDelete(state, reloadBoard) // `lib/goalDelete.ts`
 
 // --- goal detail (S-104, D226) ----------------------------------------------------------------
 //
@@ -623,6 +606,12 @@ const {
   closeGoal,
 } = detail
 const family = createFamilyView(state, { openGoal, closeGoal, ensureDetail })
+
+// History (docs/design/board-undo.md): every write a person starts is a step; undo and redo use the raw verbs.
+bindBoardHistory({ board: () => withSpans(state.board), completeGoal, updateGoal, reloadBoard,
+  busy: () => Boolean(state.drag.id || state.drag.pending) })
+const tracked = trackedWrites({ completeGoal, updateGoal, scheduleGoalTo, scheduleGoalQuick, moveGoalToInbox,
+  reparent, reparentQuick, combineInto, toggleDetailChild, createGoalOn, addDetailChild })
 
 /** Opening a board card expands its column (KK ruling 2026-08-17: card click = expand + open in
  *  one gesture). Central here so direct-URL opens and swapped-face clicks get the same behavior:
@@ -699,11 +688,7 @@ export const store = {
   checkDayRollover,
   startDayRollover,
   startLiveBoard,
-  completeGoal,
-  createGoalOn,
-  scheduleGoalTo,
-  scheduleGoalQuick,
-  moveGoalToInbox,
+  ...tracked,
   setValueFilter,
   parkGoal,
   removeSample,
@@ -713,9 +698,6 @@ export const store = {
   isCollapsed,
   toggleCollapsed,
   reparentTargets,
-  reparent,
-  reparentQuick,
-  combineInto,
   pointerDownCard,
   pointerMoveDrag,
   setDragPreviewSize,
@@ -724,9 +706,6 @@ export const store = {
   pointerUpDrag,
   colorAfterDrop,
   removeGoal,
-  updateGoal,
-  toggleDetailChild,
-  addDetailChild,
   openGoal,
   ensureDetail,
   openBoardGoal: openBoardGoalExpanded,

@@ -98,7 +98,7 @@ export async function checkAgain(): Promise<void> {
     for (const link of doc.linked_goals) {
       const goal = store.state.board?.columns.flatMap((c) => c.goals).find((g) => g.id === link.goal_id)
       if (goal && goal.title === MORNING_TITLE && goal.done_at === null && doc.path === `${MORNING_FOLDER}/${goal.anchor_date}.md`) {
-        void store.completeGoal(goal.id, true)
+        void store.completeGoal(goal.id, true, false)  // the app's own tick, not a step of your history (docs/design/board-undo.md)
       }
     }
   } finally {

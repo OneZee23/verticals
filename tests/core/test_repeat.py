@@ -54,6 +54,34 @@ def test_repeat_completion_replay_is_idempotent(db: psycopg.Connection) -> None:
     assert count == 2
 
 
+def test_a_completion_hands_back_the_occurrence_it_made_and_a_replay_does_not(db: psycopg.Connection) -> None:
+    """The page takes the occurrence back with the tick that made it (docs/design/board-undo.md), so the call says which one
+    it made; one that was already there is not the call's own."""
+    first = _scheduled(db)
+    goals.update(db, owner=OWNER, id=first.id, repeat={"frequency": "daily"})
+
+    ticked = goals.update(db, owner=OWNER, id=first.id, done=True)
+    assert ticked.spawned is not None
+    assert (ticked.spawned.repeat_index, ticked.spawned.anchor_date) == (1, date(2026, 8, 11))
+    assert ticked.spawned.done_at is None and ticked.spawned.title == "Recurring task"
+
+    assert goals.update(db, owner=OWNER, id=first.id, done=True).spawned is None, "a replay finds it there"
+    assert goals.update(db, owner=OWNER, id=first.id, done=False).spawned is None, "reopening makes nothing"
+    assert goals.update(db, owner=OWNER, id=first.id, title="Retitled").spawned is None
+
+    # Taken back: the occurrence goes, and the tick played again makes it again, under another id.
+    goals.delete(db, owner=OWNER, id=ticked.spawned.id)
+    goals.update(db, owner=OWNER, id=first.id, done=False)
+    again = goals.update(db, owner=OWNER, id=first.id, done=True)
+    assert again.spawned is not None and again.spawned.id != ticked.spawned.id
+    assert again.spawned.repeat_index == 1
+
+
+def test_a_goal_that_does_not_repeat_hands_back_nothing(db: psycopg.Connection) -> None:
+    plain = _scheduled(db, "Plain")
+    assert goals.update(db, owner=OWNER, id=plain.id, done=True).spawned is None
+
+
 def test_repeat_concurrent_completion_has_one_next_occurrence(db_dsn: str) -> None:
     with psycopg.connect(db_dsn, autocommit=True) as conn:
         first = _scheduled(conn)

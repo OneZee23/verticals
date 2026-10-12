@@ -51,6 +51,7 @@ from verticals.core import due_ack as core_due_ack
 from verticals.core import goals as core_goals
 from verticals.core import moves as core_moves
 from verticals.core import search as core_search
+from verticals.core import trash as core_trash
 from verticals.core.errors import ValidationError
 from verticals.core.search import DEFAULT_LIMIT
 
@@ -335,6 +336,9 @@ def patch_goal(request: Request, response: Response, id: str, patch: UpdatePatch
         response.headers["X-Query-Count"] = str(conn.query_count)
     body = goal_to_card(updated.goal)
     body["open_descendants"] = updated.open_descendants
+    if updated.spawned is not None:
+        # The occurrence this tick made, so the page can take it back with the tick (docs/design/board-undo.md).
+        body["next_occurrence"] = goal_to_card(updated.spawned)
     return body
 
 
@@ -467,3 +471,19 @@ def delete_goal(request: Request, response: Response, id: str, cascade: bool = F
         core_goals.delete(conn, owner=owner, id=id, cascade=cascade)
         response.headers["X-Query-Count"] = str(conn.query_count)
     return None
+
+
+@router.post("/api/goals/{id}/restore")
+def restore_goal(request: Request, response: Response, id: str) -> dict:
+    """Bring back what the newest delete of `id` took away (`core/trash.py`): the goal and its subgoals with their
+    comments, evidence, document links and due acknowledgements, under the same ids. The card of the goal as it stands
+    now, plus `restored`, how many goals came back. Nothing in the trash under `id` is the ordinary byte-identical 404; a
+    goal that is back already is a 422 naming `id`. The app's own undo is its caller, so it has no MCP twin
+    (`tests/mcp/test_cross_transport.py`'s app-only list says why)."""
+    owner = request.app.state.config.owner
+    with get_conn(request) as conn:
+        restored = core_trash.restore(conn, owner=owner, id=id)
+        response.headers["X-Query-Count"] = str(conn.query_count)
+    body = goal_to_card(restored.goal)
+    body["restored"] = restored.restored
+    return body
