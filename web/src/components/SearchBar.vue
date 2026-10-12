@@ -14,6 +14,7 @@ import { circle, circleCaption, circleState, circleWords, inboxWriting } from '.
 import { sayGo } from '../lib/go'
 import { carry } from '../lib/inboxCarry'
 import { agentChat, decide, openAsk, stop } from '../lib/agentChat'
+import { answerUndo } from '../lib/answerUndo'
 import { plainWords } from '../lib/chatMarkdown'
 import { closeWindows, windows } from '../lib/windows'
 import { mascot, useMascot, watchBoardNews } from '../lib/mascot'
@@ -22,6 +23,7 @@ import { curve, reducedMotion } from '../lib/motion'
 import { launch } from '../lib/chatFlight'
 import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
+import AnswerUndo from './AnswerUndo.vue'
 import CircleTags from './CircleTags.vue'
 import DocPage from './DocPage.vue'
 import { docLinks, withoutDocLines } from '../lib/docLinks'
@@ -53,6 +55,11 @@ const PAD_ASK = 36
 const NOTE_PAGE = 50
 const NOTE_PAGE_H = 67
 const NOTE_WORDS = 236
+/* An answer that changed the board has its Undo under its words (`AnswerUndo.vue`): the notice's pill, 40 px tall and about 80
+   wide, 12 px under the last line. A note's words are a short title and two lines. */
+const UNDO_ROW = 52
+const UNDO_W = 80
+const NOTE_TEXT_H = 66
 
 const body = ref<HTMLElement | null>(null)
 const shape = ref<HTMLElement | null>(null)
@@ -112,6 +119,12 @@ const noteTitle = computed(() => {
   return name.split(' — ')[0]!.trim()
 })
 const noteDoc = computed(() => (answerDocs.value.length ? docCard(answerDocs.value[0]!.id) : null))
+/* Whether the answer in the circle has an Undo: it changed the board, and has not been let go. */
+const undoable = computed(() => {
+  const words = circleWords.value
+  const entry = words?.kind === 'answer' && words.answer ? answerUndo.entries[words.answer] : undefined
+  return !!entry && entry.state !== 'spent'
+})
 const answerText = computed(() => {
   if (!circleWords.value) return ''
   return plainWords(answerDocs.value.length ? withoutDocLines(circleWords.value.text) : circleWords.value.text)
@@ -129,7 +142,10 @@ const openWidth = computed(() => Math.min(maxWidth.value, Math.ceil(PAD_CAPTION 
 const width = computed(() => {
   if (carry.over) return 120
   if (state.value === 'answer' && answerDocs.value.length) return 24 + NOTE_PAGE + behind.value + 16 + NOTE_WORDS + 32
-  if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
+  if (state.value === 'answer') {
+    const wide = Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD)
+    return Math.max(CIRCLE, wide, undoable.value ? UNDO_W + 2 * ANSWER_PAD : 0)
+  }
   if (stopping.value) return 132
   // "Ready?": the pointed field's pill as wide as its word, the word in its middle (round 8).
   if (state.value === 'go') return Math.max(136, Math.ceil(PAD_ASK + textWidth(GO_WORD) + PAD_ASK))
@@ -145,10 +161,12 @@ const width = computed(() => {
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))
 const height = computed(() => {
   if (state.value === 'typing') return PAD_Y * 2 + shownLines.value * LINE
-  if (state.value === 'answer' && answerDocs.value.length) return Math.max(CIRCLE, 12 + NOTE_PAGE_H + behind.value + 12)
+  if (state.value === 'answer' && answerDocs.value.length) {
+    return Math.max(CIRCLE, 12 + Math.max(NOTE_PAGE_H + behind.value, undoable.value ? NOTE_TEXT_H + UNDO_ROW : 0) + 12)
+  }
   if (state.value === 'answer') {
     const ask = circleWords.value?.kind === 'ask' ? 44 + (leadLines.value ? leadLines.value * 22 + 8 : 0) : 0
-    return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask)
+    return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask + (undoable.value ? UNDO_ROW : 0))
   }
   return CIRCLE
 })
@@ -515,11 +533,13 @@ onBeforeUnmount(() => {
             <div class="circle-field__note-words">
               <p class="circle-field__note-title" data-role="circle-note-title">{{ noteTitle }}</p>
               <p class="circle-field__note-text">{{ answerText }}<span class="circle-field__answer-caret" aria-hidden="true"></span></p>
+              <AnswerUndo v-if="undoable && circleWords.kind === 'answer'" :answer="circleWords.answer" class="circle-field__answer-undo" />
             </div>
           </template>
           <template v-else>
           <p v-if="leadText" class="circle-field__answer-lead">{{ leadText }}</p>
           <p class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <AnswerUndo v-if="undoable && circleWords.kind === 'answer'" :answer="circleWords.answer" class="circle-field__answer-undo" />
           <div v-if="circleWords.kind === 'ask' && openAsk" class="circle-field__answer-choices">
             <button v-for="option in openAsk.options" :key="option.value" type="button" class="circle-field__answer-choice"
               @click.stop="decide(openAsk.requestId, option.value)">{{ option.label }}</button>

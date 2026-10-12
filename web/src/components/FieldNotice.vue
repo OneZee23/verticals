@@ -7,14 +7,17 @@
 // the page, so the two never stand in the same place.
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editsText } from '../lib/boardHistory'
-import { dismiss, hold, notice, release } from '../lib/fieldNotice'
+import { dismiss, hold, notice, release, type NoticeChoice, type Segment } from '../lib/fieldNotice'
 import { cutTitle, glyphs } from '../lib/titleCut'
 import { store } from '../store'
 
 const pill = ref<HTMLElement | null>(null)
 const line = ref<HTMLElement | null>(null)
-/** The titles as the line shows them, by the place of their segment: whole, or cut to fit. */
-const cuts = ref<Record<number, string>>({})
+/** The pills of a question (⌘Z asking whose change it meant), when there is one. */
+const choiceEls = ref<HTMLElement[]>([])
+/** The titles as the notice shows them, by the place of their segment (`L:2` in the line, `1:2` in the second pill): whole, or cut
+ *  to fit. */
+const cuts = ref<Record<string, string>>({})
 let fitting = 0
 
 const overflows = (el: HTMLElement): boolean => el.scrollWidth > el.clientWidth
@@ -27,12 +30,15 @@ async function fit(): Promise<void> {
   const mine = (fitting += 1)
   cuts.value = {}
   await nextTick()
-  if (mine !== fitting || !line.value || !overflows(line.value)) return
-  const titles = notice.segments.flatMap((part, at) => ('quote' in part ? [{ at, text: part.quote, length: glyphs(part.quote).length }] : []))
+  const spills = (): boolean => !!line.value && (overflows(line.value) || choiceEls.value.some(overflows))
+  if (mine !== fitting || !line.value || !spills()) return
+  const quotes = (segments: Segment[], where: string) =>
+    segments.flatMap((part, at) => ('quote' in part ? [{ key: `${where}:${at}`, text: part.quote, length: glyphs(part.quote).length }] : []))
+  const titles = [...quotes(notice.segments, 'L'), ...notice.choices.flatMap((choice, at) => quotes(choice.label, String(at)))]
   const longest = Math.max(0, ...titles.map((title) => title.length))
   // Two titles (“into”, “out of”) give up the same share of their length.
-  const cutTo = (keep: number): Record<number, string> =>
-    Object.fromEntries(titles.map((title) => [title.at, cutTitle(title.text, Math.round((title.length * keep) / longest))]))
+  const cutTo = (keep: number): Record<string, string> =>
+    Object.fromEntries(titles.map((title) => [title.key, cutTitle(title.text, Math.round((title.length * keep) / longest))]))
   let fits = 0
   let over = longest
   while (fits < over - 1) {
@@ -40,7 +46,7 @@ async function fit(): Promise<void> {
     cuts.value = cutTo(middle)
     await nextTick()
     if (mine !== fitting || !line.value) return
-    if (overflows(line.value)) over = middle
+    if (spills()) over = middle
     else fits = middle
   }
   cuts.value = cutTo(fits)
@@ -55,6 +61,12 @@ function act(): void {
   const action = notice.action
   dismiss()
   action?.run()
+}
+
+/** A pick of the question: the question goes, and what was picked is taken back. */
+function pick(choice: NoticeChoice): void {
+  dismiss()
+  choice.run()
 }
 
 /* A key that asks for the field (a letter, which is its first one, or ⌘K, `SearchBar.vue`) puts the field back first: it is
@@ -99,7 +111,7 @@ onBeforeUnmount(() => {
       v-if="notice.open"
       ref="pill"
       class="field-notice"
-      :class="{ 'field-notice--bare': !notice.action }"
+      :class="{ 'field-notice--bare': !notice.action && !notice.choices.length, 'field-notice--question': notice.choices.length > 0 }"
       data-role="field-notice"
       role="status"
       aria-live="polite"
@@ -109,9 +121,23 @@ onBeforeUnmount(() => {
       <p ref="line" class="field-notice__line" data-role="field-notice-line">
         <template v-for="(part, at) in notice.segments" :key="at">
           <span v-if="'text' in part" class="field-notice__text">{{ part.text }}</span>
-          <span v-else class="field-notice__quote"><i>“</i><span class="field-notice__title">{{ cuts[at] ?? part.quote }}</span><i>”</i></span>
+          <span v-else class="field-notice__quote"><i>“</i><span class="field-notice__title">{{ cuts[`L:${at}`] ?? part.quote }}</span><i>”</i></span>
         </template>
       </p>
+      <button
+        v-for="(choice, at) in notice.choices"
+        :key="at"
+        ref="choiceEls"
+        type="button"
+        class="field-notice__action field-notice__choice"
+        data-role="field-notice-choice"
+        @click="pick(choice)"
+      >
+        <template v-for="(part, place) in choice.label" :key="place">
+          <span v-if="'text' in part" class="field-notice__text">{{ part.text }}</span>
+          <span v-else class="field-notice__quote"><i>“</i><span class="field-notice__title">{{ cuts[`${at}:${place}`] ?? part.quote }}</span><i>”</i></span>
+        </template>
+      </button>
       <button v-if="notice.action" type="button" class="field-notice__action" data-role="field-notice-action" @click="act">
         {{ notice.action.label }}
       </button>
@@ -143,6 +169,12 @@ onBeforeUnmount(() => {
   font: 400 15px/22px var(--font-body);
 }
 .field-notice--bare { padding-right: 28px; }
+/* The question ⌘Z asks (docs/design/agent-answer-undo.md): "Take back" and the candidates as pills, which give up their titles,
+   cut with “…”, before the words do. A pill is the notice's own button; it may shrink, which the button's `flex: none` below would
+   not allow, so this stands on two classes. */
+.field-notice--question { gap: 12px; max-width: min(640px, calc(100vw - 32px)); }
+.field-notice--question .field-notice__line { flex: none; }
+.field-notice__action.field-notice__choice { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: pre; }
 /* Nothing in the line shrinks: a title too long for it is cut in the text by the component (so the “…” stands right after
    its last letter), and `overflow` only keeps a line that still does not fit, in a very narrow window, off the button. */
 .field-notice__line { display: flex; flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; white-space: pre; }

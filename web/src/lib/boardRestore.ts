@@ -61,6 +61,9 @@ export interface Applied {
   outcome: Outcome
   kept: { id: string; title: string }[]
   set: boolean
+  /** The goals that were put right, the first first, for a step that changes many (an agent's answer): what is said names the
+   *  first and counts the others. Without it the step is about one goal. */
+  put?: { id: string; title: string }[]
 }
 
 const nothing = (outcome: Outcome): Applied => ({ outcome, kept: [], set: false })
@@ -335,4 +338,31 @@ export async function settleShots(
     await ports.reloadBoard()
     return nothing(err instanceof ApiError && err.status > 0 && err.status < 500 ? 'drop' : 'retry')
   }
+}
+
+/** Sets every goal of an agent's answer to its target, in the order given, and goes on past one that cannot be set: a goal that is
+ *  gone, or that the server refuses, is told once and stays as it is. Only a server that could not be reached makes it `retry`. */
+export async function settleAll(
+  ports: RestorePorts, targets: Target[], direction: 'back' | 'forward', held?: Map<string, Promise<Shot | null>>,
+): Promise<Applied> {
+  const kept: Applied['kept'] = []
+  const put: NonNullable<Applied['put']> = []
+  let set = false
+  let outcome: Outcome = 'done'
+  let failed = false
+  for (const target of targets) {
+    try {
+      const one = await settleOne(ports, target, direction, held)
+      if (one.settled === 'failed') failed = true
+      if (one.kept || one.settled === 'gone') kept.push({ id: target.shot.id, title: one.title })
+      if (one.set) put.push({ id: target.shot.id, title: one.title })
+      set ||= one.set
+    } catch (err) {
+      toast(messageForError(err))
+      failed = true
+      if (!(err instanceof ApiError && err.status > 0 && err.status < 500)) outcome = 'retry'
+    }
+  }
+  if (failed) await ports.reloadBoard()
+  return { outcome, kept, set, put }
 }

@@ -53,7 +53,7 @@ function lastAgentWords(): string {
 export const circleWords = computed(() => {
   if (agentChat.open) return null
   if (openAsk.value) return { kind: 'ask' as const, text: openAsk.value.title, lead: lastAgentWords() }
-  if (agentChat.answer) return { kind: 'answer' as const, text: agentChat.answer.text }
+  if (agentChat.answer) return { kind: 'answer' as const, text: agentChat.answer.text, answer: agentChat.answer.answer }
   return null
 })
 

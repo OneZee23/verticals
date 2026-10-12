@@ -4,6 +4,7 @@
 // app in place; an ask of the agent's is its balloon with the choices as buttons. The documents a message links stand
 // under its words as chips (DocChip.vue; Inbox and Documents redesign, rounds 9–10).
 import { computed, nextTick, ref, watch } from 'vue'
+import AnswerUndo from './AnswerUndo.vue'
 import DocChip from './DocChip.vue'
 import { docLinks, withoutDocLines } from '../lib/docLinks'
 import { agentChat, agentOf, balloons, decide } from '../lib/agentChat'
@@ -97,6 +98,7 @@ function onClick(event: MouseEvent): void {
             <div v-if="balloon.who === 'agent' && docLinks(balloon.text).length" class="agent-balloon__docs" data-role="agent-docs">
               <DocChip v-for="doc in docLinks(balloon.text)" :id="doc.id" :key="doc.id" :label="doc.label" dark />
             </div>
+            <AnswerUndo v-if="balloon.who === 'agent' && balloon.answer" :answer="balloon.answer" />
             <div v-if="balloon.ask" class="agent-balloon__ask" data-role="agent-ask">
               <p class="agent-balloon__ask-title">{{ balloon.ask.title }}</p>
               <div class="agent-balloon__choices">

@@ -203,6 +203,8 @@
   animation: circle-field-blink 1060ms steps(1) infinite;
 }
 .circle-field__answer-choices { display: flex; gap: 8px; margin-top: 10px; }
+/* An answer's Undo (`AnswerUndo.vue`) stands under its words at the left, the notice's own pill. */
+.circle-field__answer-undo { align-self: flex-start; }
 .circle-field__answer-choice {
   height: 32px;
   padding: 0 14px;

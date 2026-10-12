@@ -1,0 +1,33 @@
+<script setup lang="ts">
+// An agent's answer has its own Undo (docs/design/agent-answer-undo.md), at the answer's end, in the look of the notice's Undo
+// (`FieldNotice.vue`): a white pill. Pressed, it takes back what the answer wrote and is still as the answer left it, and
+// becomes Redo. An answer that changed nothing on the board has none; one that could not be taken back any more has none.
+import { computed } from 'vue'
+import { answerUndo, putBack, takeBack } from '../lib/answerUndo'
+
+const props = defineProps<{ answer?: string | null }>()
+const entry = computed(() => (props.answer ? answerUndo.entries[props.answer] : undefined))
+const undone = computed(() => entry.value?.state === 'undone')
+
+function press(): void {
+  if (entry.value) void (undone.value ? putBack(entry.value.id) : takeBack(entry.value.id))
+}
+</script>
+
+<template>
+  <button
+    v-if="entry && entry.state !== 'spent'"
+    type="button"
+    class="field-notice__action answer-undo"
+    data-role="answer-undo"
+    :data-state="entry.state"
+    :disabled="entry.busy"
+    @click.stop="press"
+  >{{ undone ? 'Redo' : 'Undo' }}</button>
+</template>
+
+<style>
+/* The pill is the notice's own (`.field-notice__action`); this only places it under the answer's words. */
+.answer-undo { display: block; margin-top: 12px; }
+.answer-undo:disabled { opacity: .6; cursor: default; }
+</style>

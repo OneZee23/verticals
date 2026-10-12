@@ -4,6 +4,7 @@
 // the agent is unavailable there and the field only finds.
 import { computed, reactive } from 'vue'
 import { stepPhrase } from './agentSteps'
+import { answersAvailable, refreshAnswers } from './answerUndo'
 import { commandFilter } from './commandFilter'
 import { goalChangesSince } from './goalChanges'
 
@@ -47,7 +48,11 @@ export interface Ask {
   done: boolean
   chosen?: string
 }
-export interface Balloon { key: string; who: 'you' | 'agent'; text: string; error?: boolean; ask?: Ask; pending?: boolean }
+export interface Balloon {
+  key: string; who: 'you' | 'agent'; text: string; error?: boolean; ask?: Ask; pending?: boolean
+  /** The answer the message belongs to: what its writes changed is kept under it (`lib/answerUndo.ts`). */
+  answer?: string
+}
 
 const KEY = {
   threads: 'vt-chat:threads',
@@ -87,7 +92,7 @@ export const agentChat = reactive({
   /** The phrase of the step the agent is on while it works (S2.P3). */
   step: 'Thinking',
   /** The words of the last finished turn, for the circle while the conversation is hidden (S2.P4). */
-  answer: null as { text: string; at: number } | null,
+  answer: null as { text: string; at: number; answer?: string } | null,
   /** The conversation shows over the board or the window (S2.P1). */
   open: false,
   /** You are talking with the agent: typing or a click on the field brings the conversation back; a second Esc leaves
@@ -106,9 +111,10 @@ export const balloons = computed<Balloon[]>(() => {
   const out: Balloon[] = []
   let turn: Balloon | null = null
   let brk = false
+  let answer: string | undefined
   const agentBalloon = (index: number) => {
     if (!turn) {
-      turn = { key: `a${index}`, who: 'agent', text: '' }
+      turn = { key: `a${index}`, who: 'agent', text: '', answer }
       out.push(turn)
     }
     return turn
@@ -122,6 +128,7 @@ export const balloons = computed<Balloon[]>(() => {
         break
       case 'turn_start':
         turn = null
+        answer = typeof event.answer === 'string' ? event.answer : undefined
         break
       case 'text_start':
         brk = !!turn?.text
@@ -353,13 +360,17 @@ function follow(event: ChatEvent): void {
       touchThread({ status: event.error ? 'failed' : 'idle' })
       // With the conversation open the answer is its balloon at once; only a hidden one lands in the circle (S2.P4.034),
       // and not while you type: then it waits in the conversation and your words stay (S2.P4.025).
-      if (!event.error && reply.trim() && awaitingReplies > 0 && !agentChat.open && !commandFilter.text) agentChat.answer = { text: reply, at: Date.now() }
+      if (!event.error && reply.trim() && awaitingReplies > 0 && !agentChat.open && !commandFilter.text) {
+        agentChat.answer = { text: reply, at: Date.now(), answer: typeof event.answer === 'string' ? event.answer : undefined }
+      }
       awaitingReplies = Math.max(0, awaitingReplies - 1)
       reply = ''
+      void refreshAnswers() // what the answer wrote is its Undo now (docs/design/agent-answer-undo.md)
       break
     case 'exit':
       agentChat.running = false
       touchThread({ status: 'failed' })
+      void refreshAnswers()
       break
   }
 }
@@ -454,8 +465,8 @@ export async function quietTurn(text: string, extra: Record<string, unknown> = {
       if (event.t === 'turn_start') words = ''
       else if (event.t === 'text_start') fresh = !!words
       else if (event.t === 'text') { words += (fresh ? '\n' : '') + String(event.text ?? ''); fresh = false }
-      else if (event.t === 'done') finish(event.error ? '' : words)
-      else if (event.t === 'exit') finish('')
+      else if (event.t === 'done') { void refreshAnswers(); finish(event.error ? '' : words) }
+      else if (event.t === 'exit') { void refreshAnswers(); finish('') }
       else if (event.t === 'permission') abandon()
     }
     events.onerror = () => { if (events.readyState === EventSource.CLOSED) finish('') }
@@ -481,5 +492,8 @@ export async function decide(requestId: string, value: string): Promise<void> {
 export async function startAgentChat(): Promise<void> {
   await refreshAgents()
   if (!agentChat.available) return
+  // The gateway keeps what the agent's answers wrote, so one given while this window was closed has its Undo when it opens.
+  answersAvailable(true)
+  void refreshAnswers()
   openThread(agentChat.current ?? crypto.randomUUID())
 }

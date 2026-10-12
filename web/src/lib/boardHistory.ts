@@ -12,7 +12,7 @@ import { toast } from '@konstantinopolskii/vue'
 import { findGoal } from './boardIndex'
 import { currentShot, holdings, settleShots, type Applied, type Outcome, type RestorePorts, type Target } from './boardRestore'
 import { changeBetween, changed, parentDiffers, placeDiffers, shotOf, shotsOf, slotDiffers, type Shot } from './boardShots'
-import { dismiss, say, type NoticeAction, type Segment } from './fieldNotice'
+import { ask, dismiss, say, type NoticeAction, type Segment } from './fieldNotice'
 import { changeWords, keptWords, putBackWords } from './historyWords'
 import { messageForError } from './scheduleFeedback'
 import { glideThrough } from './undoGlide'
@@ -22,6 +22,9 @@ export interface Step {
   id: string
   /** Its title as the step knows it, for the line that says what could not be done. */
   title?: string
+  /** Whether everything the step changed is in view once it is applied. Without it, the goal the step is about (`id`) is the one
+   *  looked for. */
+  inView?(): boolean
   /** The words for a notice when the change leaves the view; `null` when there is nothing to say. `redo` is the change
    *  as it was first made, so it is also what is said when it was just made. */
   words(direction: 'undo' | 'redo'): Segment[] | null
@@ -42,6 +45,35 @@ export interface HistoryPorts extends RestorePorts {
 
 /** More than anyone goes back; the oldest steps go first. */
 const LIMIT = 500
+
+// --- whose change ⌘Z means (docs/design/agent-answer-undo.md) -----------------------------------------------------
+
+/** The order in which the page learned of the person's changes and of the agent's answers (`lib/answerUndo.ts`), so that "after your
+ *  own last change" is told without comparing two clocks. */
+let sequence = 0
+export const nextSeq = (): number => (sequence += 1)
+
+const stamps = new WeakMap<Step, number>()
+
+/** When the person last did something to their own history (a change, ⌘Z, ⇧⌘Z), by the clock the page shows. */
+let touchedAt = 0
+
+/** A change of the person's own that is this old is not obviously theirs any more, if an agent answered since. */
+const CLEAR_MS = 5000
+
+/** What the page knows of the agent's answers, bound once by `lib/answerUndo.ts`. */
+export interface AnswerSide {
+  /** Reads the answers that have ended. */
+  refresh(): Promise<void>
+  /** The answers that stand, learned of after `seq`, in the order they were. */
+  standingAfter(seq: number): { id: string; label: Segment[] }[]
+  takeBack(id: string): Promise<void>
+}
+let answers: AnswerSide | null = null
+
+export function bindAnswers(side: AnswerSide): void {
+  answers = side
+}
 
 const done: Step[] = []
 const undone: Step[] = []
@@ -109,20 +141,28 @@ export function seen(id: string): boolean {
 
 const frame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()))
 
+/** What the notice's button does: the history's own, or an answer's (`lib/answerUndo.ts`). */
+export interface Again {
+  undo(): void
+  redo(): void
+}
+const OWN: Again = { undo: () => void undoOwn(), redo: () => void redo() }
+
 /** A change that leaves your view is said in the field; one you can see is not. The board has drawn the change by the
  *  time this looks, and the check is what is on the screen, so it holds for every kind of change. What stayed because it was
  *  changed since is always said: the person is looking at a goal that did not move. */
-async function announce(step: Step, direction: 'undo' | 'redo', applied: Applied | null = null): Promise<void> {
+export async function announce(step: Step, direction: 'undo' | 'redo', applied: Applied | null = null, again: Again = OWN): Promise<void> {
   await nextTick()
   await frame()
   if (typeof document === 'undefined') return
-  const other: NoticeAction = direction === 'redo' ? { label: 'Undo', run: () => void undo() } : { label: 'Redo', run: () => void redo() }
+  const other: NoticeAction = direction === 'redo' ? { label: 'Undo', run: () => again.undo() } : { label: 'Redo', run: () => again.redo() }
   if (applied?.kept.length) {
     // With nothing set there is nothing to take back or play again from here: the line stands alone.
-    say(keptWords(direction, step.title ?? applied.kept[0]!.title, applied.kept, applied.set), applied.set ? other : null)
+    const put = applied.put // a step of many goals names the first it put right and counts the rest
+    say(keptWords(direction, put?.[0]?.title ?? step.title ?? applied.kept[0]!.title, applied.kept, applied.set, put ? Math.max(0, put.length - 1) : 0), applied.set ? other : null)
     return
   }
-  if (seen(step.id)) return
+  if (step.inView ? step.inView() : seen(step.id)) return
   const words = step.words(direction)
   if (!words) return
   say(words, other)
@@ -133,6 +173,8 @@ async function announce(step: Step, direction: 'undo' | 'redo', applied: Applied
 /** Puts a step on the history: what could be played forward is gone, and the change is said if it left the view. */
 export function record(step: Step): void {
   dismiss() // a notice still up is about an older step, and its Undo would take this one back
+  stamps.set(step, nextSeq())
+  touchedAt = Date.now()
   done.push(step)
   if (done.length > LIMIT) done.shift()
   undone.length = 0
@@ -243,12 +285,16 @@ export function track(id: string, run: () => Promise<void>, family = false, exte
  *  steps behind it should not wait on it for ever. */
 const failures = new WeakMap<Step, number>()
 
-async function apply(direction: 'undo' | 'redo'): Promise<void> {
-  await Promise.allSettled([...writing])
-  const from = direction === 'undo' ? done : undone
-  const to = direction === 'undo' ? undone : done
-  const step = from.pop()
-  if (!step) return
+export interface Ran {
+  outcome: Outcome
+  /** What stayed and whether anything was set, from a step that says (`lib/boardRestore.ts`). */
+  applied: Applied | null
+}
+
+/** Runs one step in one direction: the server is asked what the goals hold, a change you can see glides, a step that fails is told
+ *  once and kept for a second try. It touches no list: the history's own steps are put back by `apply`, and an agent's answer
+ *  (`lib/answerUndo.ts`) never joins them. */
+export async function runStep(step: Step, direction: 'undo' | 'redo'): Promise<Ran> {
   dismiss() // whatever a notice offered is being done now
   step.prepare?.(direction)
   const run = (): Promise<Outcome | Applied> => (direction === 'undo' ? step.undo() : step.redo())
@@ -267,16 +313,53 @@ async function apply(direction: 'undo' | 'redo'): Promise<void> {
     failures.set(step, tries)
     if (tries >= 2) outcome = 'drop'
   }
+  return { outcome, applied }
+}
+
+async function apply(direction: 'undo' | 'redo'): Promise<void> {
+  await Promise.allSettled([...writing])
+  const from = direction === 'undo' ? done : undone
+  const to = direction === 'undo' ? undone : done
+  const step = from.pop()
+  if (!step) return
+  touchedAt = Date.now()
+  const { outcome, applied } = await runStep(step, direction)
   // Everything the step changed has been changed since: there is nothing to take back or play again, so the step is spent
   // and the line says so (the next ⌘Z goes on to the step before it).
   const spent = outcome === 'done' && !!applied?.kept.length && !applied.set
-  if (outcome === 'done' && !spent) to.push(step)
-  else if (outcome === 'retry') from.push(step)
+  if (outcome === 'done' && !spent) {
+    to.push(step)
+    if (direction === 'redo') stamps.set(step, nextSeq()) // played again, it is the person's latest change
+  } else if (outcome === 'retry') from.push(step)
   if (outcome === 'done') await announce(step, direction, applied)
 }
 
-export function undo(): Promise<void> {
+/** The person's own last change taken back, whatever else has happened: what the notice's Undo and a pick of the question do. */
+export function undoOwn(): Promise<void> {
   return enqueue(() => apply('undo'))
+}
+
+/** What ⌘Z may take back, put to the person when it cannot tell: their own last change, or the agent's last answer. */
+function askWhat(last: Step | undefined, answer: { id: string; label: Segment[] }): void {
+  const mine = last && (last.words('redo') ?? [{ text: 'Changed ' }, { quote: last.title ?? 'a goal' }])
+  ask([
+    ...(mine ? [{ label: mine, run: () => void undoOwn() }] : []),
+    { label: answer.label, run: () => void answers?.takeBack(answer.id) },
+  ])
+}
+
+/** ⌘Z: the person's own last change, at once, unless it cannot be told whose change is meant. That is so when an agent's answer
+ *  changed the board after the person's last change, and the person's own is 5 seconds old or more, or there is none: then the
+ *  field asks which to take back, and a pick takes it (docs/design/agent-answer-undo.md). Inside text the key never gets here. */
+export function undo(): Promise<void> {
+  return enqueue(async () => {
+    await Promise.allSettled([...writing])
+    await answers?.refresh().catch(() => undefined) // an answer that has just ended counts
+    const last = done[done.length - 1]
+    const later = answers?.standingAfter(last ? stamps.get(last) ?? 0 : 0) ?? []
+    if (!later.length || (last && Date.now() - touchedAt < CLEAR_MS)) return apply('undo')
+    askWhat(last, later[later.length - 1]!)
+  })
 }
 
 export function redo(): Promise<void> {
