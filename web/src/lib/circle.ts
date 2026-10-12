@@ -5,6 +5,7 @@
 import { computed, reactive } from 'vue'
 import { commandFilter } from './commandFilter'
 import { agentChat, balloons, openAsk } from './agentChat'
+import { askLine } from './askDetail'
 import { frontWindow, windows } from './windows'
 import { store } from '../store'
 
@@ -52,7 +53,7 @@ function lastAgentWords(): string {
 /** What the circle holds while the conversation is hidden: the answer, or the ask the agent waits on (S2.P4, S2.P1.044). */
 export const circleWords = computed(() => {
   if (agentChat.open) return null
-  if (openAsk.value) return { kind: 'ask' as const, text: openAsk.value.title, lead: lastAgentWords() }
+  if (openAsk.value) return { kind: 'ask' as const, text: openAsk.value.title, lead: lastAgentWords(), changes: askLine(openAsk.value) }
   if (agentChat.answer) return { kind: 'answer' as const, text: agentChat.answer.text }
   return null
 })

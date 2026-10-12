@@ -7,6 +7,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import DocChip from './DocChip.vue'
 import { docLinks, withoutDocLines } from '../lib/docLinks'
 import { agentChat, agentOf, balloons, decide } from '../lib/agentChat'
+import { askDetail } from '../lib/askDetail'
 import { chatMarkdown } from '../lib/chatMarkdown'
 import { scrollLook, useMessageScroll } from '../lib/messageScroll'
 import { flight, land } from '../lib/chatFlight'
@@ -27,6 +28,8 @@ function lines() {
 const { toEnd } = useMessageScroll(column, content, lines, () => balloons.value.length)
 const agentName = computed(() => agentOf(agentChat.selection?.provider).label)
 const look = computed(() => scrollLook())
+/* What each ask will change: the goal and its date (lib/askDetail.ts; docs/design/agent-fixes.md, fix 6). */
+const changes = computed(() => Object.fromEntries(balloons.value.map((balloon) => [balloon.key, balloon.ask ? askDetail(balloon.ask) : null])))
 
 watch(() => [agentChat.open, balloons.value.length, balloons.value[balloons.value.length - 1]?.text], async () => {
   if (!agentChat.open) return
@@ -98,7 +101,8 @@ function onClick(event: MouseEvent): void {
               <DocChip v-for="doc in docLinks(balloon.text)" :id="doc.id" :key="doc.id" :label="doc.label" dark />
             </div>
             <div v-if="balloon.ask" class="agent-balloon__ask" data-role="agent-ask">
-              <p class="agent-balloon__ask-title">{{ balloon.ask.title }}</p>
+              <p class="agent-balloon__ask-title" :class="{ 'agent-balloon__ask-title--changes': changes[balloon.key] }">{{ balloon.ask.title }}</p>
+              <p v-if="changes[balloon.key]" class="agent-balloon__ask-changes" data-role="agent-ask-changes">{{ changes[balloon.key]!.goal }}<template v-if="changes[balloon.key]!.date"><span class="agent-balloon__ask-sep" aria-hidden="true"> · </span>{{ changes[balloon.key]!.date }}</template></p>
               <div class="agent-balloon__choices">
                 <button
                   v-for="option in balloon.ask.options"
@@ -187,6 +191,10 @@ function onClick(event: MouseEvent): void {
 .agent-balloon__markdown th, .agent-balloon__markdown td { padding: 4px 12px 4px 0; text-align: left; vertical-align: top; }
 .agent-balloon__markdown th { font-weight: 600; }
 .agent-balloon__ask-title { margin: 0 0 10px; font-weight: 600; }
+/* What it will change stands right under the question, in the balloon's own type: the two are one block, the buttons the next. */
+.agent-balloon__ask-title--changes { margin-bottom: 0; }
+.agent-balloon__ask-changes { margin: 0 0 10px; }
+.agent-balloon__ask-sep { color: rgb(255 255 255 / 40%); }
 .agent-balloon__markdown + .agent-balloon__ask { margin-top: 12px; }
 /* The documents the message brings, one chip under another, after its words. */
 .agent-balloon__docs { display: flex; flex-direction: column; gap: 12px; }

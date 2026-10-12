@@ -13,9 +13,13 @@ launcher has its own ports, database, state directory and UI build.
   serves the UI, proxies `/api` with the bearer token (like the Docker nginx) and serves the chat's `/__chat/*` routes.
 - `chat/` — chat backend (`chat.py`: Claude via `claude --print` stream-json, Codex via
   `codex app-server`), `mcp_proxy.py` (stdio → HTTP MCP relay for Codex), `prompt-intro.md`
-  (the system prompt is this intro plus `.agents/skills/verticals-operator`, read at startup),
+  (the system prompt is this intro plus `.agents/skills/verticals-operator`, read at startup; the morning report's
+  turn adds `prompt-morning.md` and `.agents/skills/verticals-morning-report`),
   `ui/assets/` (the agents' and models' marks). The conversation itself is drawn by the app
-  (`web/src/lib/agentChat.ts`, `AgentConversation.vue`).
+  (`web/src/lib/agentChat.ts`, `AgentConversation.vue`). The gateway keeps `agent.log` in the state folder, beside
+  `api.log` and `mcp.log`: a small rotating file (three files of 200 kB at most) of what the agent was asked to be and did,
+  that is, event kinds, tool names, flags, durations and exit details, never your words, the agent's, tool inputs or
+  titles, so a bug report can carry its last lines.
 - `macos/` — `Verticals.swift` (native window, WKWebView), `Updater.swift` (checks, downloads and
   installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
   (self-contained `Verticals.app` + `.dmg`).
@@ -83,7 +87,7 @@ dev builds), drawn by `macos/icon/make_icon.py` (`.venv/bin/python desktop/macos
 the repository's Playwright Chrome and macOS's `iconutil`).
 
 The bundle mirrors the repository layout inside `Contents/Resources` (verticals/, desktop/, the
-operator skill) plus a trimmed Python 3.12 with the dependencies and PostgreSQL 16 with its
+operator and morning-report skills) plus a trimmed Python 3.12 with the dependencies and PostgreSQL 16 with its
 Homebrew libraries copied in and relinked; the build checks that no binary links outside the app
 and runs initdb + `pg_trgm` from the bundle. The app keeps its data in
 `~/Library/Application Support/Verticals` and never writes into itself; an update replaces the

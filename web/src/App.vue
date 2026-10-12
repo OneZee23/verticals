@@ -33,6 +33,7 @@ import AgentConversation from './components/AgentConversation.vue'
 import AgentStep from './components/AgentStep.vue'
 import AgentTag from './components/AgentTag.vue'
 import { ensureMorning } from './lib/morning'
+import { takeSelection } from './lib/pageSelection'
 
 /* The shell, not `Board.vue`, owns the day-rollover watcher: it is mounted for the whole life of
    the tab, while `Board` unmounts every time Inbox is active — a planner left on Inbox overnight
@@ -137,6 +138,8 @@ async function onSubmit(text: string): Promise<void> {
     return
   }
   if (!agentChat.available) return
+  // What you selected on the page goes with these words, once (lib/pageSelection.ts).
+  const selection = takeSelection()
   // Sent while moving a goal: a new task with the move's context, and the move ends (docs/design-handoff S5.P3.041, .042).
   if (circle.moving) {
     const move = moveContext((id) => (findGoal(store.state.board, id) ?? spanGoal(id))?.title
@@ -156,7 +159,7 @@ async function onSubmit(text: string): Promise<void> {
   if (goalOpening) await goalOpening
   const front = frontWindow.value
   if (front?.kind === 'goal' && currentThread.value?.goal?.id !== front.target) await openForGoal({ id: front.target, title: front.title })
-  void send(text)
+  void send(text, selection ? { selection } : {})
 }
 function onVeilClick(): void {
   agentChat.open = false
@@ -244,7 +247,7 @@ onMounted(() => {
    asked for it once a day. The agent is there only after the gateway answered, so the first look waits for it. */
 let morningTimer: ReturnType<typeof setInterval> | null = null
 async function morningCheck(): Promise<void> {
-  ensureMorning(todayIso())
+  await ensureMorning(todayIso())
 }
 onUnmounted(() => {
   if (morningTimer) clearInterval(morningTimer)

@@ -8,7 +8,7 @@
     python3 desktop/macos/bundle.py --dev        # a dev build: the yellow icon, so it never passes for the app people use
 
 Contents/Resources mirrors the repository: verticals/, desktop/ (launcher, chat, UI build) and the
-operator skill, plus a trimmed Python 3.12 with the dependencies and PostgreSQL 16 taken from
+skills the chat reads (SKILLS below), plus a trimmed Python 3.12 with the dependencies and PostgreSQL 16 taken from
 Homebrew with its Homebrew libraries copied in and relinked. The target Mac needs nothing
 installed (only an agent CLI for the chat). Build machine needs: Homebrew postgresql@16, uv with
 Python 3.12, Xcode Command Line Tools, and the UI built into desktop/build/web (see README).
@@ -31,6 +31,9 @@ ICON = ROOT / "macos/icon" / ("AppIcon-dev.icns" if "--dev" in sys.argv else "Ap
 RES = APP / "Contents" / "Resources"
 BREW = Path("/opt/homebrew")
 PG_OPT = BREW / "opt/postgresql@16"
+# The skills desktop/chat/chat.py reads from the folder it runs in: the operator skill for every turn, the morning-report
+# skill for the morning turn. A skill left out here makes the chat quietly go without it (tests/static/test_chat_gateway.py).
+SKILLS = ["verticals-operator", "verticals-morning-report"]
 PG_KEEP_BINS = ["postgres", "initdb", "pg_ctl"]
 PG_KEEP_MODULES = ["plpgsql", "dict_snowball", "pg_trgm"]
 # What rarely changes between releases: a lite update zip leaves these out, and the app completes it
@@ -120,7 +123,8 @@ def copy_code():
     shutil.copy2(ROOT / "launcher.py", RES / "desktop/launcher.py")
     shutil.copytree(ROOT / "chat", RES / "desktop/chat", ignore=skip)
     shutil.copytree(ROOT / "build/web", RES / "desktop/build/web")
-    shutil.copytree(REPO / ".agents/skills/verticals-operator", RES / ".agents/skills/verticals-operator")
+    for skill in SKILLS:
+        shutil.copytree(REPO / ".agents/skills" / skill, RES / ".agents/skills" / skill)
 
 
 def copy_python():

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each
-message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[slow]` works
-for a second and a half, `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers
-with the words after it, and `[context]` with the app context Verticals sent. A message that opens with "Check again"
-(a document's comments and edits handed over, web/src/lib/checkAgain.ts) works for a second and a half, which is the
-time a test has to rewrite the document as the real agent would, then answers in two lines."""
+message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[ask:NAME]` asks
+permission for one of the writes in ASKS, shaped as the real tool is called, `[slow]` works for a second and a half,
+`[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers with the words after it, and
+`[context]` with the app context Verticals sent. A message that opens with "Check again" (a document's comments and edits
+handed over, web/src/lib/checkAgain.ts) works for a second and a half, which is the time a test has to rewrite the document
+as the real agent would, then answers in two lines. Each start appends the arguments it was given to `argv.log` in its
+folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions)."""
 import json
 import re
 import sys
@@ -22,6 +24,16 @@ def read():
 
 
 CHECKED = "Check again"
+# `[ask:NAME]`: a write the agent asks permission for. SYNDAY01 is "Draft the outline", a goal of 8 Aug 2026 in F2.
+ASKS = {
+    "schedule": ("schedule", {"id": "SYNDAY01", "vertical": "day", "anchor_date": "2026-08-10"}),
+    "week": ("schedule", {"id": "SYNDAY01", "vertical": "week", "anchor_date": "2026-08-10"}),
+    "clear": ("schedule", {"id": "SYNDAY01", "vertical": None, "anchor_date": None}),
+    "create": ("create", {"title": "Plan the review", "vertical": "week", "anchor_date": "2026-08-10"}),
+    "update": ("update", {"id": "SYNDAY01", "done": True}),
+    "delete": ("delete", {"id": "SYNDAY01"}),
+    "unknown": ("schedule", {"id": "SYNNOPE1", "vertical": "day", "anchor_date": "2026-08-10"}),
+}
 
 
 def answer_for(words):
@@ -37,7 +49,11 @@ def answer_for(words):
     return f"Done: {said}" if said else "Done."
 
 
+with open("argv.log", "a") as argv_log:
+    argv_log.write(json.dumps(sys.argv[1:]) + "\n")
+
 started = False
+asked = 0
 for msg in iter(read, None):
     kind = msg.get("type")
     if kind == "control_request":
@@ -58,9 +74,12 @@ for msg in iter(read, None):
     if not started:
         out({"type": "system", "subtype": "init", "model": "fake-model"})
         started = True
-    if "[ask]" in words:
-        out({"type": "control_request", "request_id": "ask-1", "request": {
-            "subtype": "can_use_tool", "tool_name": "mcp__verticals__update", "input": {"id": "x"}}})
+    ask = re.search(r"\[ask(?::([a-z_]+))?\]", words)
+    if ask:
+        tool, tool_input = ASKS[ask.group(1)] if ask.group(1) else ("update", {"id": "x"})
+        asked += 1
+        out({"type": "control_request", "request_id": f"ask-{asked}", "request": {
+            "subtype": "can_use_tool", "tool_name": f"mcp__verticals__{tool}", "input": tool_input}})
         while (reply := read()) is not None and reply.get("type") != "control_response":
             pass
     for name in re.findall(r"\[tool:([a-z_]+)\]", words):

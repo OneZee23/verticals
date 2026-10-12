@@ -91,11 +91,15 @@ export async function checkAgain(): Promise<void> {
     void send(checkAsk(`[${name}](#doc/${doc.id})`)).then(() => {
       if (!agentChat.running && currentThread.value?.status !== 'working') letGo()
     })
-    // A morning report gone through has nothing left to wait for: its open task is done.
+    // A morning report gone through has nothing left to wait for: its open task is done. The one task is linked to every
+    // morning's report (core/morning.py), so only the report of the day it stands in finishes it, not an earlier one
+    // (docs/design/agent-fixes.md, fix 2).
     if (!doc.path.startsWith(`${MORNING_FOLDER}/`)) return
     for (const link of doc.linked_goals) {
       const goal = store.state.board?.columns.flatMap((c) => c.goals).find((g) => g.id === link.goal_id)
-      if (goal && goal.title === MORNING_TITLE && goal.done_at === null) void store.completeGoal(goal.id, true)
+      if (goal && goal.title === MORNING_TITLE && goal.done_at === null && doc.path === `${MORNING_FOLDER}/${goal.anchor_date}.md`) {
+        void store.completeGoal(goal.id, true)
+      }
     }
   } finally {
     if (!following) free(id)

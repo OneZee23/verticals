@@ -27,6 +27,7 @@ import { docCard } from '../lib/docCard'
 import MovingStack from './MovingStack.vue'
 import { backspace as pickBackspace, escape as movingEscape, tab as pickTab } from '../lib/moving'
 import { dots } from '../lib/spansDrag'
+import { brush, type Brush } from '../lib/brush'
 import './circleField.css'
 
 defineKnobs('The field', [
@@ -121,6 +122,8 @@ const answerText = computed(() => {
   return plainWords(answerDocs.value.length ? withoutDocLines(circleWords.value.text) : circleWords.value.text)
 })
 const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(circleWords.value.lead) : ''))
+/* An ask says what it will change under its question: the goal and its date (lib/askDetail.ts). */
+const changesText = computed(() => (circleWords.value?.kind === 'ask' ? circleWords.value.changes : ''))
 const stopping = computed(() => state.value === 'working' && circle.pointed)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
@@ -230,7 +233,7 @@ function moved(): void {
 watch([text, width, height], () => void nextTick(measure))
 
 /* The answer's shape hugs its words: one line as wide as they are, more at the 376 px measure, three at most (S2.P4.040). */
-watch(answerText, async () => {
+watch([answerText, changesText], async () => {
   await nextTick()
   const el = answerMeasure.value
   if (!el) return
@@ -265,6 +268,11 @@ watch(() => state.value === 'working', (working, was) => {
   if (from && from !== 'none') el.animate([{ transform: from }, { transform: 'none' }], { duration: 165, easing: curve('large') })
 })
 
+/* The answer goes back into the circle and the conversation keeps it: Esc does it, and so does brushing it away with a
+   sideways swipe or a drag down (lib/brush.ts; docs/design/agent-fixes.md, fix 8). */
+function sendBack(): void {
+  agentChat.answer = null
+}
 /* The answer goes up into the conversation as its last balloon, and the field takes the caret (S2.P4.003). */
 function reply(): void {
   const words = shape.value?.querySelector('.circle-field__answer-words')?.getBoundingClientRect()
@@ -384,7 +392,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
     return
   }
   if (event.key === 'Escape' && circleWords.value?.kind === 'answer') {
-    agentChat.answer = null
+    sendBack()
     return
   }
   if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1 || event.key === ' ') return
@@ -397,6 +405,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   focusField()
 }
 function onShapeClick(): void {
+  if (brushing?.swallowed()) return  // the end of a drag is no click on the answer
   if (circleWords.value?.kind === 'answer') reply()
   else if (!circleWords.value) focusField()
 }
@@ -406,7 +415,9 @@ defineExpose({ focusField })
 
 let stopNews: (() => void) | null = null
 let stopFinding: (() => void) | null = null
+let brushing: Brush | null = null
 onMounted(() => {
+  if (shape.value) brushing = brush(shape.value, () => state.value === 'answer' && circleWords.value?.kind === 'answer', sendBack)
   const match = /^\/search\/(.*)/.exec(location.pathname)
   if (match?.[1]) { try { commandFilter.text = decodeURIComponent(match[1]) } catch { commandFilter.text = match[1] } }
   window.addEventListener('keydown', onWindowKeyDown, true)
@@ -418,6 +429,7 @@ onMounted(() => {
   void document.fonts?.ready.then(() => void nextTick(measure))
 })
 onBeforeUnmount(() => {
+  brushing?.stop()
   window.removeEventListener('keydown', onWindowKeyDown, true)
   window.removeEventListener('resize', onResize)
   hoverQuery?.removeEventListener('change', onCanHover)
@@ -507,13 +519,14 @@ onBeforeUnmount(() => {
           <template v-else>
           <p v-if="leadText" class="circle-field__answer-lead">{{ leadText }}</p>
           <p class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <p v-if="changesText" class="circle-field__answer-changes" data-role="circle-ask-changes">{{ changesText }}</p>
           <div v-if="circleWords.kind === 'ask' && openAsk" class="circle-field__answer-choices">
             <button v-for="option in openAsk.options" :key="option.value" type="button" class="circle-field__answer-choice"
               @click.stop="decide(openAsk.requestId, option.value)">{{ option.label }}</button>
           </div>
           </template>
         </div>
-        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}</p>
+        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}<template v-if="changesText"><br>{{ changesText }}</template></p>
         <p ref="leadMeasure" class="circle-field__answer-measure circle-field__answer-measure--lead" aria-hidden="true">{{ leadText }}</p>
         <button v-if="stopping" type="button" class="circle-field__stop" aria-label="Stop the agent" @click.stop="stop()">
           <span aria-hidden="true"></span>
