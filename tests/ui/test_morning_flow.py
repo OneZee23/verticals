@@ -174,6 +174,25 @@ def test_a_report_starts_each_source_where_the_last_report_stopped_and_counts_ev
     assert "Times in Europe/Berlin." in body and "(goal:" in body
 
 
+def test_a_task_the_sources_show_done_is_closed_on_the_board_listed_once_and_left_out_of_the_rows(morning: Morning) -> None:
+    morning.sources()
+    morning.last_report()
+    task = morning.task()
+    open_id, done_id = morning.goal("Launch plan is shared"), morning.goal("Announcement draft is approved")
+    morning.scenario(rows=[{"id": open_id, "title": "Launch plan is shared"}],
+                     close=[{"id": done_id, "title": "Announcement draft is approved", "evidence": "Team chat shows it approved."}])
+    run = morning.ask(task)
+    assert run.final()["error"] is False
+    assert morning.api.get(f"/api/goals/{done_id}").json()["done_at"] is not None
+    assert morning.api.get(f"/api/goals/{open_id}").json()["done_at"] is None
+    body = morning.report()
+    closed = body.split("## Closed since the last report")[1].split("\n## ")[0]
+    assert body.count(f"(goal:{done_id})") == 1 and f"(goal:{done_id})" in closed, "listed once, in what was closed, never in the rows"
+    assert first_line(body) == "Checked against the sources by a second agent: all 10 passed."
+    # Closed with `update`, its evidence recorded with `evidence_update`: the two writes the morning turn may make besides the report.
+    assert [e["name"] for e in run.events if e["t"] == "tool" and e["name"] in ("update", "evidence_update")] == ["update", "evidence_update"]
+
+
 def test_a_morning_that_runs_after_another_starts_where_that_one_ended_and_a_source_it_could_not_read_keeps_its_end(morning: Morning) -> None:
     morning.sources(mail_approved=False)  # the reader has not approved Mail's check: it cannot be read
     morning.last_report(chat_end="2026-08-07 09:00", mail_end="2026-08-07 07:00")
