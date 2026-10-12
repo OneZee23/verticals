@@ -2,7 +2,7 @@
 // and inputs with the ask and the card drew only "Allow Claude to use schedule?", so you answered a question about a tool.
 // The goal is named by its title, as the board names it, and its date as the board's own cards say it (lib/schedule.ts):
 // "Draft the outline · Mon 10 Aug".
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { getGoal } from './api'
 import type { Ask } from './agentChat'
 import { findGoal } from './boardIndex'

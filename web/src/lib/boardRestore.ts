@@ -19,7 +19,7 @@
 // the list is not: it shifts whenever a neighbour moves, so it is set only while the goal stands in the group the step left
 // it in. What stayed is handed back, for the notice to say.
 
-import { toast } from '@konstantinopolskii/vue'
+import { toast } from '../kit'
 import {
   ApiError, getGoal, patchGoal, reparentGoal, scheduleGoal,
   type BoardResponse, type UpdatePatch,

@@ -112,7 +112,7 @@ export function isAllowedImageSrc(cleaned: string): boolean {
 const INLINE_PICTURE_RE = /!\[[^\]\n]{0,250}\]\(data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=_-]*\)/gi
 
 /** The text without its pictures, for an excerpt: cut at a fixed length, a data URL would print as base64 on the page that
- *  shows the excerpt (DocPage.vue draws no picture at all), and the words after the pictures would be cut off with it. */
+ *  shows the excerpt (DocPage.tsx draws no picture at all), and the words after the pictures would be cut off with it. */
 export function withoutPictures(body: string): string {
   return body.replace(INLINE_PICTURE_RE, '')
 }
@@ -317,7 +317,7 @@ function appendRun(parent: HTMLElement, run: Run): void {
   parent.append(element)
 }
 
-/** Safe DOM renderer shared by Vue entry and programmatic history restores. Never uses innerHTML. */
+/** Safe DOM renderer shared by the body components and programmatic history restores. Never uses innerHTML. */
 export function renderBodyElement(root: HTMLElement, body: string): void {
   const document = root.ownerDocument
   const fragment = document.createDocumentFragment()

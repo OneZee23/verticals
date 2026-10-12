@@ -1,4 +1,4 @@
-/* The circle and the field (SearchBar.vue): docs/design-handoff S1.P1, S1.P2, S2.P3, S2.P4. */
+/* The circle and the field (SearchBar.tsx): docs/design-handoff S1.P1, S1.P2, S2.P3, S2.P4. */
 .circle-field {
   position: fixed;
   left: 50%;
@@ -142,7 +142,7 @@
 .circle-field__pivot { position: absolute; inset: 0; pointer-events: none; }
 .circle-field__pivot.is-turning { animation: circle-field-turn 1600ms var(--vt-ease-play) infinite; }
 .circle-field__pivot.is-stopping { left: -48px; }
-/* With the step beside it the circle is a pill, and the line turns at its left end, where the circle's centre was: SearchBar.vue
+/* With the step beside it the circle is a pill, and the line turns at its left end, where the circle's centre was: SearchBar.tsx
    moves the pivot there (`translate`), and it follows the shape's own timing, so the line holds its place while the black
    widens and narrows. Typing has no transition, as the shape has none. */
 .circle-field__pivot { transition: translate var(--vt-dur-close) var(--vt-ease-large); }
@@ -225,7 +225,7 @@
   animation: circle-field-blink 1060ms steps(1) infinite;
 }
 .circle-field__answer-choices { display: flex; gap: 8px; margin-top: 10px; }
-/* An answer's Undo (`AnswerUndo.vue`) stands under its words at the left, the notice's own pill. */
+/* An answer's Undo (`AnswerUndo.tsx`) stands under its words at the left, the notice's own pill. */
 .circle-field__answer-undo { align-self: flex-start; }
 .circle-field__answer-choice {
   height: 32px;
@@ -292,7 +292,7 @@
    line grows from 3 × 24 to 5 × 46 px, stays upright and keeps its round ends; the pointer shows, as over any button. It
    comes at once: the timings above are the ones the way back takes, so settling takes 200 ms on the app's ease-out token and
    nothing else about the circle moves. The sizes are `--vt-field-hover-*` in style.css; the buttons above grow in
-   CircleTags.vue. */
+   CircleTags.tsx. */
 @media (hover: hover) and (pointer: fine) {
   .circle-field[data-pointed] .circle-field__shape {
     min-width: var(--vt-field-hover-width);

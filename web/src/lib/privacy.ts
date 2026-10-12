@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { fetchPrivacy, putPrivacy, type PrivacyView } from './api'
 
 const state = reactive({ mode: false, hidden: new Set<string>() })

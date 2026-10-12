@@ -3,7 +3,7 @@
 // the board's order. The documents no goal holds come first, under "No goal" (KK, 7 Oct: "at the beginning"), one stack
 // for each age. The field narrows the desk as it narrows the board (S1.P3): a stack says how many of its pages match,
 // and one with none turns off.
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 import { fetchDocsDesk, type DeskDoc, type DocsDesk } from './api'
 import { filterText } from './commandFilter'
 import { isoDate } from './schedule'

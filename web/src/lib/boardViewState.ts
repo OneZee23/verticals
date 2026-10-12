@@ -135,7 +135,7 @@ export function hoverChainOf(view: BoardViewState): { id: string; set: Set<strin
   return chainOf(view, view.hoverChainId)
 }
 
-/** The family line of the card the pointer rests on: `GoalCard.vue` binds the wash class off it. */
+/** The family line of the card the pointer rests on: `GoalCard.tsx` binds the wash class off it. */
 export function restChainOf(view: BoardViewState): { id: string; set: Set<string> } | null {
   return chainOf(view, view.restChainId)
 }

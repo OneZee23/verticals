@@ -16,7 +16,7 @@
 //     alone; the rest comes back when it closes, in the filter it had. The plan stays where it was clicked, by this
 //     module's own hold: nothing here waits for the column to scroll the family to the top (that glide is not ours).
 
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from '../reactivity'
 import { store } from '../store'
 import { findGoal } from './boardIndex'
 import { liftScale } from './cardLift'

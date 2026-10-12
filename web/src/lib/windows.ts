@@ -1,7 +1,7 @@
 // The windows lifted over the board (docs/design-handoff S3.P2, S3.P3) and the one "out of focus" flag the board's layer
 // and every window read (S2.P6.012): the board is out of focus while the conversation or a window is open. Windows keep
 // the order they opened in; one is in the centre, the others stand at the sides.
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 import { agentChat } from './agentChat'
 
 export type WindowKind = 'goal' | 'doc' | 'page'
@@ -14,7 +14,7 @@ export interface VtWindow {
   /** Where a document or page opens: a heading's words or an anchor (S3.P4.003). */
   part?: string
   /** A document's head (round 2, frame f2b; round 5, m3–m5): its one line of facts, and its versions, which open
-   *  history. Set by DocWindowBody.vue. */
+   *  history. Set by DocWindowBody.tsx. */
   facts?: string[]
   versions?: number
   /** The document's own title has scrolled out of view, so the head says it; it never shows twice. */

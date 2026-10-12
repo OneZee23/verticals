@@ -521,5 +521,5 @@ def test_the_waiting_task_is_the_same_card_in_every_frame_while_the_field_widens
 def test_nothing_of_the_tile_beside_the_field_is_left() -> None:
     """The tile beside the field was a second way to wait; `lib/inboxCarry.ts` keeps only the drag."""
     left = [path.relative_to(SRC).as_posix() for path in sorted(SRC.rglob("*"))
-            if path.suffix in {".vue", ".ts", ".css"} and re.search(r"inbox-beside|carry\.beside", path.read_text(encoding="utf-8"))]
+            if path.suffix in {".ts", ".tsx", ".css"} and re.search(r"inbox-beside|carry\.beside", path.read_text(encoding="utf-8"))]
     assert left == [], f"the tile beside the field is still in {left}"

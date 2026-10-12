@@ -8,7 +8,7 @@
 // agent in one message, and its answer lands in the field (S2.P4) in two lines. When its turn has ended the document and
 // its comments are read again: the words the agent rewrote are lit green (lib/docChanges.ts), and the comments it answered
 // stop counting, so the pill goes unless one is left unanswered. After "Check again" on a morning report, its task is done.
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, watch } from '../reactivity'
 import { fetchDocRevision, getDoc } from './api'
 import { agentChat, currentThread, newThread, send } from './agentChat'
 import { flushPending } from './beforeQuit'
@@ -149,7 +149,7 @@ async function readAgain(id: string, base: number, touched: boolean): Promise<vo
     const [fresh, before] = await Promise.all([getDoc(id), fetchDocRevision(id, base)])
     if (fresh.revision !== base) {
       if (!touched) rewritten[id] = { before: before.body }
-      // The window shows the saved copy (DocWindowBody.vue); Documents shows it by being opened again.
+      // The window shows the saved copy (DocWindowBody.tsx); Documents shows it by being opened again.
       window.dispatchEvent(new CustomEvent('verticals:doc-edited', {
         detail: { id, title: fresh.title, path: fresh.path, doc: fresh, linksFresh: true, by: 'agent' },
       }))

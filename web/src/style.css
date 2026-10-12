@@ -65,7 +65,7 @@ body {
    you EDIT the text." Global deny, re-enabled only on the surfaces that are actually editable.
    Element selectors, not this component's class names: `input`/`textarea`/`[contenteditable]`
    are what an editing surface *is*, in any component, present or future, so this rule does not
-   need to change the day `GoalDetailEditor.vue` (currently mid-rewrite by another WP) renames its
+   need to change the day `GoalDetailEditor.tsx` (currently mid-rewrite by another WP) renames its
    own classes. `.is-selectable` is the documented opt-in escape hatch for a future non-form
    surface that still needs to be copyable (e.g. an id or a code string) without becoming an
    `input`. Buttons, labels, cards and the rest of the app's read-only chrome are not editing

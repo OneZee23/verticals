@@ -1,7 +1,7 @@
 // The drag's side of the spans (docs/design-handoff S5.P1, S5.P2, S5.P6): resting the held goal on a column's dots melts
 // it in and opens that column's spans; the screen's edges move them on, or send the floating column to the other side;
 // letting go lands the goal as a drop does and then gives the board back.
-import { nextTick, reactive } from 'vue'
+import { nextTick, reactive } from '../reactivity'
 import { knob } from './tuning'
 import { closeSpans, homeSpans, openSpans, spans, stepSpans, swapSide, type SpanScale } from './spans'
 import { moving, park, unpark } from './moving'

@@ -12,8 +12,8 @@
 //   3. what it made goes to the trash, unless somebody has taken it up since: written to it (the server stamps every write), put
 //      something under it, or commented on it. A made goal with steps goes whole or not at all.
 // Redo does it the other way round, with the same care for what was changed since. What stayed is said in the field, in one line.
-import { reactive } from 'vue'
-import { toast } from '@konstantinopolskii/vue'
+import { reactive } from '../reactivity'
+import { toast } from '../kit'
 import { ApiError, fetchGoalComments, getGoal, restoreGoal, type BoardResponse, type GoalCard } from './api'
 import { countOf, madeRoots, netOf, shot, structural, type Answer, type AnswerState, type Card, type Edit, type Net } from './answerNet'
 import { announce, bindAnswers, historyPorts, nextSeq, runStep, seen, type Step } from './boardHistory'

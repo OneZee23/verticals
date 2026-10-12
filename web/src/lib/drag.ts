@@ -36,7 +36,7 @@ export function exceedsThreshold(dx: number, dy: number): boolean {
  *  the geometry it feeds). `pending` is set on `pointerdown`, before the threshold is crossed —
  *  a plain click never crosses it, so `pending` just clears on `pointerup` and the browser's own
  *  `click` fires normally. `id` is the *armed* source, set only once the threshold is crossed:
- *  `GoalCard.vue`'s ghost and `Board.vue`'s overlay both key off this, not `pending`. `x`/`y` is
+ *  `GoalCard.tsx`'s ghost and `Board.tsx`'s overlay both key off this, not `pending`. `x`/`y` is
  *  the live pointer position; `offsetX`/`offsetY` is where inside the card the pointer grabbed
  *  it (so the overlay stays glued under the cursor); `width`/`height` is the source card's own
  *  footprint at press time. `target` is `computeDropTarget`'s live answer, recomputed every armed
@@ -56,7 +56,7 @@ export interface DragState {
   /** From the row's bottom to the bottom of its subtasks drawn under it: the family travels whole. */
   tailHeight: number
   /** Live ROW box under the current drop target, the rendered row measured at the destination width. The flying
-   *  goal takes it before it lands (`DragOverlay.vue`), and Column.vue's drop indicator takes its height. */
+   *  goal takes it before it lands (`DragOverlay.tsx`), and Column.tsx's drop indicator takes its height. */
   previewWidth: number
   previewHeight: number
   /** The vacated CARD's box — the placeholder's geometry, and a different number: the row sits
@@ -80,7 +80,7 @@ export interface DragState {
    *  not reflow under a pointer that has not moved. */
   slot: ReorderTarget | null
   /** Destination ROW box. Live preview should already be here at pointer-up; these values keep
-   *  release correct when a very fast pointer-up beats Board.vue's next-frame measurement. */
+   *  release correct when a very fast pointer-up beats Board.tsx's next-frame measurement. */
   settling:
     | {
         id: string
@@ -158,7 +158,7 @@ function activateDrag(drag: DragState, board: BoardResponse | null): void {
 }
 
 /** `pointerdown` on a card row, before any threshold check — `store.ts::pointerDownCard`'s whole
- *  body. `drag` is the live `state.drag` object (Vue's `reactive()` tracks a plain mutation on it
+ *  body. `drag` is the live `state.drag` object (the store's observable state tracks a plain mutation on it
  *  exactly the same whether the mutating code lives in this module or in `store.ts` itself — nothing
  *  here needs to be a component or live inside the reactive tree's own file to participate). `rect`
  *  is the card's `getBoundingClientRect()`, captured by the caller at press time (not re-read here
@@ -375,7 +375,7 @@ export function releasePointerDrag(
   const distance = rect ? Math.hypot(left - fromLeft, top - fromTop) : null
   const duration = settleDuration(distance)
   const settling = { id, left, top, width, height, duration, cancelled }
-  // ORDER IS LOAD-BEARING: settling first, then clear the id. `Board.vue`'s flying-card identity
+  // ORDER IS LOAD-BEARING: settling first, then clear the id. `Board.tsx`'s flying-card identity
   // is `drag.id ?? drag.settling?.id`, so clearing the id first makes that value blink through
   // `null` for one tick — which unmounts the overlay and re-clones the row from a source that is
   // ALREADY ghosted, baking `visibility: hidden` into the copy. The card then "flies" invisibly
@@ -505,12 +505,12 @@ export type DropTarget =
       kind: 'reorder'
       /** The id this drop would insert the dragged goal immediately before, or `null` to append
        *  after every existing member of the RESOLVED group (`parentId` below) — drop below the
-       *  last card of that group, or into an empty column/group. Column.vue and GoalCard.vue read
+       *  last card of that group, or into an empty column/group. Column.tsx and GoalCard.tsx read
        *  this to place the drop-indicator rectangle; `reorderWrite` below reads it to build the
        *  actual PATCH body. */
       insertBeforeId: string | null
       /** The target group's own column identity — `'maybe'` for the Inbox/root pile, a real
-       *  scale name otherwise — so `Column.vue` can tell "is this reorder aimed at me" without
+       *  scale name otherwise — so `Column.tsx` can tell "is this reorder aimed at me" without
        *  re-deriving group membership itself (`props.vertical`/`props.periodKey` already carry
        *  the same two values `toColumnData` built this column from). */
       vertical: string

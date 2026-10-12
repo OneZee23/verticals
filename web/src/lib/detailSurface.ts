@@ -4,7 +4,7 @@
 // the store's one reactive state tree and its error reporter — no second state container and no
 // transport policy of its own.
 //
-// No `vue-router` (AC-086/183's dependency cap names it explicitly as absent, and it stays
+// No router (AC-086/183's dependency cap names it explicitly as absent, and it stays
 // absent) — "the URL changes by hash/param only" (AC-107/S-68) is met by hand, but NOT here any
 // more: `lib/urlState.ts` projects `openGoalId` onto the fragment and applies Back/Forward back
 // onto it. `openGoal`/`closeGoal` below set state and nothing else, so the two of them plus the
@@ -115,7 +115,7 @@ export function createDetailSurface(
     else setTimeout(prefetchBoardDetails, 300)
   }
 
-  /** Opens the detail surface on `id` — `GoalCard.vue`'s title click and every `GoalDetail.vue`
+  /** Opens the detail surface on `id` — `GoalCard.tsx`'s title click and every `GoalDetail.tsx`
    *  breadcrumb entry both call this directly (same convention as `completeGoal`/`scheduleGoalTo`:
    *  components reach into the store for their own actions, no emit-and-bubble chain). A cached
    *  detail paints instantly (D226); with a cold cache the previous detail is cleared first so a
@@ -200,7 +200,7 @@ export function createDetailSurface(
   // The modal is dead (WP-C) and open cards render in place on the board (WP-B); every path that
   // used to fall back to the modal now navigates to the goal and expands it in place instead — KK
   // ruling, verbatim: "Search simply moves u to vertical. In inbox simply expands as in vertical."
-  // `SearchBar.vue`'s result click and `main.ts`'s `#goal/<id>` boot fragment both call this one
+  // `SearchBar.tsx`'s result click and `main.ts`'s `#goal/<id>` boot fragment both call this one
   // function; neither hand-rolls host resolution anymore (that duplication is exactly what left
   // the null-host branch summoning the retired modal in the first place).
 
@@ -216,8 +216,8 @@ export function createDetailSurface(
    *  (a) already on the current board — expand + open there.
    *  (b) no host, and the fetched detail's `vertical` is null — the goal has no date, so it lives in
    *      the Inbox; switch to the Inbox and open it as a window over it, exactly as a click there
-   *      does (`InboxView.vue`, Inbox and Documents redesign round 7: the Inbox draws no goal cards
-   *      to open in place). `App.vue` opens the window on `verticals:open-goal-window`, an event
+   *      does (`InboxView.tsx`, Inbox and Documents redesign round 7: the Inbox draws no goal cards
+   *      to open in place). `App.tsx` opens the window on `verticals:open-goal-window`, an event
    *      rather than an import, since the windows module reaches back to the store.
    *  (c) no host, but the detail carries a real `anchor_date` — a dated goal that just is not on
    *      the board that happens to be loaded. Reload at its own anchor date and retry (a)'s path.
@@ -262,7 +262,7 @@ export function createDetailSurface(
     return asOneHistoryStep(() => walkToGoal(id))
   }
 
-  /** Escape (via `KModal`'s own handling, `GoalDetail.vue`) or the modal's scrim/close button both
+  /** Escape (via `KModal`'s own handling, `GoalDetail.tsx`) or the modal's scrim/close button both
    *  land here. Guarded against a redundant call (nothing open) so a stray second close is not a
    *  state change `lib/urlState.ts` would have to answer for. */
   function closeGoal(): void {

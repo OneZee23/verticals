@@ -7,13 +7,13 @@ from tests.static.conftest import WEB_SRC_DIR
 
 TOKENS = {"style.css", "lib/motion.ts", "lib/look.ts"}
 PREDATE_THE_TOKENS = {
-    "components/Column.vue",
-    "components/GoalCard.vue",
-    "components/GoalCardTools.vue",
-    "components/InlineAdd.vue",
-    "components/SubgoalAddRow.vue",
+    "components/Column.tsx",
+    "components/GoalCard.tsx",
     "components/goalCard.css",
+    "components/goalCardTools.css",
     "components/goalDetail.css",
+    "components/inlineAdd.css",
+    "components/subgoalAddRow.css",
     "lib/drag.ts",
     "lib/dragSettle.ts",  # the settle curve, split out of lib/drag.ts unchanged (S5.P1.038)
     "lib/familyMotion.ts",
@@ -23,7 +23,7 @@ PREDATE_THE_TOKENS = {
 def test_new_files_take_curves_from_tokens() -> None:
     offenders = []
     for path in sorted(WEB_SRC_DIR.rglob("*")):
-        if path.suffix not in {".vue", ".ts", ".css"}:
+        if path.suffix not in {".ts", ".tsx", ".css"}:
             continue
         rel = path.relative_to(WEB_SRC_DIR).as_posix()
         if rel.startswith("kit-ext/") or rel in TOKENS | PREDATE_THE_TOKENS:

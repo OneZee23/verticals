@@ -19,7 +19,7 @@
 // drawn under plus itself, so a step in the card goes one level in, a sibling goes sideways, a line on top goes back
 // to its level, and the same rule serves a drag held over a goal (flow 2 reuses it).
 
-import { computed, nextTick, watch, type ComputedRef } from 'vue'
+import { computed, nextTick, watch, type ComputedRef } from '../reactivity'
 import type { BoardResponse } from './api'
 import { ancestorIds, findGoal, subtreeIds } from './boardIndex'
 import { columnPlace, moveColumns, moveFamily, scrollBack, type ColumnPlace } from './familyMotion'
@@ -29,7 +29,7 @@ import { reducedMotion } from './motion'
  *  leaves out is turned off, so the rest of the board needs no light of its own. */
 export type Light = 'full' | 'light' | 'faint' | 'far'
 
-/** Vue settles a change and the open card's notes in a few ticks, all before the next frame is drawn. */
+/** A change and the open card's notes settle in a few ticks, all before the next frame is drawn. */
 async function settled(): Promise<void> {
   for (let i = 0; i < 5; i++) await nextTick()
 }
@@ -177,7 +177,7 @@ export function createFamilyView(
   watch(swapped, () => { state.lightFast = true }, { flush: 'sync' })
   watch(() => state.openPath, () => { state.lightFast = false }, { flush: 'sync' })
 
-  /** The rendered host of level `i` in a column: `GoalCard.vue`'s `detailHostKey` for the card drawn there. */
+  /** The rendered host of level `i` in a column: `GoalCard.tsx`'s `detailHostKey` for the card drawn there. */
   function hostKey(vertical: string, path: readonly string[], i: number): string {
     const parent = i === 0 ? (findGoal(state.board, path[0])?.parent_id ?? null) : path[i - 1]
     return [vertical, parent ?? 'root', i, path[i]].join(':')

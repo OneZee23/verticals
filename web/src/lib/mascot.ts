@@ -1,7 +1,7 @@
 // The mascot's life at rest (docs/design-handoff S1.P1): plays when you leave it be, pong when nobody is there, its line
 // watching the goal you point at, a jump for a goal just made and a blink for one moved. Every number is a hidden
 // setting (R.073). Nothing here runs with reduced motion (S0.P1.028).
-import { computed, onBeforeUnmount, onMounted, reactive, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, watch, type Ref } from '../reactivity'
 import { store } from '../store'
 import { circle, circleNews, circleState } from './circle'
 import { curve, reducedMotion } from './motion'

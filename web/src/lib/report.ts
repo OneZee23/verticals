@@ -18,7 +18,7 @@ import { encodePictures } from './reportImages'
 import { clearPictures, pictures } from './reportPictures'
 import { isoDate } from './schedule'
 import { messageForError } from './scheduleFeedback'
-import { toast } from '@konstantinopolskii/vue'
+import { toast } from '../kit'
 
 export type { ReportKind }
 

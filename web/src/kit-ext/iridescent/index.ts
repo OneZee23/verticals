@@ -63,8 +63,8 @@ export function registerIridescentCard(element: HTMLElement): void {
   element.dataset.foil = 'true'
   const existing = cards.get(element)
   if (existing) {
-    // Re-registration doubles as tier repair: Vue rewrites the class attribute whenever a
-    // card's bound classes change (a board refetch flipping data-colored is enough), wiping
+    // Re-registration doubles as tier repair: the card's drawing rewrites the class attribute
+    // whenever its classes change (a board refetch flipping data-colored is enough), wiping
     // the imperative foil--static/--flat mark. attach() re-applies the overlay's tier; with
     // no overlay yet, re-assert the fallback directly.
     if (activeOverlay) activeOverlay.attach(existing)

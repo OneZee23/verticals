@@ -9,7 +9,7 @@
 // this app (one detail surface is open at a time), so there is exactly one `threads` array here,
 // not a per-target cache. Switching target (a different goal opens, the doc pane switches docs)
 // clears `threads` and reloads: `docs/COMMENTS_SPEC.md` WP-B's own line, "Refetch threads on panel
-// open and after every own write," is the FLOOR, not the ceiling — `GoalDetail.vue`/`DocDetail.vue`
+// open and after every own write," is the FLOOR, not the ceiling — `GoalDetail.tsx`/`DocDetail.tsx`
 // also call `loadCommentsFor` the moment their own goal/doc loads (not gated on the panel being
 // open at all), because the icon's own "open-thread count" badge needs real data to be worth
 // anything; see this module's own `loadCommentsFor` doc comment.
@@ -37,7 +37,7 @@ export interface CommentsState {
    *  with NO selection creates a whole-card/whole-doc thread, anchor null"). */
   pendingAnchor: CommentAnchor | null
   /** A thread reached by clicking its highlight in the body — the panel scrolls to it once, then
-   *  this clears itself (`CommentsPanel.vue`'s own watcher) so a second click on the same highlight
+   *  this clears itself (`CommentsPanel.tsx`'s own watcher) so a second click on the same highlight
    *  still re-triggers the scroll. */
   focusThreadId: string | null
   /** A document's comment open on its words (docs/design/doc-comments-inline.md): the thread whose card stands under
@@ -99,7 +99,7 @@ export function createCommentsPanel(state: { comments: CommentsState }, deps: De
     }
   }
 
-  /** The icon click (`GoalDetailEditor.vue`'s bottom row / `DocDetail.vue`'s header) and a
+  /** The icon click (`GoalDetailEditor.tsx`'s bottom row / `DocDetail.tsx`'s header) and a
    *  highlight click both land here — `focusThreadId` is only ever set by the latter. Always
    *  refetches (COMMENTS_SPEC.md WP-B: "Refetch threads on panel open"), even when this target's
    *  threads are already loaded from the auto-fetch-on-open above, since a reply/resolve made by an

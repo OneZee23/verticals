@@ -1,6 +1,6 @@
-/** Pure DOM helpers for anchored comments (docs/COMMENTS_SPEC.md WP-B) — no Vue, no store, so
- *  these are trivially unit-exercisable and reusable between `GoalDetail.vue`'s and
- *  `DocDetail.vue`'s body (both render markdown into the same contenteditable-toggle node,
+/** Pure DOM helpers for anchored comments (docs/COMMENTS_SPEC.md WP-B) — no reactivity, no store, so
+ *  these are trivially unit-exercisable and reusable between `GoalDetail.tsx`'s and
+ *  `DocDetail.tsx`'s body (both render markdown into the same contenteditable-toggle node,
  *  `bodyMarkdown.ts`'s own convention).
  *
  *  Two jobs: capture a selection as `{quote, prefix, suffix}` the same triple the kit's own

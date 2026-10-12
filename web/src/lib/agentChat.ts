@@ -2,7 +2,7 @@
 // moved into the app from the script the gateway used to inject. The server and its event protocol stay as they are, and the
 // conversations stored in localStorage (vt-chat:*) are read as they are, so none is lost. The web build has no gateway:
 // the agent is unavailable there and the field only finds.
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 import { stepPhrase } from './agentSteps'
 import { answersAvailable, refreshAnswers } from './answerUndo'
 import { commandFilter } from './commandFilter'

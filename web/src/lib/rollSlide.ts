@@ -1,6 +1,6 @@
 // A period turning while the app is open (docs/design-handoff S4.P1.013, .014): the plans left over slide from where they
 // stood into their column's group in one movement, 400 ms; with reduced motion they fade in.
-import { nextTick } from 'vue'
+import { nextTick } from '../reactivity'
 import { reducedMotion, timing } from './motion'
 
 const ROW = '.goal-card[data-goal-id] > .goal-card__row'

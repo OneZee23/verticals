@@ -1,8 +1,8 @@
 // Pictures waiting above the field (docs/design/bug-reports.md). A picture dropped on the window or pasted stands above the
-// field as a goal let go over it does (MovingStack.vue hosts both), and the field widens to hold them. Past a few they
-// overlap, so any number still fits; the one under the pointer lifts out, bigger (FieldPictures.vue). They wait until the
+// field as a goal let go over it does (MovingStack.tsx hosts both), and the field widens to hold them. Past a few they
+// overlap, so any number still fits; the one under the pointer lifts out, bigger (FieldPictures.tsx). They wait until the
 // person says what they see and what they want: then they are the report's pictures (lib/report.ts).
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 
 export interface FieldPicture {
   id: string

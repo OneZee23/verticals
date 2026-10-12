@@ -1,4 +1,4 @@
-import { toast } from '@konstantinopolskii/vue'
+import { toast } from '../kit'
 import { ApiError, deleteGoal, type BoardResponse } from './api'
 import { findGoal } from './boardIndex'
 import { makeStep } from './boardHistory'
