@@ -6,6 +6,7 @@ import { commandFilter } from './commandFilter'
 import { agentChat, balloons, openAsk } from './agentChat'
 import { askLine } from './askDetail'
 import { frontWindow, windows } from './windows'
+import { pictures, reporting } from './reportPictures'
 import { store } from '../store'
 
 export type CircleJob = 'board' | 'goal' | 'moving'
@@ -20,6 +21,10 @@ const CAPTIONS: Record<CircleJob, string> = {
  *  simply can invite us to do that"): it rests open with its invitation, and ↵ writes your words down (`lib/inbox.ts`).
  *  Round 9: “"Write to inbox" in field actually.” */
 export const INBOX_CAPTION = 'Write to inbox'
+/** With pictures waiting above it the field is a report's (docs/design/bug-reports.md): it rests open and asks for the words.
+ *  While a file is dragged over the window it says what the drop will do. */
+export const REPORT_CAPTION = 'Say what happened'
+export const DROP_CAPTION = 'Drop pictures'
 
 export const circle = reactive({
   job: 'board' as CircleJob,
@@ -34,6 +39,8 @@ export const inboxWriting = computed(() => store.state.activeView === 'inbox' &&
 
 /** Once an answer has gone up into the conversation, the field asks the agent (S1.P1.015). */
 export const circleCaption = computed(() => {
+  if (pictures.over) return DROP_CAPTION
+  if (reporting.value) return REPORT_CAPTION
   if (inboxWriting.value) return INBOX_CAPTION
   if (circle.job !== 'board') return CAPTIONS[circle.job]
   if (frontWindow.value?.kind === 'goal') return CAPTIONS.goal
@@ -60,7 +67,9 @@ export const circleWords = computed(() => {
 export const circleState = computed<CircleState>(() => {
   if (commandFilter.text) return 'typing'
   if (circle.moving) return 'moving'
-  if (circle.focused) return 'open'
+  // The report is being made from the pictures: the line turns, as it does while the agent works.
+  if (pictures.sending) return 'working'
+  if (circle.focused || reporting.value || pictures.over) return 'open'
   if (circleWords.value) return 'answer'
   if (agentChat.running) return 'working'
   if (circle.pointed || inboxWriting.value) return 'open'

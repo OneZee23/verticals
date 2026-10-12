@@ -5,7 +5,7 @@
 // and one with none turns off.
 import { computed, reactive } from 'vue'
 import { fetchDocsDesk, type DeskDoc, type DocsDesk } from './api'
-import { commandFilter } from './commandFilter'
+import { filterText } from './commandFilter'
 import { isoDate } from './schedule'
 
 export interface ShownStack {
@@ -73,7 +73,7 @@ export const count = (n: number) => `${n} document${n === 1 ? '' : 's'}`
 /** A document with no goal has no column, so its stack is its age: a week, a month, a quarter, a year, or more. */
 const AGES = [7, 31, 92, 366, Infinity]
 
-const terms = computed(() => commandFilter.text.toLocaleLowerCase().split(/\s+/).filter((t) => t.length > 0))
+const terms = computed(() => filterText.value.toLocaleLowerCase().split(/\s+/).filter((t) => t.length > 0))
 function matchesWords(doc: DeskDoc): boolean {
   const text = `${doc.title ?? ''} ${doc.path} ${doc.excerpt}`.toLocaleLowerCase()
   return terms.value.every((term) => text.includes(term))

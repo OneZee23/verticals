@@ -4,10 +4,11 @@
 // (`submit`); the board follows every letter through `commandFilter`. Open, it is as wide as its caption, and while you
 // type it never gets narrower than that (Inbox and Documents redesign, rounds 9–10). A message of the agent's inside it
 // takes a message's corners, and what it made or changed stands under its words as chips, as in its balloon
-// (docs/design/agent-chips.md).
+// (docs/design/agent-chips.md). Pictures dropped on the window or pasted stand above it as a goal let go over it does and
+// widen it; its words are then the report's (docs/design/bug-reports.md).
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { store } from '../store'
-import { commandFilter } from '../lib/commandFilter'
+import { commandFilter, filterText } from '../lib/commandFilter'
 import { circle, circleCaption, circleState, circleWords, inboxWriting } from '../lib/circle'
 import { carry } from '../lib/inboxCarry'
 import { agentChat, decide, openAsk, stop } from '../lib/agentChat'
@@ -25,6 +26,7 @@ import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import MovingStack from './MovingStack.vue'
 import { backspace as pickBackspace, escape as movingEscape, tab as pickTab } from '../lib/moving'
 import { dots } from '../lib/spansDrag'
+import { pictures, picturesBackspace, picturesEscape, reporting, stackRoom, watchPictureInput } from '../lib/reportPictures'
 import { brush, type Brush } from '../lib/brush'
 import './circleField.css'
 
@@ -132,7 +134,7 @@ const holding = computed(() => carry.over
 /* Open, the field is as wide as its caption (round 9: "size of the field should align with the text"). */
 const openWidth = computed(() => Math.min(maxWidth.value, Math.ceil(PAD_CAPTION + textWidth(circleCaption.value) + PAD_CAPTION)))
 
-const width = computed(() => {
+const baseWidth = computed(() => {
   if (carry.over) return 120
   if (state.value === 'answer' && answerChips.value.length) return ANSWER_MEASURE + 2 * CHIPS_PAD
   if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
@@ -148,6 +150,12 @@ const width = computed(() => {
   if (state.value === 'moving') return Math.min(tagsShown.value ? 434 : 300, maxWidth.value)
   return mascot.pong ? 132 : CIRCLE
 })
+/* Pictures waiting above the field widen it to hold them: the stack, and what stands at its left end (4 px, or the tags and 8)
+   and keeps the stack's room as CSS reads it (FieldPictures.vue). It is as wide as the stack needs and the open field was, at
+   once (docs/design/bug-reports.md). */
+const tagsShift = ref(0)
+const width = computed(() => Math.min(maxWidth.value,
+  Math.max(baseWidth.value, reporting.value ? stackRoom(pictures.list) + Math.max(8, 4 + tagsShift.value) : 0)))
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))
 const height = computed(() => {
   if (state.value === 'typing') return PAD_Y * 2 + shownLines.value * LINE
@@ -259,7 +267,8 @@ watch(width, (value) => document.documentElement.style.setProperty('--moving-fie
 watch(tagsShown, async (shown) => {
   await nextTick()
   const tags = shown ? document.querySelector<HTMLElement>('.circle-tags')?.offsetWidth ?? 0 : 0
-  document.documentElement.style.setProperty('--moving-tags-shift', `${tags ? tags + 8 : 0}px`)
+  tagsShift.value = tags ? tags + 8 : 0
+  document.documentElement.style.setProperty('--moving-tags-shift', `${tagsShift.value}px`)
 }, { immediate: true })
 
 /* While the agent works the line turns; when it answers it ends upright (S2.P3.003). */
@@ -314,8 +323,9 @@ function clear(): void {
 function send(): void {
   const words = commandFilter.text.trim()
   if (!words) return
-  // In the Inbox they become the first card in Today, so no balloon takes them up (lib/inbox.ts).
-  if (inboxWriting.value) {
+  // In the Inbox they become the first card in Today, and with pictures above the field they are the report's: no balloon
+  // takes them up (lib/inbox.ts, lib/bugReport.ts).
+  if (inboxWriting.value || reporting.value) {
     emit('submit', words)
     return
   }
@@ -332,6 +342,11 @@ function onKeyDown(event: KeyboardEvent): void {
     send()
     return
   }
+  // On an empty field with pictures above it, Backspace picks the last and a second takes it off (docs/design/bug-reports.md).
+  if (!commandFilter.text && event.key === 'Backspace' && picturesBackspace()) {
+    event.preventDefault()
+    return
+  }
   // On an empty field in the moving mode, Backspace and Tab pick up what stands above it (S5.P4.002, .003).
   if (!commandFilter.text && circle.moving && ((event.key === 'Backspace' && pickBackspace()) || (event.key === 'Tab' && pickTab()))) {
     event.preventDefault()
@@ -341,6 +356,7 @@ function onKeyDown(event: KeyboardEvent): void {
     event.preventDefault()
     event.stopPropagation()
     if (commandFilter.text) clear()
+    else if (picturesEscape()) return
     else if (movingEscape()) return
     else if (agentChat.open) agentChat.open = false
     else if (windows.list.length) closeWindows()
@@ -417,6 +433,7 @@ defineExpose({ focusField })
 
 let stopNews: (() => void) | null = null
 let stopFinding: (() => void) | null = null
+let stopPictures: (() => void) | null = null
 let brushing: Brush | null = null
 onMounted(() => {
   if (shape.value) brushing = brush(shape.value, () => state.value === 'answer' && circleWords.value?.kind === 'answer', sendBack)
@@ -426,7 +443,8 @@ onMounted(() => {
   window.addEventListener('resize', onResize)
   document.fonts?.addEventListener('loadingdone', onFontsLoaded)
   stopNews = watchBoardNews()
-  stopFinding = followWords(() => commandFilter.text, () => store.state.board)
+  stopFinding = followWords(() => filterText.value, () => store.state.board)
+  stopPictures = watchPictureInput()
   void document.fonts?.ready.then(() => void nextTick(measure))
 })
 onBeforeUnmount(() => {
@@ -437,6 +455,7 @@ onBeforeUnmount(() => {
   document.fonts?.removeEventListener('loadingdone', onFontsLoaded)
   stopNews?.()
   stopFinding?.()
+  stopPictures?.()
   if (stillTimer) clearTimeout(stillTimer)
   if (flyingTimer) clearTimeout(flyingTimer)
 })
@@ -496,7 +515,7 @@ onBeforeUnmount(() => {
           type="button"
           class="circle-field__send"
           :class="{ 'is-shown': !!commandFilter.text }"
-          :aria-label="inboxWriting ? 'Write it down' : 'Send to the agent'"
+          :aria-label="reporting ? 'Make the report' : inboxWriting ? 'Write it down' : 'Send to the agent'"
           :tabindex="commandFilter.text ? 0 : -1"
           @click.stop="send"
         >

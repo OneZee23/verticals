@@ -3,6 +3,7 @@
 // over the field waits beside it, the same card, out of its group. Picked, one springs up with its shadow and the other
 // steps aside; the goal is dragged from here to its place. A task carried onto the field in the Inbox waits here as well,
 // the same card with no view's name beside it, and the Inbox's own drag takes it out again (docs/design/inbox-carry-stack.md).
+// The pictures dropped on the window or pasted wait in the same row, after them (FieldPictures.vue; docs/design/bug-reports.md).
 import { computed } from 'vue'
 import { store } from '../store'
 import { findGoal } from '../lib/boardIndex'
@@ -12,6 +13,8 @@ import { goalLight } from '../lib/look'
 import { isPrivate } from '../lib/privacy'
 import { spanGoal, spans, VIEW_NAMES } from '../lib/spans'
 import { moving, tap } from '../lib/moving'
+import { pictures } from '../lib/reportPictures'
+import FieldPictures from './FieldPictures.vue'
 
 const view = computed(() => (spans.vertical ? VIEW_NAMES[spans.vertical] : null))
 /* The waiting goal is a card of the board or of the spans; a task from the Inbox has its title and its value's colour,
@@ -47,7 +50,7 @@ function onGoalDown(event: PointerEvent): void {
 </script>
 
 <template>
-  <div v-if="view || goal" class="moving-stack" :class="{ 'moving-stack--holding': !!store.state.drag.id && !goal }" data-role="moving-stack">
+  <div v-if="view || goal || pictures.list.length" class="moving-stack" :class="{ 'moving-stack--holding': !!store.state.drag.id && !goal }" data-role="moving-stack">
     <component :is="'style'" v-if="hideSource">{{ hideSource }}</component>
     <button
       v-if="view"
@@ -73,6 +76,7 @@ function onGoalDown(event: PointerEvent): void {
         <span class="goal-card__title-text moving-stack__title">{{ goal.title }}</span>
       </div>
     </div>
+    <FieldPictures v-if="pictures.list.length" />
   </div>
 </template>
 
