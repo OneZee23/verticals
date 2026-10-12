@@ -9,7 +9,7 @@ import type { GoalCard } from './api'
 // word of three letters the server's matches decide (S1.P3), notes included; below that, titles on the board do.
 export const commandFilter = reactive({ text: '' })
 /** The words that narrow the board, ask the server and filter the Documents desk: the field's, except while pictures wait
- *  above it (docs/design/bug-reports.md). Then the words say what happened, and nothing narrows while they are written. */
+ *  above it (docs/design/bug-reports.md). Then the words say what the person sees and what they want, and nothing narrows while they are written. */
 export const filterText = computed(() => (reporting.value ? '' : commandFilter.text))
 export const queryTerms = computed(() => termsOf(filterText.value))
 export const filterActive = computed(() => queryTerms.value.length > 0)

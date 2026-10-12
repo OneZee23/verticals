@@ -415,6 +415,31 @@ function pageContext(goal: GoalRef | undefined) {
   }
 }
 
+/** Something wrong, or something that could be better: what a report is (docs/design/bug-reports.md). */
+export type ReportKind = 'bug' | 'request'
+/** The longest the page waits for the agent to tell, a little over what the gateway waits for it (desktop/chat/report_kind.py). */
+const REPORT_KIND_WAIT_MS = 30_000
+
+/** Which kind of report these words are, told by the agent from the words alone, so the person picks nothing. A request when
+ *  there is no agent, when it is slow or cannot tell: that shape loses nothing (the words, the pictures, the version). */
+export async function reportKind(words: string): Promise<ReportKind> {
+  if (!agentChat.available) return 'request'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REPORT_KIND_WAIT_MS)
+  try {
+    const res = await fetch('/__chat/report-kind', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({ words, settings: agentChat.selection ?? {} }),
+    })
+    const data = await res.json().catch(() => ({})) as { kind?: string }
+    return res.ok && data.kind === 'bug' ? 'bug' : 'request'
+  } catch {
+    return 'request'
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Your words, as your balloon at once; while the agent works they wait in the server's queue (S2.P1.015). `settings`
  *  adds to the agent's for this turn: the morning report's `{ sources: 'connected' }` (lib/morning.ts). */
 export async function send(text: string, extra: Record<string, unknown> = {}, settings: Record<string, unknown> = {}): Promise<void> {

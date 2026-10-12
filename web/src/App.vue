@@ -34,7 +34,7 @@ import AgentStep from './components/AgentStep.vue'
 import AgentTag from './components/AgentTag.vue'
 import { ensureMorning } from './lib/morning'
 import { takeSelection } from './lib/pageSelection'
-import { makeReport } from './lib/bugReport'
+import { makeReport } from './lib/report'
 import { reporting } from './lib/reportPictures'
 
 /* The shell, not `Board.vue`, owns the day-rollover watcher: it is mounted for the whole life of
@@ -133,8 +133,8 @@ onUnmounted(() => {
 /* The goal conversation Discuss is opening; a message sent meanwhile waits for it. */
 let goalOpening: Promise<void> | null = null
 async function onSubmit(text: string): Promise<void> {
-  // Pictures wait above the field: the words say what happened, and with them they are a report, in whatever view this is
-  // (lib/bugReport.ts, docs/design/bug-reports.md). It needs no agent.
+  // Pictures wait above the field: the words say what the person sees and what they want, and with them they are a report, in whatever view this is
+  // (lib/report.ts, docs/design/bug-reports.md). The agent is asked only to tell the kind from the words.
   if (reporting.value) {
     commandFilter.text = ''
     void makeReport(text)

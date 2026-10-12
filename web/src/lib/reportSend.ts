@@ -3,6 +3,11 @@
 // What goes is the report's own text as it stands in its document, so a line the person took out of the document stays out.
 // Nothing from the board goes but that text: the link is built here from the document and from nothing else.
 //
+// A bug reads as a bug and a request as a request: the issue link carries the repository's own label for each (`bug` and
+// `enhancement`, GitHub's defaults, which the repository has), and the text itself differs by what the kind carries, the logs
+// for a bug and none for a request. GitHub applies a label from a link only for someone who may label, and ignores it for
+// anyone else, whose issue then waits for the maintainers to label it; the title is never changed.
+//
 // A link cannot carry pictures, so the issue ends with a line saying how many there were and to drag them into the box
 // (the person still has them where they took them), and the document keeps them.
 //
@@ -10,9 +15,12 @@
 // it start at about 8,000 characters. So a link is kept to `LINK_BUDGET`. When the report is longer, the oldest lines of the logs
 // go first (the longer log first, so each keeps its newest lines), and the issue says how many; only when the logs are gone and
 // the words alone are too long are the words cut, at a word, and the issue says so. The document is never changed by this.
+import type { ReportKind } from './agentChat'
 
 /** The new-issue page of Verticals' public repository. */
 export const ISSUES_URL = 'https://github.com/konstantinopolskii/verticals/issues/new'
+/** The repository's labels for each kind of report (`gh label list`: "Something isn't working", "New feature or request"). */
+export const LABELS: Record<ReportKind, string> = { bug: 'bug', request: 'enhancement' }
 /** Where the email draft goes. Empty: the draft opens without a recipient, for the person to address. Verticals' repository
  *  publishes no address; whoever ships a build that has one sets it here. */
 export const DEVELOPERS_EMAIL = ''
@@ -27,6 +35,7 @@ const LOG_HEADING = /^## .+ log$/
 const LOG_LINE = /^`.*`$/
 
 export interface Letter {
+  kind: ReportKind
   title: string
   /** The report's text without its pictures, line by line. */
   lines: string[]
@@ -50,10 +59,10 @@ export function issueTitle(title: string): string {
 }
 
 /** What goes: the document's text, its pictures counted and taken out. */
-export function letterOf(title: string, body: string): Letter {
+export function letterOf(kind: ReportKind, title: string, body: string): Letter {
   const all = body.replace(/\r\n?/g, '\n').split('\n')
   const lines = all.filter((line) => !PICTURE_LINE.test(line.trim()))
-  return { title: issueTitle(title), lines, pictures: all.length - lines.length, cut: 0, shortened: false }
+  return { kind, title: issueTitle(title), lines, pictures: all.length - lines.length, cut: 0, shortened: false }
 }
 
 /** The text of the issue or the email: the report, then what was left out of it. */
@@ -68,7 +77,7 @@ export function textOf(letter: Letter): string {
 }
 
 export function issueLink(letter: Letter): string {
-  return `${ISSUES_URL}?${new URLSearchParams({ title: letter.title, body: textOf(letter) })}`
+  return `${ISSUES_URL}?${new URLSearchParams({ title: letter.title, body: textOf(letter), labels: LABELS[letter.kind] })}`
 }
 export function mailLink(letter: Letter): string {
   return `mailto:${DEVELOPERS_EMAIL}?subject=${encodeURIComponent(letter.title)}&body=${encodeURIComponent(textOf(letter))}`
@@ -130,8 +139,8 @@ export function fit(letter: Letter, link: (letter: Letter) => string, budget = L
 }
 
 /** Both links for a report's document: the issue and the email draft, each as long as its limit allows. */
-export function sendLinks(title: string, body: string): { issue: string; mail: string; letter: Letter } {
-  const letter = letterOf(title, body)
+export function sendLinks(kind: ReportKind, title: string, body: string): { issue: string; mail: string; letter: Letter } {
+  const letter = letterOf(kind, title, body)
   const forIssue = fit(letter, issueLink)
   const forMail = fit(letter, mailLink)
   return { issue: issueLink(forIssue), mail: mailLink(forMail), letter: forIssue }

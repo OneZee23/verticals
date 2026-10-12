@@ -324,7 +324,7 @@ function send(): void {
   const words = commandFilter.text.trim()
   if (!words) return
   // In the Inbox they become the first card in Today, and with pictures above the field they are the report's: no balloon
-  // takes them up (lib/inbox.ts, lib/bugReport.ts).
+  // takes them up (lib/inbox.ts, lib/report.ts).
   if (inboxWriting.value || reporting.value) {
     emit('submit', words)
     return

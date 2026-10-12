@@ -21,9 +21,9 @@ const CAPTIONS: Record<CircleJob, string> = {
  *  simply can invite us to do that"): it rests open with its invitation, and ↵ writes your words down (`lib/inbox.ts`).
  *  Round 9: “"Write to inbox" in field actually.” */
 export const INBOX_CAPTION = 'Write to inbox'
-/** With pictures waiting above it the field is a report's (docs/design/bug-reports.md): it rests open and asks for the words.
- *  While a file is dragged over the window it says what the drop will do. */
-export const REPORT_CAPTION = 'Say what happened'
+/** With pictures waiting above it the field is a report's (docs/design/bug-reports.md): it rests open and asks for the words,
+ *  whether something is wrong or could be better. While a file is dragged over the window it says what the drop will do. */
+export const REPORT_CAPTION = 'Say what you see and what you want'
 export const DROP_CAPTION = 'Drop pictures'
 
 export const circle = reactive({

@@ -48,7 +48,7 @@ def test_pictures_dropped_on_the_window_stand_above_the_field_and_widen_it(ui_f2
 
     field = box(page, SHAPE)
     expect(page.locator(CIRCLE)).to_have_attribute("data-state", "open")
-    expect(page.locator(FIELD)).to_have_attribute("aria-label", "Say what happened")
+    expect(page.locator(FIELD)).to_have_attribute("aria-label", "Say what you see and what you want")
     assert field["width"] > 200
     # Each is 56 px tall and as wide as its picture is (160 x 100 makes 90), in a row 8 px apart, over the field, inside it.
     for n in range(3):
@@ -223,7 +223,7 @@ def test_a_file_dragged_over_the_window_opens_the_field_and_says_what_the_drop_d
 
 
 def test_the_words_beside_the_pictures_narrow_nothing(ui_f2: UiSession) -> None:
-    """Typing in the field filters the board, as Find does; with pictures above it the words say what happened, and the board
+    """Typing in the field filters the board, as Find does; with pictures above it the words say what the person sees and wants, and the board
     stays as it is while they are written."""
     page = ui_f2.page
     _board(page)

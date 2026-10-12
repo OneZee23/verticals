@@ -5,7 +5,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { getDoc, type DocDetail } from './api'
 import { agentChat, currentThread, openForGoal, send } from './agentChat'
-import { isReportPath } from './bugReport'
+import { isReportPath, reportKindOf } from './report'
 import { chipLinks } from './chipLinks'
 import { circleWords } from './circle'
 import { docCard } from './docCard'
@@ -48,9 +48,9 @@ if (typeof window !== 'undefined') {
 export const report = computed(() => (read.doc && read.doc.id === reportDocId.value ? read.doc : null))
 /** The task the report belongs to: the goal that links it (the report is its first document). */
 export const reportTask = computed(() => report.value?.linked_goals[0] ?? null)
-/** The two links, built from the document's text: the issue, and the email draft. */
+/** The two links, built from the document's text: the issue, and the email draft. The kind is the folder the report is in. */
 export const links = computed(() => (report.value
-  ? sendLinks(reportTask.value?.title || report.value.title || 'Report', report.value.body)
+  ? sendLinks(reportKindOf(report.value.path) ?? 'request', reportTask.value?.title || report.value.title || 'Report', report.value.body)
   : null))
 
 /** ⌥ held: the pill is the email draft's, as a Mac's menu item changes while ⌥ is down. */
@@ -70,7 +70,7 @@ export const reportShown = computed(() => sendShown.value || improveShown.value)
 /** What the agent is told. Its conversation is the task's, so the links are what it needs; how a design is written, where it
  *  goes and what happens once it is agreed are the chat's own instructions (desktop/chat/prompt-report.md). */
 export function improveAsk(report: string, task: string): string {
-  return `Improve it. ${report} is a report I made, in ${task}. Write the design document for the change it asks for, link it `
+  return `Improve it. ${report} is a report I made, in ${task}. Write the design document for the change it calls for, link it `
     + 'to that task, and say in two short lines that you are waiting for my comments.'
 }
 
