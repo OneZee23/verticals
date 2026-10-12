@@ -121,7 +121,9 @@ export async function makeReport(words: string): Promise<void> {
       throw error
     }
     clearPictures()
-    commandFilter.text = ''
+    // The field is empty already (↵ took the words); it holds them only when a failed report is tried again. Words typed
+    // since are the person's next ones and stay.
+    if (commandFilter.text.trim() === said) commandFilter.text = ''
     // The answer lands in the field, as an agent's does: with the conversation open, or the keys still in the field, it would
     // have no place to land (the field is the open one while it has them).
     agentChat.open = false

@@ -196,6 +196,38 @@ def test_when_the_agent_cannot_tell_it_is_a_request(ui_agent: UiSession, tmp_pat
     assert words not in log
 
 
+def test_while_the_agent_tells_the_kind_the_field_works_and_a_second_press_does_nothing(ui_agent: UiSession) -> None:  # noqa: F811
+    session = ui_agent
+    page = session.page
+    page.wait_for_selector(".goal-card__row")
+    words = f"{WORDS} [slow]"  # the stand-in agent takes a second and a half to answer
+    drop(page, files(2))
+    expect(page.locator(ITEM)).to_have_count(2)
+    page.locator(FIELD).fill(words)
+    page.keyboard.press("Enter")
+
+    # At once: the line turns, as it does while the agent works, and the pictures wait, dimmed, where they are.
+    expect(page.locator(".circle-field")).to_have_attribute("data-state", "working")
+    expect(page.locator('[data-role="field-pictures"]')).to_have_class(re.compile(r"\bis-sending\b"))
+    expect(page.locator(ITEM)).to_have_count(2)
+    assert not _reports(session.backend.dsn), "nothing is made until the agent has told"
+    # Another press while it waits starts nothing, and words typed meanwhile stay in the field: the pictures cannot be sent
+    # twice, and the person's next words are not lost.
+    page.locator(FIELD).fill("and one more thing")
+    page.keyboard.press("Enter")
+    expect(page.locator(FIELD)).to_have_value("and one more thing")
+
+    expect(page.locator(ITEM)).to_have_count(0, timeout=20000)
+    assert len(_reports(session.backend.dsn)) == 1
+    assert len(_asked(session, KIND)) == 1, "the agent was asked once"
+    expect(page.locator(FIELD)).to_have_value("and one more thing")
+    # With the next words cleared, the answer is there: both chips.
+    page.locator(FIELD).fill("")
+    page.evaluate("document.activeElement?.blur()")
+    expect(page.locator(DOC_CHIP)).to_have_count(1)
+    expect(page.locator(GOAL_CHIP)).to_have_count(1)
+
+
 def test_the_chips_open_what_they_name(ui_agent: UiSession) -> None:  # noqa: F811
     session = ui_agent
     page = session.page
