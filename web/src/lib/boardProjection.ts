@@ -9,6 +9,7 @@
  */
 
 import { columnNames } from './columnNames'
+import { periodHoldsDay, type AdjustableVertical } from './periodNavigation'
 import type { BoardColumn, BoardResponse, GoalCard } from './api'
 import type { BoardColumnData, GoalCardData } from '../types'
 
@@ -136,6 +137,9 @@ export function toColumnData(
   // (docs/design/column-names.md).
   const names = columnNames(col, anchor, today)
   const [full, ...shorter] = names.forms
+  // A paged-away board: this column's own period no longer holds today, and its sign is the single bar that goes back
+  // (docs/design/column-bars.md). Life has no period to leave, and no sign.
+  const away = verticalKey !== 'maybe' && verticalKey !== 'life' && !periodHoldsDay(verticalKey as AdjustableVertical, anchor, today)
   return {
     vertical: verticalKey,
     title: full.name,
@@ -151,5 +155,6 @@ export function toColumnData(
     // `types.ts::BoardColumnData.periodKey`'s own doc comment: the same field `columnNames` above
     // just read to build `title`, carried through unchanged for `dropOnColumn` below.
     periodKey: col.period_key,
+    away,
   }
 }

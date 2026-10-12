@@ -1,24 +1,46 @@
 <script setup lang="ts">
 // The period bars, | ||| | (docs/design/column-bars.md): Verticals pages a column with vertical bars, its own sign, in place of
-// ← • →. The three in the middle are the mode button, the middle one dark: a week in each column for Week, the mode a
-// dragged goal opens on the column's corner (`lib/spansDrag.ts`). Under the pointer a bar comes at each side and steps
-// the column to the period before and after. All three are buttons, named by the column's kind for the keyboard and
-// assistive tech: "Previous week", "Week mode", "Next week".
+// ← • →. The three in the middle are one button, the middle bar dark: the mode a dragged goal opens on the column's
+// corner (`lib/spansDrag.ts`), a week in each column for Week. Under the pointer a bar comes at each side and steps the
+// column to the period before and after.
+//
+// A column whose period no longer holds today (the board is paged away) shows the middle bar alone, `|`, its two light
+// neighbours gone: the owner's rule, "the central one first becomes the single | instead of |||, meaning it will bring you
+// center". That click goes back to today, as the `t` key does, and the sign turns back into three bars; the next click
+// opens the mode. Everything else stands where it did: the two light bars only fade (opacity), so the middle bar, the two
+// side bars and the three boxes keep their places and the hand finds them there.
+//
+// All three are buttons, named for the keyboard and assistive tech by what they do: "Previous week", "Weeks side by
+// side" (or "Today", for the single bar), "Next week".
 import { computed } from 'vue'
 
 const props = withDefaults(defineProps<{
+  /** The column's kind, "Week": names the side bars. */
   kind: string
+  /** What the mode shows, "Weeks": names the three bars. */
+  plural: string
+  /** The column's period no longer holds today: the sign is the single bar that goes back to it. */
+  away?: boolean
   /** Where the words on the line end, in px from the column's left (`ColumnLine.vue`): the left box grows no further. */
   wordsEnd?: number
-}>(), { wordsEnd: 0 })
-const emit = defineEmits<{ step: [direction: -1 | 1]; mode: [] }>()
+}>(), { away: false, wordsEnd: 0 })
+const emit = defineEmits<{ step: [direction: -1 | 1]; mode: []; today: [] }>()
 const noun = computed(() => props.kind.toLowerCase())
+function onMiddle(): void {
+  if (props.away) emit('today')
+  else emit('mode')
+}
 </script>
 
 <template>
-  <!-- The sign's middle stands where it does with or without its sides; each button's own box reaches outward from its
-       bars, so the three never overlap. -->
-  <div class="column-bars" :style="{ '--words-end': `${wordsEnd}px` }" data-cap="period-nav">
+  <!-- The sign's middle stands where it does with or without its sides, and in either look; each button's own box reaches
+       outward from its bars, so the three never overlap. -->
+  <div
+    class="column-bars"
+    :class="{ 'column-bars--away': away }"
+    :style="{ '--words-end': `${wordsEnd}px` }"
+    data-cap="period-nav"
+  >
     <button
       class="column-bars__button column-bars__button--prev column-bars__button--side"
       type="button"
@@ -29,10 +51,10 @@ const noun = computed(() => props.kind.toLowerCase())
     <button
       class="column-bars__button column-bars__button--mode"
       type="button"
-      :aria-label="`${kind} mode`"
-      data-cap="period-mode"
-      @click="emit('mode')"
-    ><span class="column-bars__mark"><i class="column-bars__bar"></i><i class="column-bars__bar column-bars__bar--ink"></i><i class="column-bars__bar"></i></span></button>
+      :aria-label="away ? 'Today' : `${plural} side by side`"
+      :data-cap="away ? 'period-today' : 'period-mode'"
+      @click="onMiddle"
+    ><span class="column-bars__mark"><i class="column-bars__bar column-bars__bar--outer"></i><i class="column-bars__bar column-bars__bar--ink"></i><i class="column-bars__bar column-bars__bar--outer"></i></span></button>
     <button
       class="column-bars__button column-bars__button--next column-bars__button--side"
       type="button"
@@ -117,11 +139,20 @@ const noun = computed(() => props.kind.toLowerCase())
   transition: background-color var(--motion-bars) var(--vt-ease-large);
 }
 .column-bars__bar--ink { background: #2d3036; }
+/* The sign's two light bars go and come with the column's period, as one movement with the page's own change: opacity
+   only, in the title's 150 ms, so every place stays (a bar that leaves the layout would move the middle one). Their look
+   under the pointer keeps its own timing and leaves this one alone. */
+.column-bars__bar--outer {
+  transition: background-color var(--motion-bars) var(--vt-ease-large), opacity var(--motion-title) var(--vt-ease-small);
+}
+.column-bars--away .column-bars__bar--outer { opacity: 0; }
 .column-bars__button:focus-visible { outline: none; }
 /* Pressed, a bar looks as it does in a keyboard's focus: it answers at the press, on a touch screen too, where nothing
    hovers; the action itself fires on release over the same button. */
 .column-bars__button:focus-visible .column-bars__bar,
 .column-bars__button:active .column-bars__bar { background: #2d3036; transition: none; }
+.column-bars__button:focus-visible .column-bars__bar--outer,
+.column-bars__button:active .column-bars__bar--outer { transition: opacity var(--motion-title) var(--vt-ease-small); }
 .column-bars__button:focus-visible .column-bars__mark,
 .column-bars__button:active .column-bars__mark { background: rgb(45 48 54 / 8%); }
 /* Nothing hovers on a touch screen, so the side bars stay in view there; where a pointer can hover they come with it:
@@ -140,6 +171,7 @@ const noun = computed(() => props.kind.toLowerCase())
     transition: none;
   }
   .column-bars__button:hover .column-bars__bar { background: #2d3036; transition: none; }
+  .column-bars__button:hover .column-bars__bar--outer { transition: opacity var(--motion-title) var(--vt-ease-small); }
 }
 /* A search that finds nothing turns the board off, the bars with the column's names (FindingSections.vue). */
 .pattern-vertical-board--nothing-found .column-bars {

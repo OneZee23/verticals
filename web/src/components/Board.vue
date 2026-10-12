@@ -112,6 +112,8 @@ function navigatePeriod(vertical: string, direction: PeriodDirection) {
   void loadPeriod(adjacentPeriodAnchor(anchor, vertical as AdjustableVertical, direction), direction)
 }
 
+/* The `t` key, and the single bar a column away from today shows (docs/design/column-bars.md): every column back on the
+   period that holds today. */
 function navigateToday() {
   const today = todayIso()
   const current = store.state.board?.anchor_date
@@ -268,11 +270,13 @@ onBeforeUnmount(() => document.body.classList.remove('pattern-vertical-board__no
       :add-placeholder="column.addPlaceholder"
       :goals="column.goals"
       :period-key="column.periodKey"
+      :away="column.away"
       :period-direction="periodDirection"
       :period-swap-id="periodSwapId"
       @mouseenter="previewColumn(column.vertical)"
       @pointermove="previewColumn(column.vertical)"
       @period-step="navigatePeriod"
+      @period-today="navigateToday"
       @period-mode="openMode"
     />
   </KCardStack>

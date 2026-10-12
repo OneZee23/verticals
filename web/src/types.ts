@@ -65,6 +65,9 @@ export interface BoardColumnData {
    *  `lib/columnNames.ts::columnNames` already reads to build the header's own name — one field,
    *  read twice, never recomputed independently. */
   periodKey?: string | null
+  /** The board is paged away from today and this column's own period no longer holds it, so its sign is the single bar
+   *  that brings the board back (docs/design/column-bars.md). False for a column that holds today, and for Life. */
+  away?: boolean
 }
 
 export interface BoardData {

@@ -28,10 +28,16 @@ export interface ColumnNames {
 const KINDS: Record<string, string> = {
   day: 'Day', week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year', decade: 'Three years', life: 'Life',
 }
-/** A scale's kind, "Week": what a column's bars are named by, "Previous week", "Week mode", "Next week"
+/** A scale's kind, "Week": what a column's side bars are named by, "Previous week", "Next week"
  *  (docs/design/column-bars.md). */
 export function kindOf(vertical: string): string {
   return KINDS[vertical] ?? vertical
+}
+/** What a scale's mode shows, in the plural, "Weeks": the three bars are named "Weeks side by side"
+ *  (docs/design/column-bars.md). Three years is its own plural. */
+export function pluralOf(vertical: string): string {
+  const kind = kindOf(vertical)
+  return vertical === 'decade' ? kind : `${kind}s`
 }
 /** The scales whose name doesn't say its year; the kind line does, when it isn't this one. Year and three years are
  *  their years, and life has none. */

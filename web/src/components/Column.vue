@@ -12,7 +12,7 @@ import ColumnDots from './ColumnDots.vue'
 import type { SpanScale } from '../lib/spans'
 import { store } from '../store'
 import { playSound } from '../lib/sound'
-import { kindOf, kindTail } from '../lib/columnNames'
+import { kindOf, kindTail, pluralOf } from '../lib/columnNames'
 import type { PeriodDirection } from '../lib/periodNavigation'
 import type { GoalCardData, NameForm } from '../types'
 import { filterActive } from '../lib/commandFilter'
@@ -43,16 +43,21 @@ const props = withDefaults(
     /** The wide column that floats over the spans (SpansBoard.vue): it doesn't page, so it has neither the period bars nor
      *  the line pinned at its top (docs/design/column-bars.md). */
     floating?: boolean
+    /** The board is paged away from today and this column's period no longer holds it: its sign is the single bar that
+     *  brings the board back (docs/design/column-bars.md). */
+    away?: boolean
   }>(),
   {
     subLabel: '', shorter: () => [], label: '', active: false, deckActive: false, deckMain: false, addPlaceholder: 'Add…', periodKey: null,
-    periodDirection: 1, periodSwapId: 0, span: false, end: '', floating: false,
+    periodDirection: 1, periodSwapId: 0, span: false, end: '', floating: false, away: false,
   },
 )
 
 const emit = defineEmits<{
   'period-step': [vertical: string, direction: PeriodDirection]
-  /** The middle bar: this column's spans, the mode a dragged goal opens on its corner (Board.vue). */
+  /** The single bar of a column that is away from today: the board goes back to it (Board.vue). */
+  'period-today': []
+  /** The middle bar of a column that holds today: this column's spans, the mode a dragged goal opens on its corner (Board.vue). */
   'period-mode': [vertical: string, periodKey: string | null]
 }>()
 
@@ -348,8 +353,11 @@ onBeforeUnmount(() => swapAnimation?.cancel())
     <ColumnBars
       v-if="paging && !dragging"
       :kind="kindOf(vertical)"
+      :plural="pluralOf(vertical)"
+      :away="away"
       :words-end="wordsEnd"
       @step="(direction) => emit('period-step', vertical, direction)"
+      @today="emit('period-today')"
       @mode="emit('period-mode', vertical, periodKey)"
     />
     <ColumnDots v-if="dragging && vertical !== 'life' && vertical !== 'maybe' && !span" :vertical="vertical as SpanScale" />
