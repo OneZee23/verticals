@@ -167,13 +167,13 @@ def test_delete_shows_its_red(ui_f2: UiSession) -> None:
 
 
 def test_the_agent_group_comes_first_and_only_where_an_agent_is(ui_agent: UiSession) -> None:  # noqa: F811
-    """Agent over Discuss, then the rest; the other groups and their lines do not move for it."""
+    """Agent over Discuss, Start work and Open in, then the rest; the other groups and their lines do not move for it."""
     page = ui_agent.page
     page.wait_for_selector('[data-goal-id="SYNCOL03"]')
     _menu(page, "SYNCOL03", "day")
     expect(page.locator(f'{MENU} [data-menu-section="agent"]')).to_have_count(1)
     assert _groups(page) == [
-        {"name": "agent", "heading": "Agent", "items": ["Discuss"], "line": False},
+        {"name": "agent", "heading": "Agent", "items": ["Discuss", "Start work", "Open in"], "line": False},
         {**RESCHEDULE, "line": True},
         MOVE,
         DELETE,

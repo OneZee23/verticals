@@ -32,6 +32,7 @@ import AgentConversation from './components/AgentConversation.vue'
 import AgentStep from './components/AgentStep.vue'
 import AgentTag from './components/AgentTag.vue'
 import { ensureMorning } from './lib/morning'
+import { startSessionWatch } from './lib/taskSessions'
 import { takeSelection } from './lib/pageSelection'
 
 /* The shell, not `Board.vue`, owns the day-rollover watcher: it is mounted for the whole life of
@@ -187,12 +188,12 @@ function onConversationLink(url: string, web: boolean, from: Element | null): vo
 /* Discuss with agent: the goal pops out of its row into a window, the board goes out of focus, and the goal's latest
    conversation rises over the card (S3.P2.002, S3.P1.002). */
 function onDiscussGoal(event: Event): void {
-  const { id, session } = ((event as CustomEvent).detail ?? {}) as { id?: string; session?: string }
+  const { id, session, provider } = ((event as CustomEvent).detail ?? {}) as { id?: string; session?: string; provider?: string }
   if (!id || !agentChat.available) return
   const row = document.querySelector<HTMLElement>(`.goal-card[data-goal-id="${CSS.escape(id)}"] > .goal-card__row`)
   const title = row?.querySelector<HTMLElement>('.goal-card__title-text')?.innerText.trim() || 'Goal'
   openWindow({ kind: 'goal', target: id, title }, row)
-  if (session) openThread(session, { id, title })
+  if (session) openThread(session, { id, title }, provider)
   else goalOpening = openForGoal({ id, title }).then(() => undefined).finally(() => { goalOpening = null })
   agentChat.open = true
   agentChat.engaged = true
@@ -233,7 +234,7 @@ function onWindowsKey(event: KeyboardEvent): void {
 }
 onMounted(() => {
   // The morning report is looked for once the agent has answered (lib/morning.ts).
-  void startAgentChat().then(() => void morningCheck())
+  void startAgentChat().then(() => { startSessionWatch(); return morningCheck() })
   window.addEventListener('verticals:discuss-goal', onDiscussGoal)
   window.addEventListener('verticals:replan', onReplan)
   window.addEventListener('verticals:open-goal-window', onOpenGoalWindow)
