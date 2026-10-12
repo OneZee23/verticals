@@ -76,6 +76,10 @@ class Alone:
         if not self.claude_mcp.exists():
             self.claude_mcp.write_text('{"mcpServers": {}}')
 
+    def claude_config(self, session_id=None):
+        """The MCP configuration the agent starts with, whatever conversation it is in: none, so no call is anybody's answer."""
+        return self.claude_mcp
+
     def remember_models(self, provider, raw):
         pass
 

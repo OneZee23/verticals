@@ -69,7 +69,7 @@ def test_the_prompt_says_what_a_report_is_and_how_a_design_and_its_pull_request_
 def test_the_reports_come_in_every_turn_but_the_unattended_morning_one() -> None:
     chat = _chat()
     chat.JsonProcess, chat.which = _Proc, lambda provider: "claude"
-    host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."))
+    host = types.SimpleNamespace(claude_config=lambda session_id=None: Path("mcp.json"), workdir=Path("."))
     for settings, wanted in (({"permission": "manual"}, True), ({"permission": "board"}, True), ({"sources": "connected"}, False)):
         agent = chat.ClaudeAgent(host, _Session(), chat.clean_settings(settings), None)
         args = agent.proc.args
