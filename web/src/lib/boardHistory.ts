@@ -27,9 +27,9 @@ export interface Step {
   words(direction: 'undo' | 'redo'): Segment[] | null
   /** Whether goals move on the board when the step is applied, so the rows glide (`lib/undoGlide.ts`). */
   glides(direction: 'undo' | 'redo'): boolean
-  /** Looks at what the goals hold now, before the step is applied, so that the board can move in the same breath as the key
-   *  (`lib/boardRestore.ts`, `holdings`). */
-  prepare?(direction: 'undo' | 'redo'): Promise<void>
+  /** Asks the server what the goals hold, as the step begins (`lib/boardRestore.ts`, `holdings`): nothing waits for the answer
+   *  but a write, so the board moves in the same breath as the key. */
+  prepare?(direction: 'undo' | 'redo'): void
   /** A step that holds goals against what they were left as (`lib/boardRestore.ts`) says what stayed; the others, how it went. */
   undo(): Promise<Outcome | Applied>
   redo(): Promise<Outcome | Applied>
@@ -163,13 +163,13 @@ function editStep(pairs: Pair[], mainId: string): Step {
   const afters = pairs.map((p) => ({ shot: p.after, change: changeBetween(p.after, p.before), expect: p.before }))
   const main = pairs.find((p) => p.before.id === mainId) ?? pairs[0]!
   const structural = pairs.some(({ before, after }) => parentDiffers(before, after) || placeDiffers(before, after) || slotDiffers(before, after))
-  let held: Map<string, Shot | null> | undefined
+  let held: Map<string, Promise<Shot | null>> | undefined
   return {
     id: mainId,
     title: main.before.title,
     glides: () => structural,
-    prepare: async (direction) => {
-      held = await holdings(ports!, direction === 'undo' ? befores : afters).catch(() => undefined)
+    prepare: (direction) => {
+      held = holdings(ports!, direction === 'undo' ? befores : afters)
     },
     words: (direction) => direction === 'undo'
       ? putBackWords(main.before.title)
@@ -250,7 +250,7 @@ async function apply(direction: 'undo' | 'redo'): Promise<void> {
   const step = from.pop()
   if (!step) return
   dismiss() // whatever a notice offered is being done now
-  await step.prepare?.(direction)
+  step.prepare?.(direction)
   const run = (): Promise<Outcome | Applied> => (direction === 'undo' ? step.undo() : step.redo())
   let outcome: Outcome
   let applied: Applied | null = null
