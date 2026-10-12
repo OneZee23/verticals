@@ -56,6 +56,7 @@ from playwright.sync_api import (
 
 from tests.harness.report import artifact, scenario_id_of
 from tests.ui.gesture_counter import GestureCounter
+from tests.ui.undo_helpers import sent_body
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = REPO_ROOT / "web"
@@ -510,7 +511,8 @@ class UiSession:
     failed_requests: list[str] = field(default_factory=list)
     bad_responses: list[str] = field(default_factory=list)
     #: Every completed request this session's page has issued, in order:
-    #: `{"method", "url", "status", "headers"}`. Not part of E2E.md §6's teardown dump (that is
+    #: `{"method", "url", "status", "headers", "body"}` (`body`: what a write carried, cut at 400
+    #: characters, so a scenario that counts writes can say which ones it counted). Not part of E2E.md §6's teardown dump (that is
     #: `failed_requests`/`bad_responses` only) — this is a general request log so an individual
     #: scenario can assert its own exact request count/content (S-64's "exactly 1 request to
     #: `/api/goals`", S-65's create POST, S-125's `GET /api/search?q=cycl` and its Origin-header
@@ -629,6 +631,7 @@ def _make_ui_session(
                 "url": req.url,
                 "status": req.response().status if req.response() else None,
                 "headers": req.headers,
+                "body": sent_body(req),
             }
         ),
     )
