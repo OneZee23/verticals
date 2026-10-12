@@ -34,6 +34,8 @@ import AgentStep from './components/AgentStep.vue'
 import AgentTag from './components/AgentTag.vue'
 import { ensureMorning } from './lib/morning'
 import { takeSelection } from './lib/pageSelection'
+import { makeReport } from './lib/bugReport'
+import { reporting } from './lib/reportPictures'
 
 /* The shell, not `Board.vue`, owns the day-rollover watcher: it is mounted for the whole life of
    the tab, while `Board` unmounts every time Inbox is active — a planner left on Inbox overnight
@@ -131,6 +133,13 @@ onUnmounted(() => {
 /* The goal conversation Discuss is opening; a message sent meanwhile waits for it. */
 let goalOpening: Promise<void> | null = null
 async function onSubmit(text: string): Promise<void> {
+  // Pictures wait above the field: the words say what happened, and with them they are a report, in whatever view this is
+  // (lib/bugReport.ts, docs/design/bug-reports.md). It needs no agent.
+  if (reporting.value) {
+    commandFilter.text = ''
+    void makeReport(text)
+    return
+  }
   // In the Inbox the field writes things down: your words land first in Today, with or without an agent (lib/inbox.ts).
   if (inboxWriting.value) {
     commandFilter.text = ''
