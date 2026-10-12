@@ -20,7 +20,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.ui.conftest import _DIALOG_RECORDER_SCRIPT, _MORNING_ASKED_SCRIPT, UiSession, activate_column, expand_column
+from tests.ui.conftest import _DIALOG_RECORDER_SCRIPT, UiSession, activate_column, expand_column
 
 STRIP = '[data-role="column-strip"]'
 SPANS = '[data-role="spans-board"]'
@@ -701,7 +701,6 @@ def test_on_touch_the_side_bars_stay_in_view(ui_f2: UiSession) -> None:
     context = ui_f2.context.browser.new_context(
         viewport={"width": 390, "height": 800}, has_touch=True, is_mobile=True, reduced_motion="reduce")
     context.add_init_script(script=_DIALOG_RECORDER_SCRIPT)
-    context.add_init_script(script=_MORNING_ASKED_SCRIPT)
     page = context.new_page()
     try:
         page.clock.set_fixed_time("2026-08-08T09:00:00+03:00")
