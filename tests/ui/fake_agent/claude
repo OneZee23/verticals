@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each
-message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[slow]` works
-for a second and a half, `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers
-with the words after it, and `[context]` with the app context Verticals sent."""
+message by marks in its words: `[tool:NAME]` shows Verticals' tool NAME at work, `[tool:NAME {"id": "X"}]` really calls it
+(over MCP, the way Claude does, with the connection the gateway wrote for this conversation: `--mcp-config`), `[ask]` asks
+permission first, `[slow]` works for a second and a half, `[wait:N]` works for N seconds, `[long]` answers in three paragraphs, `[fail]` ends the turn with
+an error, `[say]` answers with the words after it, and `[context]` with the app context Verticals sent."""
 import json
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
 
 
 def out(obj):
@@ -19,6 +22,33 @@ def read():
     return json.loads(line) if line.strip() else None
 
 
+def tool_marks(words):
+    """`[tool:NAME]` and `[tool:NAME {json}]` marks in `words`: (name, arguments or None, start, end) for each."""
+    marks, at = [], 0
+    while (found := re.compile(r"\[tool:([a-z_]+)").search(words, at)):
+        end, arguments = found.end(), None
+        rest = words[end:]
+        trimmed = rest.lstrip()
+        if trimmed.startswith("{"):
+            try:
+                arguments, used = json.JSONDecoder().raw_decode(trimmed)
+                end += len(rest) - len(trimmed) + used
+            except ValueError:
+                arguments = None
+        close = words.find("]", end)
+        if close == -1:
+            break
+        marks.append((found.group(1), arguments, found.start(), close + 1))
+        at = close + 1
+    return marks
+
+
+def without_tool_marks(words):
+    for _name, _arguments, start, end in reversed(tool_marks(words)):
+        words = words[:start] + words[end:]
+    return words
+
+
 def answer_for(words):
     if "[say]" in words:
         return words.split("[say]", 1)[1].strip()
@@ -26,8 +56,63 @@ def answer_for(words):
         return ("Here is the first part of a longer answer, with **bold** words.\n\n"
                 "The second part goes on about the plan, the dates and what could move next week.\n\n"
                 "The third part closes it with one more line to read.")
-    said = re.sub(r"\[[a-z:_]+\]", "", words).strip()
+    said = re.sub(r"\[(?:[a-z:_]+|wait:[0-9.]+)\]", "", without_tool_marks(words)).strip()
     return f"Done: {said}" if said else "Done."
+
+
+class Mcp:
+    """Verticals' MCP server as Claude reaches it: the url and the headers of `--mcp-config` (the bearer token, and the
+    conversation this agent belongs to), streamable HTTP, one session for the whole run."""
+
+    def __init__(self):
+        self.server, self.session, self.version, self.next_id = None, None, "2025-06-18", 0
+        if "--mcp-config" in sys.argv:
+            try:
+                with open(sys.argv[sys.argv.index("--mcp-config") + 1]) as config:
+                    self.server = json.load(config)["mcpServers"]["verticals"]
+            except (OSError, ValueError, KeyError, IndexError):
+                self.server = None
+
+    def post(self, payload):
+        headers = {**self.server.get("headers", {}), "Content-Type": "application/json",
+                   "Accept": "application/json, text/event-stream"}
+        if self.session:
+            headers["Mcp-Session-Id"], headers["MCP-Protocol-Version"] = self.session, self.version
+        request = urllib.request.Request(self.server["url"], json.dumps(payload).encode(), headers, method="POST")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body, kind = response.read().decode(), response.headers.get("content-type", "")
+            self.session = response.headers.get("mcp-session-id") or self.session
+        if "id" not in payload:
+            return None
+        messages = [json.loads(line[5:]) for line in body.splitlines() if line.startswith("data:")] \
+            if "event-stream" in kind else [json.loads(body)]
+        return next((m for m in messages if m.get("id") == payload["id"]), None)
+
+    def request(self, method, params):
+        self.next_id += 1
+        return self.post({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params})
+
+    def call(self, name, arguments):
+        """(text, is_error) of one tool call."""
+        if self.server is None:
+            return "No connection to Verticals.", True
+        try:
+            if self.session is None:
+                started = self.request("initialize", {"protocolVersion": self.version, "capabilities": {},
+                                                      "clientInfo": {"name": "fake-claude", "version": "0"}})
+                self.version = started["result"].get("protocolVersion", self.version)
+                self.post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            reply = self.request("tools/call", {"name": name, "arguments": arguments})
+        except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError) as error:
+            return f"The call failed: {error}", True
+        if reply is None or "error" in reply:
+            return f"The call failed: {(reply or {}).get('error')}", True
+        result = reply["result"]
+        text = "".join(block.get("text", "") for block in result.get("content", []) if block.get("type") == "text")
+        return text[:2000], bool(result.get("isError"))
+
+
+mcp = Mcp()
 
 
 started = False
@@ -56,14 +141,21 @@ for msg in iter(read, None):
             "subtype": "can_use_tool", "tool_name": "mcp__verticals__update", "input": {"id": "x"}}})
         while (reply := read()) is not None and reply.get("type") != "control_response":
             pass
-    for name in re.findall(r"\[tool:([a-z_]+)\]", words):
+    for number, (name, arguments, _start, _end) in enumerate(tool_marks(words)):
+        use = f"tool-{name}-{number}"
         out({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "id": f"tool-{name}", "name": f"mcp__verticals__{name}", "input": {}}]}})
-        time.sleep(0.3)
+            {"type": "tool_use", "id": use, "name": f"mcp__verticals__{name}", "input": arguments or {}}]}})
+        if arguments is None:
+            time.sleep(0.3)
+            text, failed = "ok", False
+        else:
+            text, failed = mcp.call(name, arguments)
         out({"type": "user", "message": {"content": [
-            {"type": "tool_result", "tool_use_id": f"tool-{name}", "content": "ok"}]}})
+            {"type": "tool_result", "tool_use_id": use, "content": text, **({"is_error": True} if failed else {})}]}})
     if "[slow]" in words:
         time.sleep(1.5)
+    for seconds in re.findall(r"\[wait:([0-9.]+)\]", words):
+        time.sleep(float(seconds))
     if "[fail]" in words:
         out({"type": "result", "is_error": True, "result": "The fake agent failed on purpose."})
         continue

@@ -25,14 +25,15 @@ from tests.ui.views import FIELD
 
 
 @contextmanager
-def _agent_gateway(backend: Server, tmp_path: Path) -> Iterator[str]:
-    """The desktop gateway over this test's backend, its agent the fake one (`tests/ui/agent_gateway.py`)."""
+def _agent_gateway(backend: Server, tmp_path: Path, mcp_url: str | None = None) -> Iterator[str]:
+    """The desktop gateway over this test's backend, its agent the fake one (`tests/ui/agent_gateway.py`). With `mcp_url` the
+    agent's marked calls reach that MCP server."""
     port = _free_port()
     log_path = tmp_path / "gateway.log"
     with open(log_path, "w") as logfile:
         proc = subprocess.Popen(
             [sys.executable, str(REPO_ROOT / "tests" / "ui" / "agent_gateway.py"), str(port), str(backend.port),
-             str(tmp_path / "desktop-state"), TEST_TOKEN],
+             str(tmp_path / "desktop-state"), TEST_TOKEN, *([mcp_url] if mcp_url else [])],
             cwd=REPO_ROOT, stdout=logfile, stderr=subprocess.STDOUT, start_new_session=True,
         )
     base_url = f"http://127.0.0.1:{port}"
