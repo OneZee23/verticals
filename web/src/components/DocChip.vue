@@ -2,14 +2,16 @@
 // A document as one thing in a list (Inbox and Documents redesign, rounds 9–10; .local-design/inbox-and-docs/final, "A
 // document as a chip"): its own first page on the left, as tall as three lines (50 × 67), and on the right its name, two
 // lines at most, and when it was edited, from the top. In a message it sits on the balloon's black; in the Inbox it is a
-// ghost on the desk until the pointer brings it to life. A click opens the document as a window (S3.P4).
+// ghost on the desk until the pointer brings it to life. A click opens the document as a window (S3.P4). A source (the
+// Inbox's Sources row, lib/sources.ts) is a document too: the line under its name is its state, "checked 07:00", and in red
+// "not answering since 06:00", where a document says when it was edited.
 import { computed } from 'vue'
 import DocPage from './DocPage.vue'
 import { docCard, type DocCard } from '../lib/docCard'
 import { whenEdited } from '../lib/docsDesk'
 import { openWindow } from '../lib/windows'
 
-const props = defineProps<{ id: string; doc?: DocCard | null; dark?: boolean; label?: string }>()
+const props = defineProps<{ id: string; doc?: DocCard | null; dark?: boolean; label?: string; note?: string; tone?: 'ok' | 'grey' | 'red' }>()
 
 const card = computed(() => props.doc ?? docCard(props.id))
 /* A document with no title is called by its file's name. */
@@ -25,7 +27,8 @@ function open(event: Event): void {
     <span class="doc-chip__page"><DocPage v-if="card" :doc="card" :width="50" /></span>
     <span class="doc-chip__text">
       <span class="doc-chip__name">{{ name }}</span>
-      <span v-if="card" class="doc-chip__when">{{ whenEdited(card.updated_at) }}</span>
+      <span v-if="note" class="doc-chip__when" :class="{ 'doc-chip__when--red': tone === 'red' }" data-role="source-state" :data-tone="tone">{{ note }}</span>
+      <span v-else-if="card" class="doc-chip__when">{{ whenEdited(card.updated_at) }}</span>
     </span>
   </button>
 </template>
@@ -42,6 +45,8 @@ function open(event: Event): void {
   font: 500 15px/22px var(--font-body, Commissioner, system-ui, sans-serif); overflow-wrap: anywhere; }
 .doc-chip__when { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font: 400 13px/22px var(--font-body, Commissioner, system-ui, sans-serif); color: rgb(45 48 54 / 60%); }
+/* A source that stopped answering: the one coloured line in the Inbox (the app's one red, the danger item's). */
+.doc-chip__when.doc-chip__when--red { color: #c93a5b; }
 /* Under the pointer it turns white and comes alive at once; it settles back in 200 ms. */
 @media (hover: hover) and (pointer: fine) {
   .doc-chip:not(.doc-chip--dark):hover { background: #fff; transform: translateY(-1px); transition-duration: 0s;

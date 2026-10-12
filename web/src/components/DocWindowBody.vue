@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // A document in a window (docs/design-handoff S3.P4): the document as the Docs view draws it, opened at the part the
 // answer points to; a link to a deleted one says so in words. Its head is one line (round 2, frame f2b; round 5, m3–m5):
-// the facts its page shows on the circle or the desk, its versions, and its title once the title has scrolled away.
+// the facts its page shows on the circle or the desk, its versions, and its title once the title has scrolled away. A
+// source (a document under sources/) carries its state over its title (SourceStrip.vue).
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import DocDetail from './DocDetail.vue'
+import SourceStrip from './SourceStrip.vue'
 import { ApiError, getDoc, type DocDetail as DocWire } from '../lib/api'
 import { windows } from '../lib/windows'
 import { shortDay, stackGoalOf } from '../lib/docsDesk'
+import { isSourcePath } from '../lib/sources'
 
 const props = defineProps<{ id: string; part?: string }>()
 const root = ref<HTMLElement | null>(null)
@@ -82,6 +85,7 @@ watch(() => props.part, () => void nextTick(showPart))
 
 <template>
   <div ref="root" class="doc-window" data-role="doc-window">
+    <SourceStrip v-if="doc && isSourcePath(doc.path)" :id="doc.id" />
     <DocDetail v-if="doc" :key="doc.id" :doc="doc" in-window />
     <p v-else-if="gone" class="doc-window__note" data-role="doc-gone">This document was deleted</p>
     <p v-else class="doc-window__note">Opening…</p>

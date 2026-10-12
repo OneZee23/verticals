@@ -1,4 +1,6 @@
-/** IR-09's deliberately bounded Markdown model. Unsupported syntax stays ordinary text.
+/** IR-09's deliberately bounded Markdown model. Unsupported syntax stays ordinary text. A fenced block
+ *  (a line of three backticks and an optional name, the text, a line of three backticks) is one block of its own: set quietly
+ *  as written, never edited here, and written back exactly as it was. A fence with no closing line is not one.
  *  A link is external (`http(s):`/`mailto:`, the S-72 allowlist; the browser follows it) or
  *  in-app (`goal:<id>`/`doc:<path>`; `lib/docsView.ts::followBodyLink` follows it).
  *  An image `![alt](src)` takes its own, narrower allowlist: see `isAllowedImageSrc`. */
@@ -14,6 +16,7 @@ export type Block =
   | { tag: 'heading'; level: number; runs: Run[] }
   | { tag: 'ul' | 'ol'; items: ListItem[] }
   | { tag: 'table'; rows: Run[][][] }
+  | { tag: 'code'; info: string; lines: string[] }
 
 const CONTROL_OR_SPACE_RE = /[\s\x00-\x1f\x7f-\x9f]/g
 const ALLOWED_SCHEME_RE = /^(https?:|mailto:)/
@@ -47,6 +50,15 @@ const LIST_ITEM_RE = /^(\s*)(?:[-*+]|\d+\.)\s+(.*)$/
 const ORDERED_ITEM_RE = /^\s*\d+\./
 const HEADING_RE = /^(#{1,6})\s+(.*)$/
 const TABLE_DIVIDER_CELL_RE = /^:?-{3,}:?$/
+const FENCE_OPEN_RE = /^```([^`]*)$/
+const FENCE_CLOSE_RE = /^[ \t]*```[ \t]*$/
+
+/** Where the fence that opens at `index` closes, or -1: no opening line here, or no closing line below it. */
+function fenceEnd(lines: string[], index: number): number {
+  if (!FENCE_OPEN_RE.test(lines[index])) return -1
+  for (let at = index + 1; at < lines.length; at++) if (FENCE_CLOSE_RE.test(lines[at])) return at
+  return -1
+}
 
 function splitTableRow(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
@@ -137,6 +149,12 @@ export function parseBody(body: string): Block[] {
       index++
       continue
     }
+    const fenced = fenceEnd(lines, index)
+    if (fenced >= 0) {
+      blocks.push({ tag: 'code', info: FENCE_OPEN_RE.exec(lines[index])![1].trimEnd(), lines: lines.slice(index + 1, fenced) })
+      index = fenced + 1
+      continue
+    }
     const heading = HEADING_RE.exec(lines[index])
     if (heading) {
       blocks.push({ tag: 'heading', level: heading[1].length, runs: tokenizeInline(heading[2]) })
@@ -172,6 +190,7 @@ export function parseBody(body: string): Block[] {
       && !HEADING_RE.test(lines[index])
       && !isTableStart(lines, index)
       && !LIST_ITEM_RE.test(lines[index])
+      && fenceEnd(lines, index) < 0
     ) {
       if (runs.length) runs.push({ kind: 'break' })
       runs.push(...tokenizeInline(lines[index]))
@@ -202,6 +221,7 @@ export function serializeBlocks(blocks: Block[]): string {
   return blocks.map((block) => {
     if (block.tag === 'p') return serializeRuns(block.runs)
     if (block.tag === 'heading') return `${'#'.repeat(block.level)} ${serializeRuns(block.runs)}`
+    if (block.tag === 'code') return ['```' + block.info, ...block.lines, '```'].join('\n')
     if (block.tag === 'table') {
       const width = Math.max(1, ...block.rows.map((row) => row.length))
       const renderRow = (row: Run[][]) => {
@@ -282,6 +302,19 @@ export function renderBodyElement(root: HTMLElement, body: string): void {
       heading.className = 'goal-detail__body-heading'
       for (const run of block.runs) appendRun(heading, run)
       fragment.append(heading)
+      continue
+    }
+    if (block.tag === 'code') {
+      // The kit's block-code rail, set quietly. Not editable: what is written in it (a source's check, an agent's table) is
+      // read, never typed over, and `serializeBodyElement` writes the same lines back.
+      const pre = document.createElement('pre')
+      pre.className = 't-code--block goal-detail__body-code'
+      pre.contentEditable = 'false'
+      pre.setAttribute('data-md-fence', block.info)
+      const code = document.createElement('code')
+      code.textContent = block.lines.join('\n')
+      pre.append(code)
+      fragment.append(pre)
       continue
     }
     if (block.tag === 'table') {
@@ -404,6 +437,10 @@ export function serializeBodyElement(root: HTMLElement): string {
     if (/^h[1-6]$/.test(tag)) {
       flushInline()
       blocks.push(`${'#'.repeat(Number(tag[1]))} ${serializeInline(node)}`)
+    } else if (tag === 'pre' && node.hasAttribute('data-md-fence')) {
+      flushInline()
+      const text = node.textContent ?? ''
+      blocks.push(['```' + (node.getAttribute('data-md-fence') ?? ''), ...(text === '' ? [] : text.split('\n')), '```'].join('\n'))
     } else if (tag === 'table') {
       flushInline()
       const table = serializeTableElement(node)
