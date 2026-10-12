@@ -119,12 +119,20 @@ async function setFields(ports: RestorePorts, now: Shot, target: Shot, change: C
   }
 }
 
-async function setPlace(ports: RestorePorts, target: Shot): Promise<void> {
+/** What a setter waits for between the board's move and the write: the server's word that the goal still holds what the step
+ *  left. `false`: it does not, and the move is taken back. Without one the write goes at once. */
+type Hold = () => Promise<boolean>
+
+async function setPlace(ports: RestorePorts, target: Shot, hold?: Hold): Promise<boolean> {
   const board = ports.board()
   const id = target.id
   const vertical = target.vertical as VerticalScale | null
   if (vertical === null) {
     const placement = schedulePlacement(board, id, { vertical: null, periodKey: null }, null)
+    if (hold && !(await hold())) {
+      placement?.rollback()
+      return false
+    }
     try {
       const updated = await scheduleGoal(id, null, null)
       if (placement) placement.reconcile(updated)
@@ -133,11 +141,15 @@ async function setPlace(ports: RestorePorts, target: Shot): Promise<void> {
       placement?.rollback()
       throw err
     }
-    return
+    return true
   }
   const slot = target.before ?? null
   const ordering = scheduleOrdering(board, id, { insertBeforeId: slot, vertical, periodKey: target.period_key })
   const placement = schedulePlacement(board, id, { vertical, periodKey: target.period_key }, target.anchor_date, slot)
+  if (hold && !(await hold())) {
+    placement?.rollback()
+    return false
+  }
   try {
     const updated = await scheduleGoal(id, vertical, target.anchor_date, ordering ?? undefined)
     placement?.reconcile(updated)
@@ -147,10 +159,15 @@ async function setPlace(ports: RestorePorts, target: Shot): Promise<void> {
     placement?.rollback()
     throw err
   }
+  return true
 }
 
-async function setParent(ports: RestorePorts, target: Shot): Promise<void> {
+async function setParent(ports: RestorePorts, target: Shot, hold?: Hold): Promise<boolean> {
   const placement = reparentPlacement(ports.board(), target.id, target.parent_id)
+  if (hold && !(await hold())) {
+    placement?.rollback()
+    return false
+  }
   try {
     const updated = await reparentGoal(target.id, target.parent_id)
     if (placement) placement.reconcile(updated)
@@ -159,6 +176,7 @@ async function setParent(ports: RestorePorts, target: Shot): Promise<void> {
     placement?.rollback()
     throw err
   }
+  return true
 }
 
 /** The goal the shot says follows it, when that goal is still in the group it is in now; otherwise the end of the list. */
@@ -168,18 +186,23 @@ function slotInGroup(board: BoardResponse | null, target: Shot, now: Shot): stri
   return next && next.vertical === now.vertical && (next.period_key ?? null) === (now.period_key ?? null) ? next.id : null
 }
 
-async function setSlot(ports: RestorePorts, target: Shot, now: Shot): Promise<void> {
+async function setSlot(ports: RestorePorts, target: Shot, now: Shot, hold?: Hold): Promise<boolean> {
   const board = ports.board()
   const target_ = { insertBeforeId: slotInGroup(board, target, now) }
   const write = reorderWrite(board, target.id, target_)
-  if (!write) return
+  if (!write) return false
   const placement = reorderPlacement(board, target.id, target_)
+  if (hold && !(await hold())) {
+    placement?.rollback()
+    return false
+  }
   try {
     placement?.reconcile(await patchGoal(target.id, write.patch))
   } catch (err) {
     placement?.rollback()
     throw err
   }
+  return true
 }
 
 /** What came of setting one goal: it is as the shot says, the server no longer has it, or a write did not take (the store's
@@ -196,68 +219,96 @@ interface One {
   title: string
 }
 
-/** What each goal holds now, asked of the server: the board may not have heard yet of what an agent did a moment ago, and a goal
- *  put back over it would be a change nobody asked for. Asked before the step is applied, so that the board moves in the same
- *  breath as the key and not a round trip later. `null`: the goal is gone. */
-export async function holdings(ports: RestorePorts, targets: Target[]): Promise<Map<string, Shot | null>> {
-  const held = new Map<string, Shot | null>()
-  await Promise.all(targets.filter((target) => target.expect).map(async (target) => {
-    held.set(target.shot.id, await currentShot(ports, target.shot.id, true))
-  }))
+/** The server's word on each goal a step holds against something, asked now and answered when it is. The board may not have heard
+ *  yet of what an agent did a moment ago (it hears after a pause), and a goal put back over that would be a change nobody asked
+ *  for. Asked as the step begins, and waited for only where a write would go: what the person sees moves in the key's own
+ *  breath, whatever the answer's timing. `null`: the goal is gone. */
+export function holdings(ports: RestorePorts, targets: Target[]): Map<string, Promise<Shot | null>> {
+  const held = new Map<string, Promise<Shot | null>>()
+  for (const target of targets) {
+    if (!target.expect) continue
+    const word = currentShot(ports, target.shot.id, true)
+    word.catch(() => undefined) // whoever waits for it hears of a failure; one nobody waits for is not an unhandled one
+    held.set(target.shot.id, word)
+  }
   return held
+}
+
+/** What a goal must still hold for the step to set one thing of it. The slot only means something in the group the step left the
+ *  goal in. */
+function holds(now: Shot, expect: Shot, aspect: 'place' | 'parent' | 'slot'): boolean {
+  if (aspect === 'place') return !placeDiffers(now, expect)
+  if (aspect === 'parent') return !parentDiffers(now, expect)
+  return !placeDiffers(now, expect) && !parentDiffers(now, expect)
 }
 
 /** Sets one goal to the shot, as far as the step changed it and the goal still holds what the step left. */
 async function settleOne(
-  ports: RestorePorts, { shot: target, change: asked, expect }: Target, direction: 'back' | 'forward', held?: Map<string, Shot | null>,
+  ports: RestorePorts, { shot: target, change: asked, expect }: Target, direction: 'back' | 'forward',
+  held?: Map<string, Promise<Shot | null>>,
 ): Promise<One> {
-  let now = held?.has(target.id) ? held.get(target.id) ?? null : await currentShot(ports, target.id, !!expect)
+  const id = target.id
+  const word = (): Promise<Shot | null> => held?.get(id) ?? currentShot(ports, id, true)
+  // The board is what the person sees, and a move starts from it at once; the writes wait for the server's word. A tick or a title
+  // is written by the store's own verbs the moment they are called, and a goal the board does not carry has nothing to move: for
+  // those the server's word comes first.
+  const seen = expect ? shotOf(ports.board(), id) : null
+  let now = seen && !asked.done && !asked.fields.length ? seen : await (expect ? word() : currentShot(ports, id))
   if (!now) return { settled: 'gone', kept: false, set: false, title: target.title }
-  const { change, kept } = holding(asked, now, expect, target)
-  const title = now.title
+  const preview = !!expect && now === seen
+  const hold = (aspect: 'place' | 'parent' | 'slot'): Hold | undefined =>
+    preview ? async () => { const there = await word(); return !!there && holds(there, expect!, aspect) } : undefined
+  const first = holding(asked, now, expect, target)
+  const { change } = first
+  let kept = first.kept
+  let title = now.title
   let set = false
   if (fieldsDiffer(now, target, change)) {
     set = true
     await setFields(ports, now, target, change)
-    now = (await currentShot(ports, target.id)) ?? now
+    now = (await currentShot(ports, id)) ?? now
     // The tick and the patch are the store's own verbs, which keep their failures to themselves: the goal is not as it
     // should be, so the server is asked whether it is there at all.
-    if (fieldsDiffer(now, target, change)) return { settled: (await currentShot(ports, target.id, true)) ? 'failed' : 'gone', kept, set, title }
+    if (fieldsDiffer(now, target, change)) return { settled: (await currentShot(ports, id, true)) ? 'failed' : 'gone', kept, set, title }
   }
 
-  now = (await currentShot(ports, target.id)) ?? now
+  now = (await currentShot(ports, id)) ?? now
   const parent = change.parent && parentDiffers(now, target)
   const place = change.place && placeDiffers(now, target)
   if (parent && place) {
-    set = true
-    let [first, second] = direction === 'back' ? [setPlace, setParent] : [setParent, setPlace]
+    const moves = { place: () => setPlace(ports, target, hold('place')), parent: () => setParent(ports, target, hold('parent')) }
+    let [one, other] = direction === 'back' ? [moves.place, moves.parent] : [moves.parent, moves.place]
+    let wrote: boolean
     try {
-      await first(ports, target)
+      wrote = await one()
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 422) throw err
-      ;[first, second] = [second, first]
-      await first(ports, target)
+      ;[one, other] = [other, one]
+      wrote = await one()
     }
-    await second(ports, target)
+    set = (await other()) || wrote || set
   } else if (place) {
-    set = true
-    await setPlace(ports, target)
+    set = (await setPlace(ports, target, hold('place'))) || set
   } else if (parent) {
-    set = true
-    await setParent(ports, target)
+    set = (await setParent(ports, target, hold('parent'))) || set
   }
 
-  now = (await currentShot(ports, target.id)) ?? now
-  if (change.slot && slotDiffers(now, target)) {
-    set = true
-    await setSlot(ports, target, now)
+  now = (await currentShot(ports, id)) ?? now
+  if (change.slot && slotDiffers(now, target)) set = (await setSlot(ports, target, now, hold('slot'))) || set
+
+  if (preview) {
+    // The server's word on what stayed: what the board showed may have been a moment behind.
+    const there = await word()
+    if (!there) return { settled: 'gone', kept: false, set, title }
+    kept = holding(asked, there, expect, target).kept
+    title = there.title
   }
   return { settled: 'done', kept, set, title }
 }
 
 /** Sets the goals of a step to `targets` (the one the gesture was about first). */
 export async function settleShots(
-  ports: RestorePorts, targets: Target[], direction: 'back' | 'forward', held?: Map<string, Shot | null>,
+  ports: RestorePorts, targets: Target[], direction: 'back' | 'forward', held?: Map<string, Promise<Shot | null>>,
 ): Promise<Applied> {
   const [head, ...rest] = targets
   if (!head) return nothing('done')

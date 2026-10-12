@@ -189,14 +189,17 @@ export async function glideThrough<T>(run: () => Promise<T>, lead: string | null
   let finished = false
   const job = run().finally(() => { finished = true })
   job.catch(() => undefined)
+  // The first look is in the task that made the change: a board that moved as the key was handled is read after Vue has drawn
+  // it, before any frame, so no frame can show a card in its new place that the glide has not started from.
+  await nextTick()
   for (let frames = 0; frames < GIVE_UP_FRAMES; frames += 1) {
-    await nextTick()
-    await frame()
     if (moved(before)) {
       play(before, lead, departing)
       break
     }
     if (finished) break
+    await frame()
+    await nextTick()
   }
   return job
 }
