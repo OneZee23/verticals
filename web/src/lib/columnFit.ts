@@ -1,6 +1,6 @@
 /* The opened goal is seen whole (Kirill's rule, PR #1): if it fits where it was clicked, the column stays; otherwise it
    scrolls just enough, 16 px from the window's edge, and a goal taller than the window shows its top. Read by the move
-   that opens it (`lib/familyMotion.ts`), which lands the column there in the same movement, and by `GoalDetail.vue` for
+   that opens it (`lib/familyMotion.ts`), which lands the column there in the same movement, and by `GoalDetail.tsx` for
    an opening the move doesn't draw. */
 
 export const GAP = 16
@@ -33,8 +33,8 @@ export function seenHeight(scroller: HTMLElement): number {
   return Math.min(scroller.clientHeight, window.innerHeight - scroller.getBoundingClientRect().top)
 }
 
-/** What the goals scroll under at the top of `scroller`: its padding, which lies under the desktop title bar (App.vue), and
- *  the line pinned at its start, which holds that room and its own 28 px (ColumnLine.vue, docs/design/column-bars.md). */
+/** What the goals scroll under at the top of `scroller`: its padding, which lies under the desktop title bar (App.tsx), and
+ *  the line pinned at its start, which holds that room and its own 28 px (ColumnLine.tsx, docs/design/column-bars.md). */
 function under(scroller: HTMLElement): number {
   const line = scroller.querySelector<HTMLElement>(':scope > [data-role="column-line"]')
   return (parseFloat(getComputedStyle(scroller).paddingTop) || 0) + (line?.offsetHeight ?? 0)

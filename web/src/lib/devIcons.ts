@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { DEV_TUNING_ENABLED } from './devTuning'
 
 export interface IconTuning {

@@ -2,7 +2,7 @@
 // it is and when it was made or changed, "Today · made just now", "Week · changed 2 min ago". The goal is the board's own
 // while the board holds it, so the chip follows every change the board shows; otherwise it is read once, and again each
 // time the board changes. A goal that is gone says so.
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from '../reactivity'
 import { ApiError, getGoal, type GoalCard } from './api'
 import { findGoal } from './boardIndex'
 import { MONTH_NAMES, type VerticalScale } from './periods'

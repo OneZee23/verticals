@@ -45,7 +45,7 @@ export function createLiveBoard(state: LiveBoardState, todayIso: () => string) {
     () => void quietReload(),
   )
 
-  /** Start following `/api/events`; returns the stop function (App.vue owns the lifecycle,
+  /** Start following `/api/events`; returns the stop function (App.tsx owns the lifecycle,
    *  mirroring `startDayRollover`). */
   function startLiveBoard(): () => void {
     return startLiveUpdates(liveReload)

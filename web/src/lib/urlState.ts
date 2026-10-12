@@ -11,10 +11,10 @@
 // A goal names no view of its own: `navigateToGoal` places it (board host, or Inbox for a Maybe
 // goal). A doc is always the Docs view. So one fragment slot is enough and the query stays empty.
 //
-// One watcher rather than per-action writes: several mutations in a tick (`App.vue`'s nav fires
+// One watcher rather than per-action writes: several mutations in a tick (`App.tsx`'s nav fires
 // `closeGoal` + `setView` + `setValueFilter`) collapse into a single history entry.
 
-import { watch } from 'vue'
+import { watch } from '../reactivity'
 
 export type AppView = 'verticals' | 'inbox' | 'docs'
 
@@ -109,7 +109,7 @@ function meaningOfState(state: UrlSyncState, todayIso: () => string): string {
 
 /** The address to write for the state. `keepPath` — the path currently showing — survives when it
  *  already names the state's date, so a hand-typed `/h/<today>` is not collapsed to `/`. Any other
- *  path (`/search/…`, a typo) is replaced by the canonical one. `SearchBar.vue` reads this too: the
+ *  path (`/search/…`, a typo) is replaced by the canonical one. `SearchBar.tsx` reads this too: the
  *  search surface borrows the address bar and has to put back what the app shows underneath. */
 export function stateUrl(state: UrlSyncState, todayIso: () => string, keepPath: string): string {
   const anchor = state.board?.anchor_date ?? todayIso()

@@ -16,7 +16,7 @@
 // group, not only the column's own top level.
 //
 // A "rendered nested group" is a card `P` with at least one same-vertical, same-column child that
-// is actually in the DOM right now (has a press-time row rect) — exactly the set `GoalCard.vue`'s
+// is actually in the DOM right now (has a press-time row rect) — exactly the set `GoalCard.tsx`'s
 // own `showChildren` gate renders inline (D244 expanded column, D247 spring-open, D248 open card
 // all satisfy it the same way: the child has a live row). Group membership itself comes from
 // `board.children[P.id]`, filtered by the exact predicate `boardProjection.ts::toCardData` nests

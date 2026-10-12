@@ -1,8 +1,8 @@
 // What can be done with a report (docs/design/bug-reports.md), in two pills above the field, where Check again stands for a
-// document (DocCheck.vue): Send to developers, a link that opens a GitHub issue with the report in the browser (⌥ held, an email
+// document (DocCheck.tsx): Send to developers, a link that opens a GitHub issue with the report in the browser (⌥ held, an email
 // draft), and Improve it, which asks the agent for a design document in the report's own task. They stand for the report in
 // front, and for the report the field's answer has just made, until the answer goes.
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from '../reactivity'
 import { getDoc, type DocDetail } from './api'
 import { agentChat, currentThread, openForGoal, send } from './agentChat'
 import { isReportPath, reportKindOf } from './report'

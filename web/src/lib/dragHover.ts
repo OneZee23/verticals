@@ -46,7 +46,7 @@ export function createDragHover(cb: DragHoverCallbacks): DragHoverController {
   function clearHold(): void {
     if (holdTimer !== null) clearTimeout(holdTimer)
     holdTimer = null
-    if (holdEl) delete holdEl.dataset.holding // an attribute: Vue rewrites the card's classes
+    if (holdEl) delete holdEl.dataset.holding // an attribute: the card's drawing rewrites its classes
     holdEl = null
   }
 

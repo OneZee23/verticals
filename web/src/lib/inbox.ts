@@ -5,7 +5,7 @@
 // inbox"; ↵ puts your words first in Today at once, and the agent, in a turn nobody watches, looks for the goal they
 // belong under. The app files the card there and the card shows it. Nothing is planned or started. Words the agent reads
 // as a request to it go on as a conversation instead.
-import { computed, reactive } from 'vue'
+import { computed, reactive } from '../reactivity'
 import { ApiError, createGoal, deleteGoal, fetchUndated, patchGoal, reparentGoal, type InboxGoal } from './api'
 import { forgetStep, makeStep, record, type Step } from './boardHistory'
 import { createdStep } from './goalSteps'

@@ -2,7 +2,7 @@
 // the same two writes read the other way round. Both rest on the server's trash (`core/trash.py`): a goal that goes waits
 // there with its subgoals, so the write that brings it back puts the same ids back, and the one that sends it away again
 // leaves it there for the next time.
-import { toast } from '@konstantinopolskii/vue'
+import { toast } from '../kit'
 import { ApiError, deleteGoal, restoreGoal } from './api'
 import { historyPorts, type Step } from './boardHistory'
 import { removePlacement } from './boardPlacement'

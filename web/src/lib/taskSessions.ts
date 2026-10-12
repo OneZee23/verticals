@@ -2,8 +2,8 @@
 // the place it lives, Claude or Codex. The gateway keeps the sessions of each task and watches their files; this reads what it
 // knows every couple of seconds (a size and a time on disk, no model, no token) and starts and opens sessions. The web build has
 // no gateway, so nothing here runs there.
-import { reactive } from 'vue'
-import { toast } from '@konstantinopolskii/vue'
+import { reactive } from '../reactivity'
+import { toast } from '../kit'
 import { agentChat, agentOf, newThreadWith, send, type GoalRef } from './agentChat'
 
 export interface TaskSession {

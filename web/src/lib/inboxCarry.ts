@@ -1,10 +1,10 @@
 // Carrying a task in the Inbox onto the field (Inbox and Documents redesign, round 5, frames c2–c3). Press a card or a row
 // and move it past 10 px: it follows the hand, as the Inbox's tile. Held over the field, the field becomes the pill that
 // takes it (S5.P3.002); let go there and it waits in the field as a goal does in Move (docs/design/inbox-carry-stack.md):
-// `park` hands it to `lib/moving.ts`, `MovingStack.vue` draws the card, and Backspace, Tab, Esc and typing work on it as
+// `park` hands it to `lib/moving.ts`, `MovingStack.tsx` draws the card, and Backspace, Tab, Esc and typing work on it as
 // they do on the board. Let go anywhere else, or Esc, and it goes back to its place. The card waiting in the field is
 // carried out by the same press: no board is in view to land it on, so the Inbox's drag takes it.
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import type { InboxGoal } from './api'
 import { moving, park, unpark } from './moving'
 

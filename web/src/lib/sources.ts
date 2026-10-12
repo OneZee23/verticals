@@ -10,7 +10,7 @@
 // Fix is the smallest first look: one click opens a conversation about the source with the failure in its first sentence.
 // The agent never comes by itself; an automatic first look would send this same message from the one place the app
 // already starts a turn on its own (lib/morning.ts), once per incident (`SourceView.since` names it).
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { agentChat, newThread, send } from './agentChat'
 import { ApiError, approveSource, fetchSources, type DeskDoc, type SourceView } from './api'
 import { shortDay } from './docsDesk'

@@ -1,4 +1,4 @@
-import { nextTick, reactive } from 'vue'
+import { nextTick, reactive } from '../reactivity'
 import { reducedMotion, timing } from './motion'
 
 // A goal checked off keeps its place while its check draws (`checkboxMotion.ts`, 200 ms), then glides to the end of its

@@ -1,7 +1,7 @@
-// A document as its page needs it (DocPage.vue): title, path, the top of the body and when it was edited. Read once per
-// document for the chips of messages and of the field (DocChip.vue), and read again when the document changes. The top of the
+// A document as its page needs it (DocPage.tsx): title, path, the top of the body and when it was edited. Read once per
+// document for the chips of messages and of the field (DocChip.tsx), and read again when the document changes. The top of the
 // body is without its pictures, as the desk's previews are (core/docs_desk.py): a report holds its screenshots as data URLs.
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { getDoc, type DeskDoc } from './api'
 import { withoutPictures } from './bodyMarkdown'
 

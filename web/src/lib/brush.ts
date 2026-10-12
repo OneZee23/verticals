@@ -1,5 +1,5 @@
 // Brushing an answer away (docs/design/agent-fixes.md, fix 8). An answer waiting in the field goes back into the circle with a
-// sideways swipe on the trackpad or a drag down, as it does with Esc (SearchBar.vue's `sendBack`); the conversation keeps it.
+// sideways swipe on the trackpad or a drag down, as it does with Esc (SearchBar.tsx's `sendBack`); the conversation keeps it.
 //
 // How it moves (kk-motion): by hand the shape follows the hand one to one, so it never lags and never jumps to meet it; the
 // first few pixels of a press are slop, taken off so the shape starts exactly where it was grabbed. Past its limit it gives

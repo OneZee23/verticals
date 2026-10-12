@@ -78,7 +78,7 @@ export function toCardData(
     progress: board.progress[g.id],
     // `child_counts` and not `kids.length`: the two agree exactly on a column card, but
     // `board.children` is keyed by column cards alone, so a card rendered one level down by
-    // `GoalCard.vue`'s recursion has no entry there and used to report 0 however many children
+    // `GoalCard.tsx`'s recursion has no entry there and used to report 0 however many children
     // it really had (`docs/PENDING_DOC_FIXES.md` rows 93, 116(a)). The server now carries the
     // count for both levels. `?? kids.length` is the fallback for a response predating the
     // field, not a second source of truth.
@@ -93,11 +93,11 @@ export function toCardData(
  *  needed to become nullable just to carry the wire shape through.
  *
  *  This mapping still has a job after ruling 1 (owner, 2026-08-09) took the Maybe *column* off
- *  the board (`Board.vue`'s own `dated` computed drops it before drawing, but this function still
- *  builds it — `columns` below stays the unfiltered eight-column projection, since `InboxView.vue`
+ *  the board (`Board.tsx`'s own `dated` computed drops it before drawing, but this function still
+ *  builds it — `columns` below stays the unfiltered eight-column projection, since `InboxView.tsx`
  *  reads its Maybe entry off this same computed: `store.columns.value.find(c => c.vertical ===
  *  'maybe')`). Two live callers depend on the literal surviving: that `find`, and
- *  `Column.vue`'s own `props.vertical`, which `createGoalOn` below branches on directly
+ *  `Column.tsx`'s own `props.vertical`, which `createGoalOn` below branches on directly
  *  (`verticalBucket === 'maybe' ? {title} : {title, vertical, anchor_date}`) — the sentinel is what
  *  tells a capture gesture apart from a schedule gesture, on the Inbox screen exactly as it did
  *  on the old eighth column. Dropping the mapping would not simplify anything; it would just move

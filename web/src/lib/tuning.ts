@@ -1,7 +1,7 @@
 // Hidden settings for every animation and effect (docs/design-handoff R.073): to play with, to tune later, and for the
 // end-to-end tests, which set `verticals-tuning-v1` in localStorage before the page loads. A key that starts with `--` is
 // a custom property on :root; any other key is read by a script through knob().
-import { reactive } from 'vue'
+import { reactive } from '../reactivity'
 import { DEV_TUNING_ENABLED } from './devTuning'
 
 export type Knob = {

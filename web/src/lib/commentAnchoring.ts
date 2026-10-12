@@ -1,13 +1,13 @@
-/** The Vue-facing half of anchored comments (docs/COMMENTS_SPEC.md WP-B) — `commentAnchor.ts`'s
+/** The component-facing half of anchored comments (docs/COMMENTS_SPEC.md WP-B) — `commentAnchor.ts`'s
  *  pure DOM functions, wired to `store` and to one component's own body ref/editing flag. Shared
- *  between `GoalDetail.vue` and `DocDetail.vue` (both render markdown into the same
+ *  between `GoalDetail.tsx` and `DocDetail.tsx` (both render markdown into the same
  *  contenteditable-toggle node and both need the identical selection affordance, highlight repaint,
  *  and highlight-click-through) rather than duplicated per component — the two call sites differ
  *  only in target type/id and which ref is their body. Imports `store` directly, the same way the
  *  two components themselves already do (`import { store } from '../store'`); this is a composable
  *  consumed BY components, not a slice `store.ts` itself spreads in, so there is no circularity the
  *  way there would be if `lib/comments.ts` imported this back. */
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from '../reactivity'
 import { store } from '../store'
 import {
   applyAnchorHighlights, captureSelectionAnchor, clearHighlights, type AnchoredThread, type AnchorContext,
@@ -26,7 +26,7 @@ export interface CommentAnchoringOptions {
    *  opens the field to write in under it, a press on marked words opens their comment there, and a resolved comment's
    *  words are plain text again. A goal's comments open the docked panel. */
   inline?: boolean
-  /** A getter, not a plain id — `GoalDetail.vue` keeps ONE instance across goal switches (the
+  /** A getter, not a plain id — `GoalDetail.tsx` keeps ONE instance across goal switches (the
    *  inline-detail host is reused per D226/D248), so the target id changes under this composable's
    *  feet; a getter reads the current one on every call instead of closing over a stale id. */
   targetId: () => string | null
@@ -129,7 +129,7 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     // target (`lib/comments.ts::loadCommentsFor`'s own "switching target" branch) — which fires
     // here whenever this is the first real commit against this target, not only on an actual
     // target SWITCH, because the goal/doc-open auto-fetch that seeds the badge count
-    // (`GoalDetail.vue`'s own `watch` on `goal.value?.id`) can still be in flight when a fast
+    // (`GoalDetail.tsx`'s own `watch` on `goal.value?.id`) can still be in flight when a fast
     // reader selects text and clicks Comment before it settles. Staging the anchor AFTER the
     // open call, rather than before, means it always lands on top of whatever that reset did,
     // synchronously, in the same tick `openCommentsPanel` returns in (its own `loadCommentsFor`
@@ -139,10 +139,10 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     store.stageAnchor(anchor)
   }
 
-  /** Highlight click-through — called from each component's own existing body `@click` handler,
+  /** Highlight click-through — called from each component's own existing body click handler,
    *  BEFORE that handler's own read/edit-mode dispatch, so a highlight always opens its thread
    *  rather than also starting a body edit. Returns whether it handled the click, so the caller
-   *  knows to stop (`GoalDetail.vue`'s own link-click carve-out is the precedent for this shape). */
+   *  knows to stop (`GoalDetail.tsx`'s own link-click carve-out is the precedent for this shape). */
   function onBodyClick(event: MouseEvent): boolean {
     const target = event.target as HTMLElement | null
     const mark = target?.closest?.('.comment-highlight')

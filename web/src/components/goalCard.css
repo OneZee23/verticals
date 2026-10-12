@@ -24,7 +24,7 @@
 }
 /* An open goal never scrolls inside itself (KK, 27 Sep 2026: "We shouldn't have the scroll inside cards"): it is one
    piece in the column, title, facts, steps and notes, and the column scrolls. Its notes are the last thing in its
-   steps list (GoalCard.vue), so they rise, colour and move with it. */
+   steps list (GoalCard.tsx), so they rise, colour and move with it. */
 .goal-card__children > #goal-detail.goal-detail-inline {
   flex: 0 0 auto;
   width: auto;
@@ -47,7 +47,7 @@
      touch-input-only property. */
   touch-action: none;
   user-select: none;
-  /* D27: press stays `grab`; only Board.vue's armed-drag state may set `grabbing`. */
+  /* D27: press stays `grab`; only Board.tsx's armed-drag state may set `grabbing`. */
   cursor: grab;
 }
 .goal-card.goal-card--detail-open > .goal-card__row {
@@ -180,7 +180,7 @@ body.popover-engine-open .goal-card:hover:not(.goal-card--menu-open, .goal-card-
 .goal-card__children > .goal-card.goal-card { background-color: transparent; }
 
 /* Hover lift (KK, 27 Sep 2026, `lib/cardLift.ts`): the goal and its subtask list rise 2 px and grow around their shared
-   centre (set inline with the scale), colour and all; the column gives it room (Column.vue). No shadow. */
+   centre (set inline with the scale), colour and all; the column gives it room (Column.tsx). No shadow. */
 .goal-card.goal-card--lifted,
 .goal-card__children--lifted {
   position: relative;
@@ -312,9 +312,9 @@ body.popover-engine-open .goal-card:hover:not(.goal-card--menu-open, .goal-card-
   overflow: hidden;
   pointer-events: none;
 }
-/* D245: the nested counterpart of `--source-gap-closed` above — see `GoalCard.vue`'s
+/* D245: the nested counterpart of `--source-gap-closed` above — see `GoalCard.tsx`'s
    `isNestedDragHole` comment for why a nested source must NOT collapse (no sibling placeholder
-   reserves its box the way Column.vue's `__dnd-placeholder__` slot does at top level). Its box
+   reserves its box the way Column.tsx's `__dnd-placeholder__` slot does at top level). Its box
    stays exactly as rendered — the CARD footprint `slotWidth`/`slotHeight` captured at pointer-
    down, since this is that same element — and only `pointer-events` is stripped, so `hitTest`'s
    `elementFromPoint` falls through it instead of resolving back to its own id (the row's own
@@ -573,7 +573,7 @@ body.popover-engine-open .goal-card:hover:not(.goal-card--menu-open, .goal-card-
   margin-top: var(--kkov-expanded-goal-spacing);
 }
 
-/* Opening goes down in place in the wide column (KK, 27 Sep 2026, the cleaned-up card; GoalCard.vue's showChildren).
+/* Opening goes down in place in the wide column (KK, 27 Sep 2026, the cleaned-up card; GoalCard.tsx's showChildren).
    An opened subgoal takes the top-level size where it stands, its checkbox on the top-level edge, and its siblings
    stay. Its own steps are its list, lined up with its siblings: the open goal's colour, not an indent, tells them
    apart. A card on the way down to a deeper open goal keeps its list in view one checkbox in, under its words (round
@@ -731,7 +731,7 @@ body.popover-engine-open .goal-card:hover:not(.goal-card--menu-open, .goal-card-
 
 /* The carried title stays full strength; only its original period is secondary. */
 
-/* The open goal's facts line and "Add…" grow in and fold away with its notes (GoalCard.vue's transitions), in the
+/* The open goal's facts line and "Add…" grow in and fold away with its notes (GoalCard.tsx's transitions), in the
    opening's time and curve: the steps under the facts line slide down, and back up on closing, instead of jumping. */
 .goal-part-enter-active,
 .goal-part-leave-active {

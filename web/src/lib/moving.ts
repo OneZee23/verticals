@@ -3,7 +3,7 @@
 // On an empty field Backspace picks the last thing and a second takes it off; Tab or a tap picks one too. A task carried
 // onto the field in the Inbox waits the same way, with no view's name: `park` and `unpark` are the one way in and out
 // (lib/inboxCarry.ts, docs/design/inbox-carry-stack.md).
-import { reactive, watchEffect } from 'vue'
+import { reactive, watchEffect } from '../reactivity'
 import { circle } from './circle'
 import { closeSpans, spanColumns, spans, VIEW_NAMES } from './spans'
 
@@ -33,7 +33,7 @@ export function park(id: string): void {
 const TEXT_ENTRY = 'textarea, select, [contenteditable="true"], '
   + 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
 
-/** The field's text area takes focus as ⌘K gives it, but opens no conversation (`SearchBar.vue`'s `focusField` would). */
+/** The field's text area takes focus as ⌘K gives it, but opens no conversation (`SearchBar.tsx`'s `focusField` would). */
 function takeTheKeys(): void {
   const active = document.activeElement
   if (active instanceof HTMLElement && active.closest(TEXT_ENTRY)) return

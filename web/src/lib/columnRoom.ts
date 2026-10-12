@@ -1,5 +1,5 @@
 /* Room after a column's last card. A goal near its column's end can't always scroll far enough to be seen whole, so
-   while it's open the column gets just enough empty room after its last card (`GoalDetail.vue` asks for it every frame
+   while it's open the column gets just enough empty room after its last card (`GoalDetail.tsx` asks for it every frame
    of the opening). When the goal closes, the room stays as long as it's in view and shrinks as the column scrolls back
    up, so the column never jumps while it folds. */
 

@@ -1,6 +1,6 @@
 // What an agent's message brings (docs/design/agent-chips.md; Inbox and Documents redesign, rounds 9–11): the chat links a
 // goal it made or changed as [title](#goal/<id>) and a document as [title](#doc/<id>) (desktop/chat/prompt-intro.md).
-// Under the message's words each link is a chip, one form for every kind of thing (DocChip.vue, GoalChip.vue), in the
+// Under the message's words each link is a chip, one form for every kind of thing (DocChip.tsx, GoalChip.tsx), in the
 // field's answer as in the agent's balloon; nothing else marks them.
 
 export interface ChipLink { kind: 'goal' | 'doc'; id: string; label: string }

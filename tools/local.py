@@ -98,12 +98,11 @@ def main():
     env = environment(settings)
     if args.command == 'setup':
         lock = json.loads((ROOT / 'web/package-lock.json').read_text())
-        for name in ['konstantinopolskii-design-system-2.1.1.tgz', 'konstantinopolskii-vue-2.1.1.tgz']:
+        for name in ['konstantinopolskii-design-system-2.1.1.tgz']:
             archive = ROOT / 'web/vendor' / name
             if not archive.is_file():
                 raise SystemExit(f'Missing vendored dependency web/vendor/{name}; see README.')
-            package = 'design-system' if 'design-system' in name else 'vue'
-            expected = lock['packages'][f'node_modules/@konstantinopolskii/{package}']['integrity']
+            expected = lock['packages']['node_modules/@konstantinopolskii/design-system']['integrity']
             actual = 'sha512-' + base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode()
             if actual != expected:
                 raise SystemExit(f'Integrity mismatch: web/vendor/{name}. Supply the lockfile-matching archive.')

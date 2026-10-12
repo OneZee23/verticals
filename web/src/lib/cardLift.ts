@@ -7,7 +7,7 @@
 // module's: every goal paints it with the board's one highlight layer (`lib/goalWash.ts`).
 //
 // The card (KCard) and its subgoal list are sibling elements, so both get the same scale around one origin. Columns
-// give a lifted card 8 px of room past their edge (`Column.vue`, KK: "u still cut the scaled tasks on the left and
+// give a lifted card 8 px of room past their edge (`Column.tsx`, KK: "u still cut the scaled tasks on the left and
 // right of each vertical column, because they have this overflow hidden param"), and cards sit 2 px apart with 6 px
 // of padding around their words: the piece grows up to 6%, but no more than 7 px a side (1 px short of that room: on
 // the clip line the clip shaves the colour's rim) and 4 px an end (plus the 2 px rise), so a wide or tall card grows
@@ -25,7 +25,7 @@
 // row at press time (`onRowPointerDown`) from the card at rest (`atRest`), and the lift drops at once when a drag
 // starts.
 
-import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { onBeforeUnmount, ref, watch, type Ref } from '../reactivity'
 
 const LEAVE_GRACE_MS = 60 // the pointer crossing the gap between the card and its list must not drop the lift
 const SETTLE_MS = 240 // the way back (--motion-lift-out, 220 ms) and a frame: the piece keeps its layer until it lands
@@ -83,8 +83,8 @@ export function releaseLifts(at: { x: number; y: number } | null): void {
   quiet = at ?? (Number.isNaN(pointer.x) ? null : { ...pointer })
   releases.forEach((release) => release())
 }
-/** Measures every lifted card again for the size it has now and writes its lift onto it at once, not on Vue's next
- *  render: the move reads where things land right after the change. */
+/** Measures every lifted card again for the size it has now and writes its lift onto it at once, not at the card's next
+ *  drawing: the move reads where things land right after the change. */
 export function refreshLifts(): void {
   refreshers.forEach((refresh) => refresh())
 }
@@ -108,7 +108,7 @@ export function anyMenuOpen(): boolean {
   return typeof document !== 'undefined' && document.body.classList.contains('popover-engine-open')
 }
 const afterMenu = new Set<() => void>() // cards the pointer entered while a menu was open: they react once it closes
-/** Run `fn` once the open menu closes (`PopoverEngine.vue` announces it). */
+/** Run `fn` once the open menu closes (`PopoverEngine.tsx` announces it). */
 export function whenMenuCloses(fn: () => void): void {
   afterMenu.add(fn)
 }
@@ -260,10 +260,8 @@ export function useCardLift(options: {
     }
   }
 
-  /* A click holds the lift, heard on the way down to what was clicked. A plain listener, not the card's
-     `@click.capture`: Vue runs a handler only for an event newer than the handler by `Date.now()`, so under a clock that
-     stands still (the UI suite pins it) only the first Vue handler on an event's path runs, and a capture handler on the
-     card is always first: a click on a card's title opened nothing there. */
+  /* A click holds the lift, heard on the way down to what was clicked: a native capture listener on the card, ahead of
+     every click handler inside it, and it stops none of them. */
   let clickHost: HTMLElement | null = null
   watch(() => options.card(), (card) => {
     clickHost?.removeEventListener('click', hold, true)

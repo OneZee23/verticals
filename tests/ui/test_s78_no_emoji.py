@@ -122,6 +122,9 @@ def _offenders(text: str, where: str) -> list[str]:
 # `\uXXXX`, `\u{XXXXX}` and `\xXX` — the three forms a JS minifier can emit for a character it
 # does not want to write literally. Decoded before the scan so an escaped emoji is caught too.
 _ESCAPE_RE = re.compile(r"\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})")
+# A range in a regex character class, written in escapes (`\\u200C-\\u200D` in React's pattern for attribute names), names
+# code points and writes none, so it is taken out before the escapes are decoded.
+_ESCAPED_RANGE_RE = re.compile(r"\\{1,2}u[0-9a-fA-F]{4}-\\{1,2}u[0-9a-fA-F]{4}")
 
 
 def _decode_js_escapes(text: str) -> str:
@@ -206,7 +209,7 @@ def test_s78_no_emoji_in_any_user_facing_string(ui_f2: UiSession) -> None:
         raw = path.read_text(encoding="utf-8", errors="replace")
         rel = str(path.relative_to(REPO_ROOT))
         offenders += _offenders(raw, rel)
-        offenders += _offenders(_decode_js_escapes(raw), f"{rel} (escapes decoded)")
+        offenders += _offenders(_decode_js_escapes(_ESCAPED_RANGE_RE.sub("", raw)), f"{rel} (escapes decoded)")
         offenders += [f"{rel}: AC-122 property match {c!r}" for c in _ac122_hits(page, raw)]
 
     assert not offenders, (
