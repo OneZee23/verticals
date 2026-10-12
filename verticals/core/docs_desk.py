@@ -6,7 +6,9 @@ A stack is a goal and every document linked anywhere in its subtree. A goal whos
 documents and has children holding some splits into its children's stacks, keeping its own links as a stack of its
 own, so no stack grows into a pile nobody can browse; a value always splits, since it is the group's heading. A document lands in one stack only: the biggest pile claims it
 first. Read-only, three statements; the page preview is the first ``EXCERPT`` characters of the body, the rest is
-read when the document opens.
+read when the document opens. A picture inside a body is a data URL, which cut at a fixed length would print as base64 on the
+page, so the preview is made from the body without its pictures (core/pictures.py), and only for a body that has one within
+its first characters: the others are read as they were, a prefix and not a whole body.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from datetime import datetime
 import psycopg
 
 from verticals.core import vertical
+from verticals.core.pictures import ALT_CHARS, PICTURE
 
 CAP = 22
 EXCERPT = 1500
@@ -65,8 +68,11 @@ def desk(conn: psycopg.Connection, *, owner: str) -> Desk:
         "SELECT DISTINCT goal_id, doc_id FROM goal_doc_links WHERE owner = %(owner)s", {"owner": owner}
     ).fetchall()
     rows = conn.execute(
-        "SELECT id, path, title, left(body, %(n)s), created_at, updated_at, revision FROM docs WHERE owner = %(owner)s",
-        {"owner": owner, "n": EXCERPT},
+        "SELECT id, path, title,"
+        " CASE WHEN left(body, %(n)s + %(alt)s) ~* 'data:image/' THEN left(regexp_replace(body, %(picture)s, '', 'gi'), %(n)s)"
+        " ELSE left(body, %(n)s) END,"
+        " created_at, updated_at, revision FROM docs WHERE owner = %(owner)s",
+        {"owner": owner, "n": EXCERPT, "alt": ALT_CHARS, "picture": PICTURE},
     ).fetchall()
     docs = {r[0]: DeskDoc(*r) for r in rows}
 

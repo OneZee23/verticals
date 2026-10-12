@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 
 import anyio
 import psycopg
 
-from tests.mcp.conftest import TEST_TOKEN, open_mcp_stdio
+from tests.mcp.conftest import REPO_ROOT, TEST_TOKEN, open_mcp_stdio
 
 # S-52's own steps: a 400-character markdown body on the root.
 _S52_BODY = ("The retro surfaced three carry-forward items. " * 9)[:400]
@@ -148,3 +150,31 @@ def test_s56_idempotent_create_over_mcp(f2_dsn: str, tmp_path: Path) -> None:
 
     after = _goal_count(f2_dsn)
     assert after - before == 1, f"expected exactly +1 row for two identical client_token calls, got +{after - before}"
+
+
+# --- the words the desktop gateway reads -------------------------------------------------------
+
+
+def test_the_words_of_create_end_with_the_goals_id_as_the_desktop_gateway_reads_them(f2_dsn: str, tmp_path: Path) -> None:
+    """docs/design/agent-chips.md: the desktop chat makes the first goal the agent creates in a conversation that conversation's
+    (desktop/chat/chat.py `made_goal`), reading its id from what `create` answers: a plain goal, a title with quotes and
+    brackets, a whole plan, a retry."""
+    spec = importlib.util.spec_from_file_location("verticals_desktop_chat", REPO_ROOT / "desktop" / "chat" / "chat.py")
+    assert spec and spec.loader
+    gateway = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = gateway
+    spec.loader.exec_module(gateway)
+
+    calls = {
+        "plain": {"title": "Plan the review"},
+        "awkward": {"title": "It's a [plan] with \"quotes\""},
+        "plan": {"title": "A whole plan", "children": [{"title": "Step one"}, {"title": "Step two", "children": [{"title": "Part"}]}]},
+        "once": {"title": "Once only", "client_token": "ct-gateway-1"},
+        "twice": {"title": "Once only", "client_token": "ct-gateway-1"},
+    }
+    for label, args in calls.items():
+        result = anyio.run(_call, f2_dsn, tmp_path, "create", args, f"gw-{label}")
+        assert result.is_error is False, result.content[0].text
+        text = result.content[0].text
+        assert gateway.made_goal(text) == result.structured_content["goal"]["id"], text
+

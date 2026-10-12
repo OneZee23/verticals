@@ -2,12 +2,17 @@ import { computed, reactive } from 'vue'
 import { store } from '../store'
 import type { BoardColumnData, GoalCardData } from '../types'
 import { asksServer, found, termsOf } from './finding'
+import { reporting } from './reportPictures'
 import type { GoalCard } from './api'
 
 // The field's words (docs/design-handoff S1.P2): the board follows every letter, a search and a message alike. From a
 // word of three letters the server's matches decide (S1.P3), notes included; below that, titles on the board do.
 export const commandFilter = reactive({ text: '' })
-export const queryTerms = computed(() => termsOf(commandFilter.text))
+/** The words that narrow the board, ask the server and filter the Documents desk: the field's, except while pictures wait
+ *  above it (docs/design/bug-reports.md). Then the words say what the person sees and what they want, and nothing narrows
+ *  while they are written. */
+export const filterText = computed(() => (reporting.value ? '' : commandFilter.text))
+export const queryTerms = computed(() => termsOf(filterText.value))
 export const filterActive = computed(() => queryTerms.value.length > 0)
 
 function titleMatches(title: string): boolean {
@@ -19,8 +24,8 @@ function titleMatches(title: string): boolean {
  *  its way, the last answer narrows by title. */
 export const serverMatches = computed<GoalCard[] | null>(() => {
   const result = found.result
-  if (!result || !asksServer(commandFilter.text)) return null
-  if (found.text === commandFilter.text.trim()) return result.goals
+  if (!result || !asksServer(filterText.value)) return null
+  if (found.text === filterText.value.trim()) return result.goals
   return result.goals.filter(goal => titleMatches(goal.title))
 })
 const serverIds = computed(() => serverMatches.value ? new Set(serverMatches.value.map(goal => goal.id)) : null)

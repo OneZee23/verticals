@@ -9,6 +9,7 @@ import { useGroupWash } from '../lib/goalWash'
 import { playSound } from '../lib/sound'
 import RepeatMark from './RepeatMark.vue'
 import GoalCardTools from './GoalCardTools.vue'
+import SessionMark from './SessionMark.vue'
 import GoalDetail from './GoalDetail.vue'
 import GoalFacts from './GoalFacts.vue'
 import SubgoalAddRow from './SubgoalAddRow.vue'
@@ -26,6 +27,7 @@ import { useCardFamily } from '../lib/cardFamily'
 import { familyMovingNow } from '../lib/familyMotion'
 import { devGoalLayout } from '../lib/devGoalLayout'
 import { isPrivate } from '../lib/privacy'
+import { reducedMotion } from '../lib/motion'
 import '../kit-ext/carryover-ghost/carryover-ghost.css'
 
 const props = withDefaults(
@@ -198,30 +200,9 @@ function openContextMenu(): void {
   tools.value?.openMenu()
 }
 
-function onAffordanceClick(event: MouseEvent): void {
-  if (!isParent.value) return
-  event.preventDefault()
-  event.stopPropagation()
-  openContextMenu()
-}
-
-/** Keyboard path (space on the focused checkbox) bypasses the click capture above, so the
- *  parent guard lives here too: a parent affordance never one-click completes. */
-function onAffordanceToggle(value: boolean): void {
-  if (isParent.value) {
-    openContextMenu()
-    return
-  }
-  onToggle(value)
-}
-
 function onCardContextMenu(event: MouseEvent): void {
   event.preventDefault()
   openContextMenu()
-}
-
-function completeParent(): void {
-  playSound('checked'); void store.completeGoal(props.id, true)
 }
 
 /* The compact row keeps its DOM identity while inline detail is open. Drag state may still hide
@@ -416,6 +397,7 @@ const nestedInsertionSlot = computed(() => (
    children list so a nested reorder's neighbours slide instead of jumping — mirrored, not
    reinvented. */
 watch(nestedInsertionSlot, async () => {
+  if (reducedMotion()) return // the gap simply opens (docs/design/column-bounce.md)
   const selector = ':scope > [data-goal-id]'
   const before = new Map(
     [...(childrenListEl.value?.querySelectorAll<HTMLElement>(selector) ?? [])]
@@ -551,9 +533,6 @@ function onRowKeydown(event: KeyboardEvent) {
         class="goal-card__affordance-slot"
         data-role="goal-affordance"
         :data-affordance="isParent ? 'parent' : 'leaf'"
-        :role="isParent ? 'button' : undefined"
-        :aria-haspopup="isParent ? 'menu' : undefined"
-        @click.capture="onAffordanceClick"
       >
         <GoalAffordance
           :kind="hasMilestone ? 'ring' : 'square'"
@@ -561,7 +540,7 @@ function onRowKeydown(event: KeyboardEvent) {
           :done="progress?.done ?? 0"
           :total="progress?.total ?? 0"
           :color="color"
-          @toggle="onAffordanceToggle"
+          @toggle="onToggle"
         />
       </span>
       <div class="goal-card__text">
@@ -608,15 +587,12 @@ function onRowKeydown(event: KeyboardEvent) {
       <GoalCardTools
         ref="tools"
         :id="id"
-        :has-children="subgoalCount > 0"
-        :is-parent="isParent"
         :vertical="vertical"
         :repeat="repeat"
         :open="isInlineDetailHost"
-        @details="onOpenDetail"
-        @complete="completeParent"
         @open-change="onMenuOpenChange"
       />
+      <SessionMark v-if="!ghost" :goal-id="id" />
     </div>
   </KCard>
   <!-- An open goal is one piece top to bottom: its title and facts (the card above), its steps, "Add…", then its notes

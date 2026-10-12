@@ -379,18 +379,36 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # `doc_tree`, `doc_history`, `doc_revision` write nothing, same reasoning.
 # WP-A adds `comments` (`verticals/mcp/comments.py`) — the worklist/scoped-list read, writes
 # nothing, same reasoning as every other read tool in this set.
-_READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "doc_get", "doc_tree", "doc_history", "doc_revision", "comments"}
+# Sources adds `sources`, the list of what the morning report reads from and how each is doing — a read.
+_READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "doc_get", "doc_tree", "doc_history", "doc_revision", "comments", "sources"}
 # WP-33's deliberate single-surface write (docs/EVIDENCE.md §6/§9, verticals/mcp/evidence.py's
 # module note): evidence is written by the agent over MCP only — the UI reads evidence off the
 # board payload (`board_to_json`'s `evidence` map, already on HTTP) and never writes it, so
 # there is no HTTP write route and no F5 capability row (F5's `ui_selector` column has nothing
 # to name). A second entry here without a spec section like §6 backing it should be treated as
 # suspicious — this set exists for capabilities that are agent tooling, not user capabilities.
-_AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report"}
-# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. None now: the daily
-# carry-over task and the morning report it once wrote are the agent's, made when the owner asks or the morning comes
-# (Inbox and Documents redesign, final page). A new one goes here with its reason.
-_APP_ONLY_ROUTES: set[tuple[str, str]] = set()
+# `session_link` (docs/design/task-sessions.md) is the same kind: an agent in a Claude Code or Codex session ties it to a task, over
+# MCP only, and what it writes is the desktop app's own list of sessions, not the board, so it has no HTTP route and no F5 row.
+# `source` (docs/design/sources.md) is agent tooling in the same sense: the owner says in a sentence what the report
+# should read and the agent writes the source document and runs its check once beside the raw output; the owner's own
+# hands on a source are the document (the ordinary /api/docs routes) and Approve, which has no tool by design.
+_AGENT_ONLY_TOOLS = {"evidence_update", "tag_mark", "size_report", "session_link", "source"}
+# The mirror image on HTTP: a route only the app itself calls, housekeeping nobody asks for. Four are there. The morning's
+# one ask a day (docs/design/agent-fixes.md): the app asks once its morning hour has come and the server answers whether
+# this morning's report is still to be asked for; the report itself is the agent's, made when that ask reaches it. The second
+# agent's verdict (docs/design/morning-quality.md): the desktop gateway runs a second agent that only reads and hands what it
+# answered to the server, which writes it into the report; no tool writes a verdict, so the agent that made the report
+# cannot grade itself. The Sources Approve button: the owner approves the exact command or file a source will run, and by
+# design no tool can (docs/design/sources.md: the agent proposes, the owner approves). And the undo of a delete, below. The
+# daily carry-over task is the agent's, made when the owner asks (Inbox and Documents redesign, final page). A new one goes
+# here with its reason.
+_APP_ONLY_ROUTES: set[tuple[str, str]] = {
+    ("POST", "/api/morning"), ("POST", "/api/morning/check"), ("POST", "/api/sources/{id}/approve"),
+    # Undo (docs/design/board-undo.md): the page brings back what its own Delete took a moment ago, by the id it kept in
+    # its history. The agent's delete also lands in the trash, but taking back the agent's mistake is the person's call
+    # through the page; an MCP twin waits for the day the agent has a reason to undo.
+    ("POST", "/api/goals/{id}/restore"),
+}
 
 # capabilities.json's `mcp_args` values are placeholders (`"<title>"`, `"<id>"`, ...), not literal
 # values a real caller would send — most placeholders are plain strings and validate as-is against

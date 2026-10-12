@@ -7,6 +7,7 @@
 
 import { nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { playSound } from './sound'
+import { reducedMotion } from './motion'
 
 /** The reference's own Lottie parameters, kept verbatim — the media duration below is derived
  *  from them rather than restated as a magic number. */
@@ -31,6 +32,8 @@ export function useCompletionCelebration(
   watch(childrenAllDone, (allDone, wasAllDone) => {
     if (!allDone || wasAllDone) return
     playSound('all_completed')
+    // With motion reduced nothing sweeps: the sound and the checked steps say it (docs/design/column-bounce.md).
+    if (reducedMotion()) return
     completionActive.value = true
     void nextTick(() => {
       completionLayer.value?.animate(

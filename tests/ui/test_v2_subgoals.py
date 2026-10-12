@@ -135,10 +135,14 @@ def test_same_vertical_subgoal_has_no_independent_schedule_or_reparent_menu(ui_f
     ).click(force=True)
     menu = session.page.locator('#dropdownPortal [data-role="goal-actions-menu"]')
     expect(menu).to_be_visible()
-    # D179: same-vertical nested children have no independent schedule/detach/reparent paths.
+    # D179: same-vertical nested children have no independent schedule/detach/reparent paths: nothing to move to a day,
+    # into a goal or to the Inbox. Only its Repeat stays, under Reschedule.
+    assert menu.locator("[data-move]").count() == 0
+    assert menu.locator('[data-menu-section="move"]').count() == 0
     assert menu.locator('[data-action="schedule"]').count() == 0
     assert menu.locator('[data-action="inbox"]').count() == 0
     assert menu.locator('[data-action="reparent"]').count() == 0
+    assert [t.strip() for t in menu.locator('[data-menu-section="reschedule"] [role="menuitem"]').all_inner_texts()] == ["Repeat"]
 
 
 def test_same_vertical_child_drag_detaches_on_top_level_slot(ui_f2: UiSession) -> None:

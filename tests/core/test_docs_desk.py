@@ -51,3 +51,40 @@ def test_a_big_branch_splits_into_its_sub_goals(db: psycopg.Connection) -> None:
     _link(db, right, "r.md")
     (group,) = docs_desk.desk(db, owner=OWNER).values
     assert [(s.goal_title, len(s.docs)) for s in group.stacks] == [("SYN left", docs_desk.CAP), ("SYN right", 1)]
+
+
+# A picture is a data URL inside the body (a report's screenshots): cut at a fixed length it would print as base64 on the
+# page a document chip draws (docs/design/bug-reports.md). The preview is made without it. Sample bytes only.
+PNG = "iVBORw0KGgo" + "AAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" * 40
+JPG = "/9j/4AAQSkZJRgABAQAAAQABAAD/" + "2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD" * 30
+
+
+def _desk_excerpt(conn: psycopg.Connection, body: str) -> str:
+    created = docs.create(conn, owner=OWNER, path="reports/bugs/2026-10-12-120000.md", title="Report", body=body).doc
+    return docs_desk.desk(conn, owner=OWNER).docs[created.id].excerpt
+
+
+def test_the_preview_of_a_report_has_its_words_and_no_picture(db: psycopg.Connection) -> None:
+    body = (f"I dragged the card to Friday and it jumped back\n\n![Picture 1](data:image/jpeg;base64,{JPG})\n"
+            f"![Picture 2](data:image/png;base64,{PNG})\n\nVerticals 0.4, macOS 27 (arm64)\n\n## App log\n`app: up`")
+    assert len(body) > 4000, "the pictures push the rest of the report far past the preview's length"
+    excerpt = _desk_excerpt(db, body)
+    assert excerpt.startswith("I dragged the card to Friday and it jumped back")
+    assert "Verticals 0.4, macOS 27 (arm64)" in excerpt and "## App log" in excerpt, "the words after the pictures come into view"
+    assert "data:image" not in excerpt and "base64" not in excerpt and "![" not in excerpt
+    assert len(excerpt) <= docs_desk.EXCERPT
+
+
+def test_a_picture_with_a_long_alt_text_does_not_dangle_at_the_end_of_the_preview(db: psycopg.Connection) -> None:
+    words = "Words. " * 210
+    alt = "a screenshot of the board " * 8
+    excerpt = _desk_excerpt(db, f"{words}![{alt}](data:image/png;base64,{PNG})\n\nAfter.")
+    assert "![" not in excerpt and "data:image" not in excerpt and excerpt.rstrip().endswith("After.")
+
+
+def test_a_body_without_a_picture_is_its_own_prefix_and_other_images_stay(db: psycopg.Connection) -> None:
+    plain = "# Title\n\n" + "Text. " * 500
+    assert _desk_excerpt(db, plain) == plain[:docs_desk.EXCERPT]
+    web = "A [link](https://example.com) and ![a web picture](https://example.com/a.png) in it."
+    other = docs.create(db, owner=OWNER, path="web.md", title="Web", body=web).doc
+    assert docs_desk.desk(db, owner=OWNER).docs[other.id].excerpt == web, "only a data URL is left out, not every image"

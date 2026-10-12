@@ -1,47 +1,67 @@
 import { toast } from '@konstantinopolskii/vue'
 import { ApiError, deleteGoal, type BoardResponse } from './api'
+import { findGoal } from './boardIndex'
+import { makeStep } from './boardHistory'
 import { removePlacement } from './boardPlacement'
+import { deletedStep } from './goalSteps'
 import { messageForError } from './scheduleFeedback'
+
+/** The tag that marks a goal as part of the sample data a first run shows. */
+export const SAMPLE_TAG = 'sample'
 
 /** Deleting a goal from the board. Lifted out of `store.ts` when flow 4 took that module past the 750-line cap again;
  *  same factory seam as `createSearchActions`: the store's one reactive state, no second container. */
-export function createGoalDelete(state: { board: BoardResponse | null }) {
-  /** `DELETE /api/goals/{id}`, no confirmation dialog — the same shape `removeSample` already ships
-   *  and the same reason (§10-D12; a confirm dialog is also a `role="dialog"` node every "this
-   *  happened without a modal" assertion in the suite would then see).
+export function createGoalDelete(state: { board: BoardResponse | null }, reloadBoard: () => Promise<void>) {
+  /** `DELETE /api/goals/{id}`, no confirmation dialog — the same shape `removeSample` already ships and the same reason
+   *  (§10-D12; a confirm dialog is also a `role="dialog"` node every "this happened without a modal" assertion in the
+   *  suite would then see).
    *
-   *  A goal with children is `core.goals.delete`'s own `HasChildren` (409), and this does **not**
-   *  silently retry with `?cascade=true`: destroying a subtree nobody asked about is a different act
-   *  from deleting the row that was clicked. The 409 surfaces as a toast whose action performs the
-   *  cascading delete, so the second, larger write is always a second, deliberate click. */
-  async function removeGoal(id: string): Promise<void> {
-    const placement = removePlacement(state.board, id)
-    try {
-      await deleteGoal(id)
-      placement?.reconcile()
-    } catch (err) {
-      placement?.rollback()
-      if (err instanceof ApiError && err.status === 409) {
-        toast('This goal has subgoals.', {
-          action: 'Delete all',
-          onAction: () => void removeGoalCascade(id),
-        })
-        return
+   *  A goal with subgoals goes with all of them, at once. The delete is a step of the board's history now, and the notice
+   *  that follows it has Undo (`lib/boardHistory.ts`), which the server's trash makes whole again; that replaces the toast
+   *  that asked "Delete all" after a 409. The board's own count of what lies under the goal says which write to send. When
+   *  it did not carry them all (a subgoal in another period), the server's 409 sends the second write. */
+  function removeGoal(id: string): Promise<void> {
+    const title = findGoal(state.board, id)?.title ?? 'a goal'
+    const subgoals = state.board?.progress[id]?.total ?? 0
+    return makeStep(async () => {
+      for (const cascade of subgoals > 0 ? [true] : [false, true]) {
+        const placement = removePlacement(state.board, id, cascade)
+        try {
+          await deleteGoal(id, cascade)
+          placement?.reconcile()
+          return deletedStep(id, title, subgoals)
+        } catch (err) {
+          placement?.rollback()
+          if (cascade || !(err instanceof ApiError) || err.status !== 409) {
+            toast(messageForError(err))
+            return null
+          }
+        }
       }
-      toast(messageForError(err))
-    }
+      return null
+    })
   }
 
-  async function removeGoalCascade(id: string): Promise<void> {
-    const placement = removePlacement(state.board, id, true)
+  /** S-62: one gesture, no confirmation (pinned, §10-D12 — a confirm dialog would fail the modal-record assertion outright),
+   *  removing only the sample chain. Finds the sample root by content (`tags @> {sample}` and no parent) rather than
+   *  hardcoding `SAMPLE01`, then issues one `DELETE ?cascade=true` — `core.goals.delete`'s own body is a single `DELETE ...
+   *  WHERE id = $1 OR path LIKE $2` inside one `conn.transaction()` (verified in `verticals/core/goals.py`), which is what
+   *  makes this "ordered leaf-first inside one transaction" without this file doing any ordering itself. No-op if no sample
+   *  root is on the board (the button should not be visible then — see `hasSampleData` — but a stale click racing a second
+   *  removal must not throw). */
+  async function removeSample(): Promise<void> {
+    if (!state.board) return
+    const root = state.board.columns
+      .flatMap((c) => c.goals)
+      .find((g) => g.parent_id === null && g.tags.includes(SAMPLE_TAG))
+    if (!root) return
     try {
-      await deleteGoal(id, true)
-      placement?.reconcile()
+      await deleteGoal(root.id, true)
+      await reloadBoard()
     } catch (err) {
-      placement?.rollback()
       toast(messageForError(err))
     }
   }
 
-  return { removeGoal, removeGoalCascade }
+  return { removeGoal, removeSample }
 }

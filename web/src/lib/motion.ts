@@ -21,7 +21,16 @@ const reducedQuery = typeof window !== 'undefined' && window.matchMedia
   ? window.matchMedia('(prefers-reduced-motion: reduce)')
   : null
 
+/* The desktop app's Reduce Motion item (View menu, desktop/macos/Verticals.swift) can't change the setting a web view reads
+   from macOS, so the app puts its answer on <html>: `data-reduce-motion` "on" or "off". With no answer (a browser, or a
+   person who never touched the item) the system setting decides. The styles' `prefers-reduced-motion` rules follow the
+   answer too (the build copies them, web/vite.config.ts), and every script asks here, so none calls matchMedia for it
+   (tests/static/test_reduce_motion_rules.py). docs/design/column-bounce.md. */
+const ANSWER = 'data-reduce-motion'
+
 export function reducedMotion(): boolean {
+  const answer = typeof document === 'undefined' ? null : document.documentElement.getAttribute(ANSWER)
+  if (answer === 'on' || answer === 'off') return answer === 'on'
   return reducedQuery?.matches ?? false
 }
 

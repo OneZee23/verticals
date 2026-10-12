@@ -1,38 +1,41 @@
 <script setup lang="ts">
 // A goal's links (docs/design-handoff S3.P1.007, .008): one list, the conversation Discuss with agent continues first,
 // then the rest by their latest change, three in view and "N more". Each row has one mark for its kind: the agent's own
-// on a conversation, the file on a document, the globe on a web page.
-import { computed, onMounted, ref, watch } from 'vue'
+// on a conversation, the file on a document, the globe on a web page. A conversation is a session of the task
+// (docs/design/task-sessions.md): its row says when it last moved, or that it went on in Claude or Codex without Verticals,
+// and the arrow at its end opens it where it lives.
+import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { agentChat, agentOf, assetUrl } from '../lib/agentChat'
+import { agentName, ago, openSession, sessionsOf, sessionWhen, taskSessions, type TaskSession } from '../lib/taskSessions'
 import { openWindow } from '../lib/windows'
 
 export interface LinkedDoc { key: string; path: string; title: string; updated: string | null; open: () => void; from?: string }
 
 const props = defineProps<{ goalId: string; goalTitle: string; body: string; docs: LinkedDoc[]; inWindow: boolean }>()
 
-type Row = { key: string; kind: 'conversation' | 'doc' | 'page'; title: string; at: number; mark?: string; note?: string; doc?: string; inherited?: boolean; open: (from: Element) => void }
-
-const conversations = ref<{ session: string; provider: string; title: string; at: number }[]>([])
-async function loadConversations(): Promise<void> {
-  const found = new Map<string, { session: string; provider: string; title: string; at: number }>()
-  for (const thread of agentChat.threads) {
-    if (thread.goal?.id === props.goalId) found.set(thread.id, { session: thread.id, provider: thread.provider, title: thread.title, at: thread.updatedAt })
-  }
-  if (agentChat.available) {
-    try {
-      const res = await fetch(`/__chat/goal?id=${encodeURIComponent(props.goalId)}`)
-      const data = res.ok ? await res.json() as { conversations?: { session: string; provider: string; lastTurnAt: number }[] } : {}
-      for (const c of data.conversations ?? []) {
-        const known = found.get(c.session)
-        found.set(c.session, { session: c.session, provider: c.provider, title: known?.title || props.goalTitle, at: Math.max(known?.at ?? 0, c.lastTurnAt * 1000) })
-      }
-    } catch { /* no gateway: the conversations kept here are all there is */ }
-  }
-  conversations.value = [...found.values()].sort((a, b) => b.at - a.at)
+type Row = {
+  key: string; kind: 'conversation' | 'doc' | 'page'; title: string; at: number; mark?: string; note?: string; doc?: string
+  inherited?: boolean; open: (from: Element) => void
+  /** A session's row: when it last moved, in words, and the way to open it where it lives. */
+  when?: string; where?: { label: string; open: () => void }
 }
-onMounted(loadConversations)
-watch(() => [props.goalId, agentChat.available, agentChat.threads.length], loadConversations)
+
+/* The task's sessions: what the gateway knows (read every couple of seconds, so a session that goes on outside shows up here
+   while the list is in sight), with the conversations this browser has kept for it, newest first. */
+const conversations = computed(() => {
+  const found = new Map<string, TaskSession & { listed: boolean }>()
+  for (const thread of agentChat.threads) {
+    if (thread.goal?.id === props.goalId) {
+      found.set(thread.id, { session: thread.id, provider: thread.provider, title: thread.title, movedAt: thread.updatedAt, outside: false, working: false, listed: false })
+    }
+  }
+  for (const session of agentChat.available ? sessionsOf(props.goalId) : []) {
+    const known = found.get(session.session)
+    found.set(session.session, { ...session, title: known?.title || session.title || props.goalTitle, movedAt: Math.max(known?.movedAt ?? 0, session.movedAt), listed: true })
+  }
+  return [...found.values()].sort((a, b) => b.movedAt - a.movedAt)
+})
 
 const pages = computed(() => {
   const seen = new Set<string>()
@@ -48,8 +51,10 @@ const pages = computed(() => {
 
 const rows = computed<Row[]>(() => {
   const talk = conversations.value.map((c): Row => ({
-    key: `c:${c.session}`, kind: 'conversation', title: c.title || props.goalTitle, at: c.at, mark: assetUrl(agentOf(c.provider).image),
-    open: () => window.dispatchEvent(new CustomEvent('verticals:discuss-goal', { detail: { id: props.goalId, session: c.session } })),
+    key: `c:${c.session}`, kind: 'conversation', title: c.title || props.goalTitle, at: c.movedAt, mark: assetUrl(agentOf(c.provider).image),
+    when: c.listed ? sessionWhen(c) : ago(c.movedAt, taskSessions.now),
+    open: () => window.dispatchEvent(new CustomEvent('verticals:discuss-goal', { detail: { id: props.goalId, session: c.session, provider: c.provider } })),
+    where: c.listed ? { label: `Open in ${agentName(c.provider)}`, open: () => void openSession(c) } : undefined,
   }))
   const docs = props.docs.map((d): Row => ({
     key: `d:${d.key}`, kind: 'doc', title: d.title, at: d.updated ? Date.parse(d.updated) : 0, note: d.from ? `from ${d.from}` : undefined,
@@ -81,7 +86,7 @@ function when(at: number): string {
 <template>
   <div v-if="rows.length" class="goal-links" data-role="goal-links">
     <ul class="goal-links__list">
-      <li v-for="row in shown" :key="row.key">
+      <li v-for="row in shown" :key="row.key" class="goal-links__item">
         <button type="button" class="goal-links__row" :class="{ 'goal-links__row--inherited': row.inherited }" :data-link-kind="row.kind"
           :data-link="row.key" :data-doc="row.doc" :data-inherited="row.inherited ? 'true' : undefined" @click="row.open($event.currentTarget as Element)">
           <img v-if="row.mark" class="goal-links__mark" alt="" :src="row.mark">
@@ -89,8 +94,10 @@ function when(at: number): string {
           <AppIcon v-else class="goal-links__mark" name="world" :size="14" />
           <span class="goal-links__title">{{ row.title }}</span>
           <span v-if="row.note" class="goal-links__note">{{ row.note }}</span>
-          <span class="goal-links__date">{{ when(row.at) }}</span>
+          <span class="goal-links__date" :data-role="row.when ? 'session-when' : undefined">{{ row.when ?? when(row.at) }}</span>
         </button>
+        <button v-if="row.where" type="button" class="goal-links__open" data-role="open-session" :aria-label="row.where.label" :title="row.where.label"
+          @click="row.where.open()"><AppIcon name="arrow-up-right" :size="16" /></button>
       </li>
     </ul>
     <button v-if="rows.length > 3" type="button" class="goal-links__more" data-role="goal-links-more" @click="all = !all">
@@ -102,6 +109,9 @@ function when(at: number): string {
 <style>
 .goal-links { order: 4; align-self: stretch; margin: 12px 0 0; }
 .goal-links__list { margin: 0; padding: 0; list-style: none; }
+/* A session's row has the way to open it where it lives after it, a button of its own: a button holds no other button. */
+.goal-links__item { display: flex; align-items: center; gap: 8px; }
+.goal-links__item > .goal-links__row { flex: 0 1 auto; min-width: 0; }
 .goal-links__row {
   display: flex;
   align-items: center;
@@ -120,6 +130,9 @@ function when(at: number): string {
 .goal-links__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline;
   text-decoration-thickness: 1px; text-underline-offset: .15em; text-decoration-color: rgb(0 0 0 / 20%); }
 .goal-links__note, .goal-links__date { flex: none; color: rgb(0 0 0 / 45%); }
+.goal-links__open { display: grid; flex: none; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; background: none;
+  color: rgb(0 0 0 / 45%); cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .goal-links__open:hover { color: #000; } }
 .goal-links__more { padding: 2px 0 0 22px; border: 0; background: none; color: rgb(0 0 0 / 45%); font: 400 13px/20px var(--font-body);
   cursor: pointer; }
 </style>

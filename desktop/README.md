@@ -13,14 +13,48 @@ launcher has its own ports, database, state directory and UI build.
   serves the UI, proxies `/api` with the bearer token (like the Docker nginx) and serves the chat's `/__chat/*` routes.
 - `chat/` — chat backend (`chat.py`: Claude via `claude --print` stream-json, Codex via
   `codex app-server`), `mcp_proxy.py` (stdio → HTTP MCP relay for Codex), `prompt-intro.md`
-  (the system prompt is this intro plus `.agents/skills/verticals-operator`, read at startup),
+  (the system prompt is this intro plus `.agents/skills/verticals-operator`, read at startup; the morning report's
+  turn adds `prompt-morning.md` and `.agents/skills/verticals-morning-report`; `morning_flow.py` runs its turns: the
+  writing one, a second agent's check with `prompt-check.md`, and one fixing turn if a check fails),
   `ui/assets/` (the agents' and models' marks). The conversation itself is drawn by the app
-  (`web/src/lib/agentChat.ts`, `AgentConversation.vue`).
-- `macos/` — `Verticals.swift` (native window, WKWebView), `Updater.swift` (checks, downloads and
-  installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
+  (`web/src/lib/agentChat.ts`, `AgentConversation.vue`). A conversation belongs to a goal when Discuss with agent began
+  it, or when the agent makes its first goal in it: the gateway reads the new goal's id from what the `create` tool answers
+  and records it, so `/__chat/goal?id=` finds the conversation, and it sends the app a `goal` event
+  (docs/design/agent-chips.md). The gateway keeps `agent.log` in the state folder, beside
+  `api.log` and `mcp.log`: a small rotating file (three files of 200 kB at most) of what the agent was asked to be and did,
+  that is, event kinds, tool names, flags, durations and exit details, never your words, the agent's, tool inputs or
+  titles, so a bug report can carry its last lines.
+- `chat/agent_sessions.py` — the sessions of tasks (docs/design/task-sessions.md). A session is a file its agent writes
+  (Claude Code's `projects/<folder>/<id>.jsonl`, Codex's `sessions/<y>/<m>/<d>/rollout-<time>-<id>.jsonl`, under
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`), and Verticals reads only its size and modified time:
+  never a byte of what is in it, no model, no token. The gateway keeps each task's sessions in `chat-sessions.json`
+  (`GET /__chat/sessions` is what the board polls), looks at their files every two seconds (a stat each), marks one that grew
+  while Verticals wasn't driving it as "continued in Claude/Codex", and opens one where it lives (`POST /__chat/open`: a Codex
+  thread by `codex://threads/<id>`, a Claude session in Terminal by `claude --resume <id>` from its folder). A session begun
+  from a task starts with its link, `verticals://goal/<id>`; the MCP tool `session_link` (the MCP server is told where the
+  gateway is by `--gateway-url`) ties a session begun in Claude Code or Codex to a task, and it is the only way one is linked.
+- `chat/report_facts.py`, `chat/report_kind.py` and `chat/prompt-report.md` — what a report carries from the app
+  (`GET /__report/facts`: the version, the Mac, and for a bug the last lines of `app.log`, `api.log` and `agent.log` with
+  every word of the board left out), whether the words are a bug or a request (`POST /__chat/report-kind`), and what the
+  agent is told about reports (docs/design/bug-reports.md; see Reports below).
+- `macos/` — `Verticals.swift` (native window, WKWebView), `AppLinks.swift` (the `verticals://goal/<id>` link and the lines
+  that connect Claude Code and Codex, no window in it, checked by `tests/static/test_app_links.py`), `Updater.swift` (checks,
+  downloads and installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
   (self-contained `Verticals.app` + `.dmg`).
 
 The agent picker follows Enjoy's (strings, model artwork).
+
+## Reduce Motion
+
+View → Reduce Motion is a checkmark between Reload and Enter Full Screen. It starts as macOS's own Reduce motion
+(System Settings → Accessibility → Display); after a click it keeps the person's choice (`ReduceMotion` in the app's
+defaults: `defaults delete app.verticals.desktop ReduceMotion` hands it back to macOS). A web view can't be told to
+change what it reads from macOS, so the app puts its answer on `<html>` as `data-reduce-motion="on"` or `"off"` — a
+user script at document start, like the title bar's height (`syncTitlebar` in `macos/Verticals.swift`) — and puts
+nothing there while no choice is made, so the page asks macOS as a browser does. Everything in the page that obeys
+`prefers-reduced-motion` obeys the answer: styles through `web/vite.config.ts`, which copies every such block under
+the switch, and scripts through `reducedMotion()` in `web/src/lib/motion.ts`. A column bounces at its ends
+(`overscroll-behavior: contain`) unless motion is reduced.
 
 ## Menu bar
 
@@ -28,10 +62,19 @@ Closing the window keeps Verticals running: PostgreSQL, the API and MCP stay up 
 icon goes away and the mascot stays in the menu bar. Its menu opens the window, says whether the
 board and MCP are running, and has:
 
-- Connect Claude Code — adds the `verticals-desktop` MCP server to Claude Code for every project
+- Use Verticals in Claude Code — adds the `verticals-desktop` MCP server to Claude Code for every project
   (`claude mcp add-json --scope user`), so terminal sessions work on this board. Its `headersHelper`
   reads the token from the owner-only `mcp-headers.json` in the state folder, so Claude Code's config
   holds no token.
+- Use Verticals in Codex — adds the `verticals` MCP server to Codex (`codex mcp add`): Codex starts
+  `chat/mcp_proxy.py` with the bundled Python, told the MCP address and the path of that same
+  `mcp-headers.json`, so Codex's config holds no token either.
+
+  The click on either is the consent: nothing is written into Claude Code's or Codex's settings before it, and the tick
+  beside the item is the app's own note that it was done (it does not read their settings). A click again replaces the
+  connection. Both need a full release of the app (a web-only update doesn't carry the menu).
+- A link `verticals://goal/<id>` — the app is registered for the `verticals` scheme: a click on one in Terminal or
+  Codex brings the window forward and opens that task (`board/#goal/<id>`); a link in the board's own page does the same.
 - Open at Login — a login item (`SMAppService`); at login Verticals starts in the menu bar only.
 - Quit Verticals — the only way, with ⌘Q, to stop the board and MCP.
 
@@ -71,7 +114,7 @@ dev builds), drawn by `macos/icon/make_icon.py` (`.venv/bin/python desktop/macos
 the repository's Playwright Chrome and macOS's `iconutil`).
 
 The bundle mirrors the repository layout inside `Contents/Resources` (verticals/, desktop/, the
-operator skill) plus a trimmed Python 3.12 with the dependencies and PostgreSQL 16 with its
+operator and morning-report skills) plus a trimmed Python 3.12 with the dependencies and PostgreSQL 16 with its
 Homebrew libraries copied in and relinked; the build checks that no binary links outside the app
 and runs initdb + `pg_trgm` from the bundle. The app keeps its data in
 `~/Library/Application Support/Verticals` and never writes into itself; an update replaces the
@@ -159,6 +202,44 @@ matching `.dmg` from the release page.
 - Agents see the screen context and use only the Verticals MCP tools (Claude runs with no built-in
   tools). Links to goals, docs and board dates open inside Verticals.
 - Uses the local CLI's own sign-in; every answer counts against that account's limits.
+
+## Reports
+
+Something is wrong, or could be better: pictures dropped on the window (or pasted into the field) wait above the field, and with
+them there what you type says what you see and what you want. ↵ makes a report (docs/design/bug-reports.md): a document with
+your words, the pictures and the version, and a task with no date that holds it. There is nothing to pick: the agent tells
+which kind it is from your words, once, and gets the words alone (`chat/report_kind.py` asks the Claude Code the chat runs, in a
+conversation nobody sees, with no tools and no MCP servers; the pictures and the logs never go to a model). In the same answer it
+names the task by its result, as the board names its tasks ("A card dragged to Friday stays there"), in the language of your words
+and in at most 8 words; the report keeps your words as you wrote them, and with no name (no agent, a slow or unsure one) the task
+takes your words. A bug, something that
+went wrong, is made under `reports/bugs/` and also holds the last lines of the app's and the agent's logs; a request, something
+that could be better, is made under `reports/requests/` and holds none (`GET /__report/facts?logs=0` opens no log). When the agent
+cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a request: that shape loses nothing. A document holds
+512 KiB, so the pictures are drawn smaller as JPEGs until they fit with the words and logs.
+
+- **Send to developers** is a link to a new GitHub issue on this repository, filled in with the report's text as the
+  document stands (the pictures cannot travel in a link: the issue ends with how many there were and to drag them in). It
+  reads as what it is: `labels=bug` for a bug and `labels=enhancement` for a request, the repository's own labels (GitHub
+  applies a label from a link only for someone who may label), and a request has no logs in it. GitHub does not publish its
+  link limit; a link is kept to 6,000 characters, the oldest log lines going first and the issue saying how many. With ⌥
+  held it is an email draft with the same text, to no address (`DEVELOPERS_EMAIL` in `web/src/lib/reportSend.ts` is empty;
+  the repository publishes none).
+- **What an agent reads of a report:** its pictures are data URLs inside the text, hundreds of kilobytes of base64, so every MCP read
+  of a document or a goal (`doc_get`, `doc_revision`, `doc_create`/`doc_save`/`doc_restore`'s answers, `goal`) returns each as
+  `[picture 1]`, `[picture 2]` and so on with every word as it is (`verticals/core/pictures.py`), and a placeholder the agent keeps
+  in a body it saves (`doc_save`, `update` of one goal) is the picture again, so editing a report's words never costs it its
+  pictures. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
+  text without its pictures.
+- **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
+  knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the
+  Mac's user name; the number of entries left out is told in the report.
+- **Improve it** asks the agent for a design document in the report's task. Once the person agrees (a comment and Check
+  again, or a word in the chat), the agent makes the change in a checkout of the source, with its tests, and opens a pull
+  request whose address it adds to the task's notes. The installed app ships without a checkout: the gateway looks for one at
+  `VERTICALS_SOURCE`, then `source` in the state folder's `config.json`, then the repository it runs from, then the usual
+  folders (`~/verticals`, `~/Developer/verticals`, …). With none, or with Verticals-only access, the task and its documents
+  still come and only the pull request waits.
 
 ## Security notes
 

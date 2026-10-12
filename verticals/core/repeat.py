@@ -5,6 +5,10 @@ The public trigger is deliberately narrow: `core.goals.update(..., done=True)` c
 wall clock never write. A replay computes the same next occurrence index, while the database's
 partial unique index on `(owner, repeat_series_id, repeat_index)` makes the operation idempotent
 under both retries and concurrent completion calls.
+
+A goal with steps repeats too (docs/design/goal-menu.md): the new time is built with every step beneath the one just
+finished, none of them ticked, in the same structure and order. See `_bring_back_steps`. The new time and each step copy
+keep their own privacy flag, so a private goal never comes back public.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import calendar
 import secrets
 import string
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import psycopg
@@ -33,6 +38,10 @@ _KEYS = frozenset(
 )
 _SELECTORS = ("weekdays", "month_days", "months", "quarters")
 _ID_ALPHABET = string.ascii_letters + string.digits
+
+
+def _new_id() -> str:
+    return "".join(secrets.choice(_ID_ALPHABET) for _ in range(8))
 
 
 def _integer(value: object, field: str, minimum: int, maximum: int) -> int:
@@ -141,12 +150,7 @@ def validate_target(conn: psycopg.Connection, *, owner: str, id: str) -> None:
         raise ValidationError("repeat requires a scheduled goal", field="repeat")
     if vertical_mod.descriptor(vertical).bounds_fn(anchor_date) is None:
         raise ValidationError("this vertical cannot repeat", field="repeat")
-    child = conn.execute(
-        "SELECT 1 FROM goals WHERE owner = %(owner)s AND parent_id = %(id)s LIMIT 1",
-        {"owner": owner, "id": id},
-    ).fetchone()
-    if child is not None:
-        raise ValidationError("goals with subgoals cannot repeat", field="repeat")
+    # Steps no longer stand in the way: each new time brings them back (`_bring_back_steps`).
 
 
 def _add_months(value: date, count: int) -> date:
@@ -215,10 +219,91 @@ def _existing(conn: psycopg.Connection, *, owner: str, series_id: str, index: in
     return tree._to_goal(row) if row is not None else None
 
 
+@dataclass(frozen=True)
+class Occurrence:
+    """The occurrence `materialize_next` stands on. `created` tells this call's own work from a replay: the page takes an
+    occurrence back with the tick that made it (docs/design/board-undo.md), and one that was already there is not that
+    tick's to take."""
+
+    goal: Goal
+    created: bool
+
+
+def _step_place(
+    step: Goal, *, completed: Goal, occurrence: Goal
+) -> tuple[str | None, date | None, str | None]:
+    """The new time's `(vertical, anchor_date, period_key)` for one step of the finished one.
+
+    A step without a day stays without one. A step dated in the goal's own period (the way the card nests the steps added
+    in it) moves with the goal into the new period. Any other dated step keeps its distance from the goal: the goal's
+    move, in days, is the step's, and its period is worked out again at its own scale."""
+    if step.vertical is None or step.anchor_date is None:
+        return None, None, None
+    if (step.vertical, step.period_key) == (completed.vertical, completed.period_key):
+        return occurrence.vertical, occurrence.anchor_date, occurrence.period_key
+    assert completed.anchor_date is not None and occurrence.anchor_date is not None
+    moved = step.anchor_date + (occurrence.anchor_date - completed.anchor_date)
+    return step.vertical, moved, vertical_mod.period_key(step.vertical, moved)
+
+
+def _bring_back_steps(
+    conn: psycopg.Connection, *, owner: str, completed: Goal, occurrence: Goal
+) -> None:
+    """Copy every step beneath `completed` under `occurrence`: unticked, with its notes, tags and its own privacy flag,
+    under the copy of the step it was under, in the order it stood in. `completed` itself keeps its steps as they were
+    left.
+
+    A parent is copied before its steps (`depth`), and the steps of one parent in their own order (`position`), each
+    taking the tail of its group as it goes, so the new list reads as the old one. The copies are plain steps: a step
+    that repeats on its own goes on in its own series, from the step itself. A dated step can't be placed under an
+    undated one (`core/placement.py`), and parking a step leaves its dated steps where they were; that copy comes back
+    undated, so completing the goal never fails on it."""
+    rows = conn.execute(
+        f"SELECT {tree.COLUMNS} FROM goals"
+        " WHERE owner = %(owner)s AND path LIKE %(pattern)s ESCAPE '\\' AND id <> %(id)s"
+        " ORDER BY depth, position, id",
+        {"owner": owner, "pattern": tree._escape_like(completed.path) + "%", "id": completed.id},
+    ).fetchall()
+    copies: dict[str, Goal] = {completed.id: occurrence}
+    for row in rows:
+        step = tree._to_goal(row)
+        parent = copies[str(step.parent_id)]
+        vertical, anchor, period_key = _step_place(step, completed=completed, occurrence=occurrence)
+        if vertical is not None and parent.vertical is None:
+            vertical = anchor = period_key = None
+        position = moves.allocate_position(
+            conn, owner=owner, vertical=vertical, period_key=period_key, parent_id=parent.id
+        )
+        for _ in range(3):
+            fresh = tree.attach(
+                conn,
+                owner=owner,
+                id=_new_id(),
+                parent_id=parent.id,
+                title=step.title,
+                body=step.body,
+                vertical=vertical,
+                anchor_date=anchor,
+                period_key=period_key,
+                color=step.color,
+                tags=step.tags,
+                origin=step.origin,
+                position=position,
+                private=step.private,
+            )
+            if fresh is not None:
+                copies[step.id] = fresh
+                break
+        else:
+            raise ValidationError("could not generate a unique step id", field="id")
+
+
 def materialize_next(
     conn: psycopg.Connection, *, owner: str, completed: Goal
-) -> Goal | None:
-    """Materialise index N+1 on completion; replay returns the already-created occurrence."""
+) -> Occurrence | None:
+    """Materialise index N+1 on completion; replay returns the already-created occurrence.
+
+    The new time comes with the steps of the finished one, unticked (`_bring_back_steps`), in the same transaction."""
     if completed.repeat_rule is None:
         return None
     assert completed.anchor_date is not None
@@ -231,7 +316,7 @@ def materialize_next(
         conn, owner=owner, series_id=completed.repeat_series_id, index=next_index
     )
     if existing is not None:
-        return existing
+        return Occurrence(existing, created=False)
     anchor = next_anchor(completed.anchor_date, completed.repeat_rule)
     raw_end = completed.repeat_rule.get("end_date")
     if raw_end is not None and anchor > date.fromisoformat(str(raw_end)):
@@ -248,7 +333,7 @@ def materialize_next(
         created = tree.attach(
             conn,
             owner=owner,
-            id="".join(secrets.choice(_ID_ALPHABET) for _ in range(8)),
+            id=_new_id(),
             parent_id=completed.parent_id,
             title=completed.title,
             body=completed.body,
@@ -263,12 +348,14 @@ def materialize_next(
             repeat_series_id=completed.repeat_series_id,
             repeat_index=next_index,
             repeat_start_date=completed.repeat_start_date,
+            private=completed.private,
         )
         if created is not None:
-            return created
+            _bring_back_steps(conn, owner=owner, completed=completed, occurrence=created)
+            return Occurrence(created, created=True)
         existing = _existing(
             conn, owner=owner, series_id=completed.repeat_series_id, index=next_index
         )
         if existing is not None:
-            return existing
+            return Occurrence(existing, created=False)
     raise ValidationError("could not generate a unique occurrence id", field="id")

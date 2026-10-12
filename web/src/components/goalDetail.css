@@ -109,6 +109,22 @@
   margin: 8px 0;
   border-radius: 6px;
 }
+/* A fenced block (bodyMarkdown.ts): the kit's block-code rail (`t-code--block`: a rule on the left, muted text, the body's own
+   typeface), set a size down from the prose and kept as written: no wrapping, scrolled sideways when a line is long. */
+.goal-detail__body-code {
+  display: block;
+  box-sizing: border-box;
+  margin: 12px 0 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  white-space: pre;
+  tab-size: 2;
+}
+.goal-detail__body-code > code { font: inherit; }
+/* The morning report's first block (docs/design/morning-quality.md): what the agent could not read, in the app's red, on top. */
+.goal-detail__body-code[data-md-fence='unread'] { border-left-color: #c93a5b; color: #c93a5b; }
 .goal-detail__body > :is(ul, ol) {
   margin: 16px 0 32px 12px;
   padding-left: 18px;

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // A document in a window (docs/design-handoff S3.P4): the document as the Docs view draws it, opened at the part the
 // answer points to; a link to a deleted one says so in words. Its head is one line (round 2, frame f2b; round 5, m3–m5):
-// the facts its page shows on the circle or the desk, its versions, and its title once the title has scrolled away.
+// the facts its page shows on the circle or the desk, its versions, and its title once the title has scrolled away. A
+// source (a document under sources/) carries its state over its title (SourceStrip.vue).
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import DocDetail from './DocDetail.vue'
+import SourceStrip from './SourceStrip.vue'
 import { ApiError, getDoc, type DocDetail as DocWire } from '../lib/api'
 import { windows } from '../lib/windows'
 import { shortDay, stackGoalOf } from '../lib/docsDesk'
+import { isSourcePath } from '../lib/sources'
 
 const props = defineProps<{ id: string; part?: string }>()
 const root = ref<HTMLElement | null>(null)
@@ -82,6 +85,7 @@ watch(() => props.part, () => void nextTick(showPart))
 
 <template>
   <div ref="root" class="doc-window" data-role="doc-window">
+    <SourceStrip v-if="doc && isSourcePath(doc.path)" :id="doc.id" />
     <DocDetail v-if="doc" :key="doc.id" :doc="doc" in-window />
     <p v-else-if="gone" class="doc-window__note" data-role="doc-gone">This document was deleted</p>
     <p v-else class="doc-window__note">Opening…</p>
@@ -89,10 +93,14 @@ watch(() => props.part, () => void nextTick(showPart))
 </template>
 
 <style>
-.doc-window { padding: 0 24px 24px; }
+/* The window runs full height with the field over its foot (WindowStack.vue, docs/design/doc-full-height.md): the end of
+   the text keeps clear of the white fade, so its last line is read, not covered. The document takes what a short text
+   leaves (below). */
+.doc-window { display: flex; flex: 1 0 auto; flex-direction: column; padding: 0 24px var(--vt-foot); }
 /* The document under its one-line head, as the frame draws it (round 5's `.dw-in`): 48 px in, the title 6 px under the
-   head at 28/34. */
-.doc-window .doc-detail { padding: 6px 24px 24px; }
+   head at 28/34. It takes the room the text leaves, and its body with it (DocDetail.vue's own `flex: 1 0 auto`); the
+   pane's `height: 100%` would squeeze a long text into a scroller of its own. */
+.doc-window .doc-detail { flex: 1 0 auto; height: auto; padding: 6px 24px 24px; }
 .doc-window .doc-detail__title.doc-detail__title { font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.012em; }
 .doc-window__note { margin: 0; padding: 24px 0; color: rgb(0 0 0 / 55%); font: 400 16px/24px var(--font-body); }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A step of the goal's menu (docs/design-handoff S5.P5): it takes the menu's place, with ‹ and its name at the top, and is
 // never a window of its own. Date lists its levels; each level is a plain list forward of its periods' starts; a specific
-// date opens the most basic calendar; Under finds the goal to sit under and makes this one its last step.
+// date opens the most basic calendar; Into a goal finds the goal to sit under and makes this one its last step.
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { store, todayIso } from '../store'
@@ -19,7 +19,7 @@ const root = ref<HTMLElement | null>(null)
 const goal = computed(() => findGoal(store.state.board, props.id) ?? null)
 const today = computed(() => localDate(todayIso()))
 const TITLES: Record<MoveStepName, string> = {
-  date: 'Move to a date', week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year', calendar: 'Date', under: 'Move under',
+  date: 'Move to a date', week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year', calendar: 'Date', under: 'Into a goal',
 }
 
 function back(): void {

@@ -6,12 +6,16 @@
 // belong under. The app files the card there and the card shows it. Nothing is planned or started. Words the agent reads
 // as a request to it go on as a conversation instead.
 import { computed, reactive } from 'vue'
-import { createGoal, deleteGoal, fetchUndated, patchGoal, reparentGoal, type InboxGoal } from './api'
+import { ApiError, createGoal, deleteGoal, fetchUndated, patchGoal, reparentGoal, type InboxGoal } from './api'
+import { forgetStep, makeStep, record, type Step } from './boardHistory'
+import { createdStep } from './goalSteps'
+import { putBackWords } from './historyWords'
 import { agentChat, newThread, quietTurn, send } from './agentChat'
 import { isoDate } from './schedule'
 import { todayIso } from '../store'
 import { moving } from './moving'
 import { desk } from './docsDesk'
+import { isSourcePath } from './sources'
 import type { DeskDoc } from './api'
 
 export const SHELVES: ReadonlyArray<readonly [string, string]> = [
@@ -51,8 +55,8 @@ export const today = computed(() => {
 
 /** Today shows its last three; “N more” unfolds the rest where they are (round 11). */
 export const TODAY_SHOWN = 3
-/** What is open in place: all of today, Earlier's shelves, Documents' shelves. */
-export const inboxView = reactive({ allToday: false, earlier: false, docs: false })
+/** What is open in place: all of today, Earlier's shelves, Documents' shelves, all the sources. */
+export const inboxView = reactive({ allToday: false, earlier: false, docs: false, sources: false })
 
 /** The column a task left (`parked_from_vertical`, which the schema keeps whenever a goal has no date); none, Life. */
 export const columnOf = (g: InboxGoal): string => g.parked_from_vertical ?? 'life'
@@ -69,8 +73,10 @@ export const shelves = computed(() => SHELVES
   .map(([vertical, name]) => ({ vertical, name, goals: earlier.value.filter((g) => columnOf(g) === vertical) }))
   .filter((shelf) => shelf.goals.length))
 
-/** Documents: every document, newest edit first, as Finder's Recents (round 8). Read with the Documents desk. */
+/** Documents: every document, newest edit first, as Finder's Recents (round 8). Read with the Documents desk. The sources
+ *  are documents too, and have a row of their own under this one (lib/sources.ts), so they are not in this row twice. */
 export const recentDocs = computed<DeskDoc[]>(() => Object.values(desk.data?.docs ?? {})
+  .filter((doc) => !isSourcePath(doc.path))
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at)))
 
 /** A document has no column, so “Show all” puts it on the shelf of its age, by its last edit: today on Day, up to a week
@@ -105,15 +111,40 @@ export function wordsToGoal(text: string): { title: string; body?: string } {
   return { title: `${(at > 150 ? cut.slice(0, at) : cut).trimEnd()}…`, body: text.trim() }
 }
 
-export async function completeInboxGoal(id: string): Promise<void> {
-  const index = inbox.goals.findIndex((g) => g.id === id)
-  if (index < 0) return
-  const [goal] = inbox.goals.splice(index, 1)
-  try {
-    await patchGoal(id, { done: true })
-  } catch {
-    inbox.goals.splice(index, 0, goal!)
+/** A task ticked off in the Inbox is a step of the board's history like any tick (docs/design/board-undo.md): undo brings
+ *  it back to the Inbox, redo ticks it again. */
+function tickStep(goal: InboxGoal): Step {
+  const set = (done: boolean) => async () => {
+    try {
+      await patchGoal(goal.id, { done })
+      await loadInbox()
+      return 'done' as const
+    } catch (err) {
+      return err instanceof ApiError && err.status === 404 ? ('drop' as const) : ('retry' as const)
+    }
   }
+  return {
+    id: goal.id,
+    glides: () => false,
+    words: (direction) => (direction === 'undo' ? putBackWords(goal.title) : [{ text: 'Completed ' }, { quote: goal.title }]),
+    undo: set(false),
+    redo: set(true),
+  }
+}
+
+export function completeInboxGoal(id: string): Promise<void> {
+  const index = inbox.goals.findIndex((g) => g.id === id)
+  if (index < 0) return Promise.resolve()
+  const [goal] = inbox.goals.splice(index, 1)
+  return makeStep(async () => {
+    try {
+      await patchGoal(id, { done: true })
+    } catch {
+      inbox.goals.splice(index, 0, goal!)
+      return null
+    }
+    return tickStep(goal!)
+  })
 }
 
 const WARM_UP = (words: string) => `Inbox warm-up. I wrote this down in my Inbox:
@@ -134,6 +165,7 @@ export async function writeDown(text: string): Promise<void> {
     id: created.id, title: created.title, parent: null, value_color: null, parked_from_vertical: created.parked_from_vertical,
     created_at: created.created_at, body_chars: created.body_chars, origin: created.origin, private: false,
   })
+  record(createdStep(created.id, created.title)) // the words you wrote are a change like any other: undo takes the card away
   if (!agentChat.available) return
   inbox.finding.push(created.id)
   const reply = (await quietTurn(WARM_UP(words), { inbox: true })).trim()
@@ -144,6 +176,7 @@ export async function writeDown(text: string): Promise<void> {
     } else if (/^ask\b/i.test(reply)) {
       // A request, not a note: it goes on as a conversation, and the card it briefly was goes away.
       await deleteGoal(created.id)
+      forgetStep(created.id) // it was never to stay: there is nothing left to take back
       inbox.goals = inbox.goals.filter((g) => g.id !== created.id)
       newThread()
       agentChat.open = true

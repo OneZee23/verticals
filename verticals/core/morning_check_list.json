@@ -1,0 +1,12 @@
+[
+  {"key": "sources", "label": "Every source read"},
+  {"key": "inputs", "label": "Every message placed"},
+  {"key": "continuity", "label": "Continues the last report"},
+  {"key": "inbox", "label": "Inbox"},
+  {"key": "changes", "label": "Changes allowed"},
+  {"key": "state", "label": "Current state"},
+  {"key": "names", "label": "Names"},
+  {"key": "hierarchy", "label": "Hierarchy and dates"},
+  {"key": "where", "label": "Where each item went"},
+  {"key": "copy", "label": "Published copy"}
+]

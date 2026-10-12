@@ -15,7 +15,7 @@ MARK = {"inbox": '[data-cap="inbox"]', "docs": '[data-cap="docs"]', "verticals":
 
 
 def show_tags(page: Page) -> None:
-    """Point at the circle: the field opens and its tags come in."""
+    """Point at the circle: it widens (it doesn't open; docs/design/field-hover.md) and its tags come in."""
     page.locator(CIRCLE).hover()
     expect(page.locator(".circle-tags.is-shown")).to_have_count(1)
 

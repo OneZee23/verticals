@@ -39,6 +39,8 @@ EXPECTED_OPERATIONS = {
     ("POST", "/api/goals/{id}/park"),
     ("POST", "/api/goals/{id}/due_ack"),
     ("DELETE", "/api/goals/{id}"),
+    # Undo (docs/design/board-undo.md): what a delete took away comes back.
+    ("POST", "/api/goals/{id}/restore"),
     ("GET", "/healthz"),
     ("POST", "/api/docs"),
     ("GET", "/api/docs"),
@@ -63,6 +65,13 @@ EXPECTED_OPERATIONS = {
     # The Inbox and Documents redesign: every goal with no date, and the Documents desk.
     ("GET", "/api/undated"),
     ("GET", "/api/docs/desk"),
+    # The agent's fixes (docs/design/agent-fixes.md, fixes 2 and 3): the morning's one ask a day.
+    ("POST", "/api/morning"),
+    # The second agent's verdict (docs/design/morning-quality.md): the gateway hands it over, the server writes it into the report.
+    ("POST", "/api/morning/check"),
+    # Sources (docs/design/sources.md): the list the Inbox draws and the owner's Approve of a check.
+    ("GET", "/api/sources"),
+    ("POST", "/api/sources/{id}/approve"),
 }
 
 # J7's negative space: none of these ever appear in a path string, in either direction of the

@@ -12,6 +12,7 @@
 
 import { createGoal, getGoal, patchGoal, type BoardResponse, type GoalDetail } from './api'
 import { ancestorIds, boardGoalHost, findGoal } from './boardIndex'
+import { noteOccurrence } from './repeatSteps'
 import { asOneHistoryStep } from './urlState'
 import type { DragState } from './drag'
 
@@ -167,7 +168,7 @@ export function createDetailSurface(
     const openId = state.openGoalId
     if (!openId) return
     try {
-      await patchGoal(childId, { done })
+      noteOccurrence(childId, (await patchGoal(childId, { done })).next_occurrence)
       state.goalDetail = await fetchGoalDetail(openId)
       await deps.reloadBoard()
     } catch (err) {
@@ -177,18 +178,20 @@ export function createDetailSurface(
 
   /** The new step lives where its parent does, so it shows on the board at once. Without a vertical the server kept it
    *  as an unscheduled idea, which the board doesn't draw: an added step vanished (found 27 Sep 2026). */
-  async function addDetailChild(title: string): Promise<void> {
+  async function addDetailChild(title: string): Promise<string | null> {
     const openId = state.openGoalId
     const trimmed = title.trim()
-    if (!openId || !trimmed) return
+    if (!openId || !trimmed) return null
     const parent = state.goalDetail?.id === openId ? state.goalDetail : null
     const place = parent?.vertical && parent.anchor_date ? { vertical: parent.vertical, anchor_date: parent.anchor_date } : {}
     try {
-      await createGoal({ title: trimmed, parent_id: openId, ...place })
+      const created = await createGoal({ title: trimmed, parent_id: openId, ...place })
       state.goalDetail = await fetchGoalDetail(openId)
       await deps.reloadBoard()
+      return created.id
     } catch (err) {
       deps.reportError(err)
+      return null
     }
   }
 

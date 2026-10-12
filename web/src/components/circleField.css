@@ -29,9 +29,14 @@
 .circle-field__shape {
   position: relative;
   box-sizing: border-box;
+  /* Every state is 84 px wide or more. Under the pointer the circle widens by raising this minimum (below), so the way it
+     settles back has its own timing and never touches how the field opens and closes (docs/design/field-hover.md). */
+  min-width: 84px;
   cursor: none;
   pointer-events: auto;
-  transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large);
+  /* The transform is for brushing an answer away (lib/brush.ts): it returns home as the circle forms. */
+  transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large),
+    transform var(--vt-dur-close) var(--vt-ease-large), min-width var(--dur-base) var(--ease-out);
 }
 .circle-field[data-state='open'] .circle-field__shape { transition-duration: var(--vt-dur-open); }
 .circle-field[data-state='typing'] .circle-field__shape { transition: none; }
@@ -47,7 +52,7 @@
   transition: border-radius var(--vt-dur-shape) var(--vt-ease-large);
 }
 /* A message inside the field takes a message's corners, the balloon's, not the pill's (round 11, KK 7 Oct 2026: "Rounding
-   of the corners should be like from message"). The circle, the open field and "Ready?" keep their round ends. */
+   of the corners should be like from message"). The circle and the open field keep their round ends. */
 .circle-field[data-state='answer'] .circle-field__surface { border-radius: var(--vt-radius-balloon); }
 .circle-field__words {
   position: absolute;
@@ -124,6 +129,9 @@
   border-radius: 1.5px;
   background: #fff;
   pointer-events: none;
+  /* Under the pointer it grows (below); it settles back in 200 ms on the app's ease-out token. */
+  transition: width var(--dur-base) var(--ease-out), height var(--dur-base) var(--ease-out),
+    margin var(--dur-base) var(--ease-out), border-radius var(--dur-base) var(--ease-out);
 }
 .circle-field__line.is-hidden { opacity: 0; }
 .circle-field__line.is-blinking { animation: circle-field-blink 1060ms steps(1) infinite; }
@@ -134,6 +142,14 @@
 .circle-field__pivot { position: absolute; inset: 0; pointer-events: none; }
 .circle-field__pivot.is-turning { animation: circle-field-turn 1600ms var(--vt-ease-play) infinite; }
 .circle-field__pivot.is-stopping { left: -48px; }
+/* With the step beside it the circle is a pill, and the line turns at its left end, where the circle's centre was: SearchBar.vue
+   moves the pivot there (`translate`), and it follows the shape's own timing, so the line holds its place while the black
+   widens and narrows. Typing has no transition, as the shape has none. */
+.circle-field__pivot { transition: translate var(--vt-dur-close) var(--vt-ease-large); }
+.circle-field[data-state='open'] .circle-field__pivot { transition-duration: var(--vt-dur-open); }
+.circle-field[data-state='typing'] .circle-field__pivot { transition: none; }
+.circle-field[data-flying='sent'] .circle-field__pivot { transition-duration: var(--vt-dur-sent); }
+@media (prefers-reduced-motion: reduce) { .circle-field__pivot { transition: none; } }
 @keyframes circle-field-turn { from { transform: rotate(0); } to { transform: rotate(180deg); } }
 .circle-field__stop {
   position: absolute;
@@ -172,6 +188,15 @@
   -webkit-line-clamp: 3;
   overflow-wrap: anywhere;
 }
+/* What an ask will change, under its question and in the same type (lib/askDetail.ts; docs/design/agent-fixes.md, fix 6). */
+.circle-field__answer-changes {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
 .circle-field__answer-lead {
   display: -webkit-box;
   margin: 0 0 8px;
@@ -182,16 +207,13 @@
   color: rgb(255 255 255 / 64%);
 }
 .circle-field__answer-measure--lead { width: 376px; }
-/* A message bringing documents (round 11): the first one's page on the left, three lines tall, a stack when there are
-   more; on the right a short title saying what came, then two lines of the message, all from the top. */
-.circle-field__answer--note { inset: 12px 32px 12px 24px; flex-direction: row; align-items: flex-start; justify-content: flex-start; gap: 16px; }
-.circle-field__note-page { position: relative; flex: none; display: block; }
-.circle-field__note-page > .doc-page { border-radius: 3px; box-shadow: none; }
-.circle-field__note-behind { position: absolute; left: 4px; top: 0; width: 50px; height: 67px; border-radius: 3px; background: #d9d9de; }
-.circle-field__note-page > .doc-page { position: relative; }
-.circle-field__note-words { flex: 1; min-width: 0; }
-.circle-field__note-title { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
-.circle-field__note-text { display: -webkit-box; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+/* A message that made or changed something (docs/design/agent-chips.md): the balloon in the field. Two lines of the message,
+   then the chips as the balloon draws them, in the same 376 px; "N more" counts the ones it has no room for. It stands on
+   the field's bottom edge, so while the black grows up around it the words and the chips stay where they will be. */
+.circle-field__answer--chips { inset: auto 32px 24px; justify-content: flex-end; }
+.circle-field__answer--chips .circle-field__answer-words { -webkit-line-clamp: 2; margin-bottom: 14px; }
+.circle-field__answer-chips { flex: none; }
+.circle-field__answer-more { margin: 12px 0 0; font: 400 13px/22px var(--font-body); color: rgb(255 255 255 / 50%); }
 .circle-field__answer-caret {
   display: inline-block;
   width: 2px;
@@ -203,6 +225,8 @@
   animation: circle-field-blink 1060ms steps(1) infinite;
 }
 .circle-field__answer-choices { display: flex; gap: 8px; margin-top: 10px; }
+/* An answer's Undo (`AnswerUndo.vue`) stands under its words at the left, the notice's own pill. */
+.circle-field__answer-undo { align-self: flex-start; }
 .circle-field__answer-choice {
   height: 32px;
   padding: 0 14px;
@@ -223,7 +247,18 @@
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-.circle-field[data-state='answer'] .circle-field__shape { transition-duration: var(--vt-dur-shape); transition-delay: 165ms; cursor: pointer; }
+/* The answer's shape grows after the line stands up (165 ms, then 300). Its transform, last of the three, keeps the close's own
+   timing: brushed away by hand (lib/brush.ts) it returns at once and as fast as the shape shrinks. The browser leaves the touch
+   to the brush. */
+.circle-field[data-state='answer'] .circle-field__shape {
+  transition-duration: var(--vt-dur-shape), var(--vt-dur-shape), var(--vt-dur-close);
+  transition-delay: 165ms, 165ms, 0ms;
+  cursor: pointer;
+  touch-action: none;
+  /* What the answer holds can be taller than the black while it grows up around it (chips): the black reveals it, and none of
+     it shows over the board. */
+  overflow: hidden;
+}
 /* The line stands up first (165 ms), then the shape grows around the answer (300 ms), then its words come in (S2.P4.013, .014). */
 .circle-field__answer { animation: circle-field-answer-in 170ms linear 295ms backwards; }
 @keyframes circle-field-answer-in { from { opacity: 0; } }
@@ -253,19 +288,36 @@
 @keyframes circle-field-ball-x { from { transform: translateX(-44px); } to { transform: translateX(44px); } }
 @keyframes circle-field-ball-y { from { transform: translateY(-12px); } to { transform: translateY(12px); } }
 
+/* Under the pointer (docs/design/field-hover.md): the resting circle only widens, 84 to 116 px, and keeps its round ends; its
+   line grows from 3 × 24 to 5 × 46 px, stays upright and keeps its round ends; the pointer shows, as over any button. It
+   comes at once: the timings above are the ones the way back takes, so settling takes 200 ms on the app's ease-out token and
+   nothing else about the circle moves. The sizes are `--vt-field-hover-*` in style.css; the buttons above grow in
+   CircleTags.vue. */
+@media (hover: hover) and (pointer: fine) {
+  .circle-field[data-pointed] .circle-field__shape {
+    min-width: var(--vt-field-hover-width);
+    cursor: pointer;
+    transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large),
+      transform var(--vt-dur-close) var(--vt-ease-large), min-width 0s;
+  }
+  .circle-field[data-pointed] .circle-field__line {
+    width: var(--vt-field-hover-line-width);
+    height: var(--vt-field-hover-line);
+    margin: calc(var(--vt-field-hover-line) / -2) 0 0 calc(var(--vt-field-hover-line-width) / -2);
+    border-radius: calc(var(--vt-field-hover-line-width) / 2);
+    transition-duration: 0s;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .circle-field__shape, .circle-field[data-state='open'] .circle-field__shape { transition: none; }
+  .circle-field__shape, .circle-field[data-state='open'] .circle-field__shape,
+  .circle-field[data-pointed] .circle-field__shape { transition: none; }
+  .circle-field__line { transition: none; }
   .circle-field__words { transition: opacity var(--vt-crossfade) linear; }
   .circle-field[data-state='answer'] .circle-field__shape { transition: width var(--vt-crossfade) linear, height var(--vt-crossfade) linear; }
   .circle-field__answer { animation-duration: var(--vt-crossfade); animation-delay: 0ms; }
   .circle-field__line.is-blinking, .circle-field__pivot.is-turning, .circle-field__answer-caret { animation: none; }
 }
 
-/* Go (lib/go.ts; round 5, frame m4): after an edit in an open document, the pointed field's black pill with the word in
-   its middle, grey like the field's caption until the hand is on it, then white. A plain arrow cursor: no line follows. */
-.circle-field__go { position: absolute; inset: 0; display: grid; place-items: center; color: rgb(255 255 255 / 40%);
-  font: 400 28px/36px var(--font-body); pointer-events: none; transition: color 120ms ease; }
-.circle-field[data-state='go'] .circle-field__shape { cursor: pointer; }
-.circle-field[data-state='go'] .circle-field__shape:hover .circle-field__go { color: #fff; }
 /* Holding a card carried in the Inbox (lib/inboxCarry.ts): the pill takes it, with the mascot and no words. */
 .circle-field[data-holding] .circle-field__words { opacity: 0; }

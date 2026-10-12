@@ -7,6 +7,8 @@ import GoalCard from './components/GoalCard.vue'
 import InboxView from './components/InboxView.vue'
 import DocsView from './components/DocsView.vue'
 import SearchBar from './components/SearchBar.vue'
+import DocCheck from './components/DocCheck.vue'
+import FieldNotice from './components/FieldNotice.vue'
 import CommentsPanel from './components/CommentsPanel.vue'
 import DevColorPanel from './components/DevColorPanel.vue'
 import DevDeckPanel from './components/DevDeckPanel.vue'
@@ -17,6 +19,7 @@ import DevZoomPanel from './components/DevZoomPanel.vue'
 import './lib/look'
 import { DEV_TUNING_ENABLED } from './lib/devTuning'
 import { isPrivacyHotkey, togglePrivacy } from './lib/privacy'
+import { startHistoryKeys } from './lib/boardHistory'
 import { store, todayIso } from './store'
 import { commandFilter } from './lib/commandFilter'
 import { agentChat, currentThread, newThread, openForGoal, openThread, send, startAgentChat } from './lib/agentChat'
@@ -29,15 +32,19 @@ import { REPLAN_ASK, type CarriedPlan } from './lib/replan'
 import { closeWindows, frontWindow, openWindow, outOfFocus, stepWindow, windows } from './lib/windows'
 import WindowStack from './components/WindowStack.vue'
 import AgentConversation from './components/AgentConversation.vue'
-import AgentStep from './components/AgentStep.vue'
 import AgentTag from './components/AgentTag.vue'
 import { ensureMorning } from './lib/morning'
+import { startSessionWatch } from './lib/taskSessions'
+import { takeSelection } from './lib/pageSelection'
+import { makeReport } from './lib/report'
+import { pictures, reporting } from './lib/reportPictures'
 
 /* The shell, not `Board.vue`, owns the day-rollover watcher: it is mounted for the whole life of
    the tab, while `Board` unmounts every time Inbox is active — a planner left on Inbox overnight
    would otherwise come back to yesterday's board. See `store.ts`'s own rollover comment. */
 let stopDayRollover: (() => void) | null = null
 let stopLiveBoard: (() => void) | null = null
+let stopHistoryKeys: (() => void) | null = null // ⌘Z / ⇧⌘Z take the board's last change back (lib/boardHistory.ts)
 const devPanelsVisible = ref(false)
 const searchBar = ref<InstanceType<typeof SearchBar> | null>(null)
 
@@ -106,6 +113,7 @@ function onWindowKeyUp(event: KeyboardEvent) {
 onMounted(() => {
   stopDayRollover = store.startDayRollover()
   stopLiveBoard = store.startLiveBoard()
+  stopHistoryKeys = startHistoryKeys()
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('pointercancel', onWindowPointerCancel)
@@ -117,6 +125,8 @@ onUnmounted(() => {
   stopDayRollover = null
   stopLiveBoard?.()
   stopLiveBoard = null
+  stopHistoryKeys?.()
+  stopHistoryKeys = null
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerCancel)
@@ -129,6 +139,15 @@ onUnmounted(() => {
 /* The goal conversation Discuss is opening; a message sent meanwhile waits for it. */
 let goalOpening: Promise<void> | null = null
 async function onSubmit(text: string): Promise<void> {
+  // Pictures wait above the field: the words say what the person sees and what they want, and with them they are a report,
+  // in whatever view this is (lib/report.ts, docs/design/bug-reports.md). The agent is asked only to tell the kind from the
+  // words. While one is being made, words typed meanwhile wait in the field.
+  if (reporting.value) {
+    if (pictures.sending) return
+    commandFilter.text = ''
+    void makeReport(text)
+    return
+  }
   // In the Inbox the field writes things down: your words land first in Today, with or without an agent (lib/inbox.ts).
   if (inboxWriting.value) {
     commandFilter.text = ''
@@ -136,6 +155,8 @@ async function onSubmit(text: string): Promise<void> {
     return
   }
   if (!agentChat.available) return
+  // What you selected on the page goes with these words, once (lib/pageSelection.ts).
+  const selection = takeSelection()
   // Sent while moving a goal: a new task with the move's context, and the move ends (docs/design-handoff S5.P3.041, .042).
   if (circle.moving) {
     const move = moveContext((id) => (findGoal(store.state.board, id) ?? spanGoal(id))?.title
@@ -155,7 +176,7 @@ async function onSubmit(text: string): Promise<void> {
   if (goalOpening) await goalOpening
   const front = frontWindow.value
   if (front?.kind === 'goal' && currentThread.value?.goal?.id !== front.target) await openForGoal({ id: front.target, title: front.title })
-  void send(text)
+  void send(text, selection ? { selection } : {})
 }
 function onVeilClick(): void {
   agentChat.open = false
@@ -184,12 +205,12 @@ function onConversationLink(url: string, web: boolean, from: Element | null): vo
 /* Discuss with agent: the goal pops out of its row into a window, the board goes out of focus, and the goal's latest
    conversation rises over the card (S3.P2.002, S3.P1.002). */
 function onDiscussGoal(event: Event): void {
-  const { id, session } = ((event as CustomEvent).detail ?? {}) as { id?: string; session?: string }
+  const { id, session, provider } = ((event as CustomEvent).detail ?? {}) as { id?: string; session?: string; provider?: string }
   if (!id || !agentChat.available) return
   const row = document.querySelector<HTMLElement>(`.goal-card[data-goal-id="${CSS.escape(id)}"] > .goal-card__row`)
   const title = row?.querySelector<HTMLElement>('.goal-card__title-text')?.innerText.trim() || 'Goal'
   openWindow({ kind: 'goal', target: id, title }, row)
-  if (session) openThread(session, { id, title })
+  if (session) openThread(session, { id, title }, provider)
   else goalOpening = openForGoal({ id, title }).then(() => undefined).finally(() => { goalOpening = null })
   agentChat.open = true
   agentChat.engaged = true
@@ -230,7 +251,7 @@ function onWindowsKey(event: KeyboardEvent): void {
 }
 onMounted(() => {
   // The morning report is looked for once the agent has answered (lib/morning.ts).
-  void startAgentChat().then(() => void morningCheck())
+  void startAgentChat().then(() => { startSessionWatch(); return morningCheck() })
   window.addEventListener('verticals:discuss-goal', onDiscussGoal)
   window.addEventListener('verticals:replan', onReplan)
   window.addEventListener('verticals:open-goal-window', onOpenGoalWindow)
@@ -243,7 +264,7 @@ onMounted(() => {
    asked for it once a day. The agent is there only after the gateway answered, so the first look waits for it. */
 let morningTimer: ReturnType<typeof setInterval> | null = null
 async function morningCheck(): Promise<void> {
-  ensureMorning(todayIso())
+  await ensureMorning(todayIso())
 }
 onUnmounted(() => {
   if (morningTimer) clearInterval(morningTimer)
@@ -261,10 +282,12 @@ onUnmounted(() => {
     <div class="app-veil" :class="{ 'is-shown': outOfFocus, 'app-veil--window': windows.list.length }" data-role="out-of-focus" aria-hidden="true" @click="onVeilClick"></div>
     <WindowStack />
     <AgentConversation @link="onConversationLink" />
-    <AgentStep />
+    <FieldNotice />
     <SearchBar id="verticals-command-bar" ref="searchBar" :agent-available="agentChat.available" @submit="onSubmit">
       <template #agent-tag><AgentTag /></template>
     </SearchBar>
+    <!-- Over the field while a document is in front: the count of its open comments, and Check again (docs/design/doc-comments-inline.md). -->
+    <DocCheck />
     <div class="app-content" :class="{ 'app-content--out-of-focus': outOfFocus, 'app-content--window': windows.list.length }">
       <!-- Mutually exclusive (`v-if`/`v-else`), not `v-show`: before ruling 1 (owner, 2026-08-09),
            `InboxView` rendered the same Maybe-bucket goals as Board's own eighth column
@@ -296,11 +319,11 @@ onUnmounted(() => {
   </div>
   <div id="dropdownPortal" aria-live="off"></div>
   <!-- docs/COMMENTS_SPEC.md WP-B2 (KK ruling 2026-08-25, D255): the comments panel is ONE instance
-       for the whole app, mounted here rather than by whichever surface (`GoalDetail.vue`,
-       `DocDetail.vue`) opened it — a viewport-docked overlay reads as "the sidebar" only if there
-       is exactly one of it, positioned against the window, not nested inside a board card or a
-       doc pane. It is entirely store-driven (`store.state.comments`) and takes no props; see
-       `CommentsPanel.vue`'s own header comment for the full story. -->
+       for the whole app, mounted here rather than by whichever surface (`GoalDetail.vue`) opened it — a
+       viewport-docked overlay reads as "the sidebar" only if there is exactly one of it, positioned against the
+       window, not nested inside a board card. It is entirely store-driven (`store.state.comments`) and takes no
+       props; see `CommentsPanel.vue`'s own header comment for the full story. A document's comments are not here:
+       they stand on their words (DocCommentCard.vue, docs/design/doc-comments-inline.md). -->
   <CommentsPanel />
   <template v-if="DEV_TUNING_ENABLED && devPanelsVisible">
     <DevColorPanel />

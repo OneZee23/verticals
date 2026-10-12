@@ -57,6 +57,9 @@ export interface DragActionDeps {
    *  ONLY when an optimistic landing's write fails after the local placement already committed;
    *  the success path never reloads. */
   quietReload: () => Promise<void>
+  /** Makes a drop's write a step of the board's history (`lib/boardHistory.ts::track`): `family` reads the goal's
+   *  subgoals too, for a write that moves them with it. */
+  track: (id: string, run: () => Promise<void>, family?: boolean) => Promise<void>
   /** The wide column (`lib/boardViewState.ts`), read fresh on every check. */
   expandedVertical: () => string | null
   /** Flow 4: open the chain a held-over goal is drawn under plus itself, in its column (`lib/familyView.ts`). */
@@ -196,7 +199,10 @@ export function createDragActions(deps: DragActionDeps) {
     // A goal kept above the field is there already: no flight back to its row.
     if (parked) state.drag.settling = null
     dragHover.reset()
-    deps.onRelease?.(state.drag.settling?.duration ?? 0, parked)
+    // Only a goal that was in the hand ends or keeps a move. A click, on the field or on the goal waiting there, is no
+    // release: it leaves the goal waiting and the weeks open, and a tap picks the goal (S5.P4.017). `App.vue` calls this
+    // on every pointer-up, so the end of a drag is told from a click here.
+    if (released) deps.onRelease?.(state.drag.settling?.duration ?? 0, parked)
     if (!released?.target) return
     const { id, target } = released
     const goal = deps.findGoalById(id)
@@ -206,7 +212,7 @@ export function createDragActions(deps: DragActionDeps) {
       // D241 (KK, 2026-08-16): a nested same-vertical subtask combines like anything else —
       // D179's glue made D236's gesture a one-way door (easy in, no out) and is superseded.
       playSound('goal_dragging')
-      void deps.combineInto(id, target.targetId)
+      void deps.track(id, () => deps.combineInto(id, target.targetId), true)
       return
     }
     const goalVertical = goal.vertical ?? 'maybe'
@@ -227,13 +233,13 @@ export function createDragActions(deps: DragActionDeps) {
         && sameVerticalParent
         && verticalRank(scale) > verticalRank(goal.vertical as VerticalScale)
       ) {
-        void splitAcross(id, sameVerticalParent, scale, target)
+        void deps.track(id, () => splitAcross(id, sameVerticalParent, scale, target), true)
         return
       }
       // The slot travels with the move. Dropping above another column's first card used to land
       // the row at the BOTTOM of that column (owner report 2026-08-10): this branch sent the
       // destination and threw `insertBeforeId` away, and a schedule write appends.
-      void deps.scheduleGoalTo(id, scale, target.periodKey ?? '', true, target.insertBeforeId)
+      void deps.track(id, () => deps.scheduleGoalTo(id, scale, target.periodKey ?? '', true, target.insertBeforeId), true)
       return
     }
     // D241/D249: a same-column drop reads the slot's own group owner (`target.parentId`,
@@ -256,23 +262,23 @@ export function createDragActions(deps: DragActionDeps) {
     if (sameVerticalParent) {
       if (slotParent !== null && slotParent !== sameVerticalParent) {
         playSound('goal_dragging')
-        void adoptIntoSlot(id, slotParent, target)
+        void deps.track(id, () => adoptIntoSlot(id, slotParent, target), true)
         return
       }
       if (slotParent === null) {
         playSound('goal_dragging')
-        void detachToSlot(id, sameVerticalParent, target)
+        void deps.track(id, () => detachToSlot(id, sameVerticalParent, target), true)
         return
       }
     } else if (slotParent !== null) {
       playSound('goal_dragging')
-      void adoptIntoSlot(id, slotParent, target)
+      void deps.track(id, () => adoptIntoSlot(id, slotParent, target), true)
       return
     }
     const write = reorderWrite(state.board, id, target)
     if (write) {
       playSound('goal_dragging')
-      void reorderGoal(id, write.patch, target)
+      void deps.track(id, () => reorderGoal(id, write.patch, target))
     }
   }
 

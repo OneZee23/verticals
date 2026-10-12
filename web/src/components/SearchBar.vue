@@ -1,17 +1,21 @@
 <script setup lang="ts">
 // The circle and the field (docs/design-handoff S1.P1, S1.P2): one black shape. At rest a circle with the mascot's line;
-// pointed at, focused or holding words, a field whose line is your cursor, then your caret. Enter sends the words
+// pointed at, it only widens and its line stands upright (docs/design/field-hover.md); a click, a key or ⌘K opens it, a
+// field whose line is your cursor, then your caret. Enter sends the words
 // (`submit`); the board follows every letter through `commandFilter`. Open, it is as wide as its caption, and while you
 // type it never gets narrower than that (Inbox and Documents redesign, rounds 9–10). A message of the agent's inside it
-// takes a message's corners, and the documents it brings stand on its left, the first one's page under a short title
-// (rounds 10–11; .local-design/inbox-and-docs/final, section 1).
+// takes a message's corners, and what it made or changed stands under its words as chips, as in its balloon
+// (docs/design/agent-chips.md). Pictures dropped on the window or pasted stand above it as a goal let go over it does and
+// widen it; its words are then the report's (docs/design/bug-reports.md).
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { store } from '../store'
-import { commandFilter } from '../lib/commandFilter'
+import { commandFilter, filterText } from '../lib/commandFilter'
+import { historyKey } from '../lib/boardHistory'
+import { fieldUndo } from '../lib/fieldUndo'
 import { circle, circleCaption, circleState, circleWords, inboxWriting } from '../lib/circle'
-import { sayGo } from '../lib/go'
 import { carry } from '../lib/inboxCarry'
 import { agentChat, decide, openAsk, stop } from '../lib/agentChat'
+import { answerUndo } from '../lib/answerUndo'
 import { plainWords } from '../lib/chatMarkdown'
 import { closeWindows, windows } from '../lib/windows'
 import { mascot, useMascot, watchBoardNews } from '../lib/mascot'
@@ -20,13 +24,16 @@ import { curve, reducedMotion } from '../lib/motion'
 import { launch } from '../lib/chatFlight'
 import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
+import AgentChips from './AgentChips.vue'
+import AnswerUndo from './AnswerUndo.vue'
 import CircleTags from './CircleTags.vue'
-import DocPage from './DocPage.vue'
-import { docLinks, withoutDocLines } from '../lib/docLinks'
-import { docCard } from '../lib/docCard'
+import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import MovingStack from './MovingStack.vue'
 import { backspace as pickBackspace, escape as movingEscape, tab as pickTab } from '../lib/moving'
 import { dots } from '../lib/spansDrag'
+import { pictures, picturesBackspace, picturesEscape, reporting, stackRoom, watchPictureInput } from '../lib/reportPictures'
+import { brush, type Brush } from '../lib/brush'
+import AgentStep from './AgentStep.vue'
 import './circleField.css'
 
 defineKnobs('The field', [
@@ -43,14 +50,22 @@ const PAD_RIGHT = 84
 const PAD_Y = 24
 const LINE = 36
 const CIRCLE = 84
-/* The open field's caption has 32 px on each side; "Ready?" has 36 (round 8's pill, at least the circle's 136). */
+/* While the agent works the circle is a pill with its step written beside the turning line (AgentStep.vue): the line stays where
+   the circle's centre was, 42 px in, and the stop square takes the right end. One width for every phrase, so the black moves
+   when the work begins and ends, not with each step. */
+const STEP_WIDTH = 360
+/* The open field's caption has 32 px on each side. */
 const PAD_CAPTION = 32
-const PAD_ASK = 36
-/* A message bringing documents: the page 50 × 67 (three lines), 24 px in from the left, 16 px to the words; the words
-   236 px wide, a short title and two lines of the message; 32 px on the right and 12 above and below (round 11). */
-const NOTE_PAGE = 50
-const NOTE_PAGE_H = 67
-const NOTE_WORDS = 236
+/* A message bringing chips is the balloon in the field: the words 376 px wide, two lines of them, 32 px in from the sides,
+   then the chips with 14 px between (the balloon's own), three at most and "N more" for the rest. */
+const CHIPS_PAD = 32
+const CHIPS_SHOWN = 3
+const CHIPS_GAP = 14
+const CHIP_HEIGHT = { doc: 67, goal: 44 }
+/* An answer that changed the board has its Undo at its end, under its words and its chips (`AnswerUndo.vue`): the notice's
+   pill, 40 px tall and about 80 wide, 12 px under what is above it. */
+const UNDO_ROW = 52
+const UNDO_W = 80
 
 const body = ref<HTMLElement | null>(null)
 const shape = ref<HTMLElement | null>(null)
@@ -85,6 +100,13 @@ const state = circleState
 const text = computed(() => commandFilter.text)
 const maxWidth = computed(() => Math.max(CIRCLE, Math.min(720, room.width - 32)))
 
+/* Under a pointer that can hover, the resting circle only widens: 116 px, its line 5 × 46 px and upright, the buttons
+   above it 38 px (circleField.css). It opens on a click, a key or ⌘K, never on the pointer (docs/design/field-hover.md). */
+const hoverQuery = typeof matchMedia === 'function' ? matchMedia('(hover: hover) and (pointer: fine)') : null
+const canHover = ref(hoverQuery?.matches ?? false)
+function onCanHover(event: MediaQueryListEvent): void { canHover.value = event.matches }
+const hovered = computed(() => circle.pointed && canHover.value && state.value === 'rest')
+
 let measureCtx: CanvasRenderingContext2D | null = null
 /* A face loads its glyphs as they are first used (Cyrillic, say): until then words are measured in the fallback face,
    so the field measures them again once a face has loaded, or a pasted line wraps out of sight. */
@@ -100,64 +122,101 @@ function textWidth(value: string): number {
   return Math.max(0, ...value.split('\n').map((part) => measureCtx!.measureText(part).width))
 }
 
-/* The documents the answer brings: the field shows the first one's page, a stack when there are more. */
-const answerDocs = computed(() => (circleWords.value?.kind === 'answer' ? docLinks(circleWords.value.text) : []))
-const behind = computed(() => (answerDocs.value.length > 1 ? 4 : 0))
-const noteTitle = computed(() => {
-  const docs = answerDocs.value
-  if (docs.length !== 1) return `${docs.length} documents`
-  const name = docCard(docs[0]!.id)?.title || docs[0]!.label || 'Document'
-  return name.split(' — ')[0]!.trim()
+/* What the answer made or changed, under its words as in its balloon: the first few chips, the rest counted. */
+const answerChips = computed(() => (circleWords.value?.kind === 'answer' ? chipLinks(circleWords.value.text) : []))
+const shownChips = computed(() => answerChips.value.slice(0, CHIPS_SHOWN))
+const moreChips = computed(() => answerChips.value.length - shownChips.value.length)
+/* Whether the answer in the circle has an Undo: it changed the board, and has not been let go. */
+const undoable = computed(() => {
+  const words = circleWords.value
+  const entry = words?.kind === 'answer' && words.answer ? answerUndo.entries[words.answer] : undefined
+  return !!entry && entry.state !== 'spent'
 })
-const noteDoc = computed(() => (answerDocs.value.length ? docCard(answerDocs.value[0]!.id) : null))
 const answerText = computed(() => {
   if (!circleWords.value) return ''
-  return plainWords(answerDocs.value.length ? withoutDocLines(circleWords.value.text) : circleWords.value.text)
+  return plainWords(answerChips.value.length ? withoutChipLines(circleWords.value.text) : circleWords.value.text)
 })
-const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(circleWords.value.lead) : ''))
+/* What the answer says to one who does not see it: its words, or the names of what it made when it has none. */
+const answerSays = computed(() => answerText.value || answerChips.value.map((chip) => chip.label).join(', '))
+const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWords.value.lead ? plainWords(withoutChipLines(circleWords.value.lead)) : ''))
+/* The chips' height is theirs to say (a title takes one line or two): measured, with the first guess until they are drawn. */
+const chipsBox = ref<HTMLElement | null>(null)
+const chipsMeasured = ref(0)
+const chipsHeight = computed(() => {
+  if (chipsMeasured.value) return chipsMeasured.value
+  const guess = shownChips.value.reduce((sum, chip) => sum + CHIP_HEIGHT[chip.kind] + 12, -12)
+  return guess + (moreChips.value ? 12 + 22 : 0)
+})
+/* The words above the chips: two lines at most, and 14 px to the first chip. */
+const chipWords = computed(() => (answerText.value ? Math.min(2, answerLines.value) * 22 + CHIPS_GAP : 0))
+/* An ask says what it will change under its question: the goal and its date (lib/askDetail.ts). */
+const changesText = computed(() => (circleWords.value?.kind === 'ask' ? circleWords.value.changes : ''))
 const stopping = computed(() => state.value === 'working' && circle.pointed)
+/* With an ask waiting in the open conversation the circle only waits (no turning line, no step). The step is a conversation's:
+   while a report is made from pictures the line turns with none (docs/design/bug-reports.md). */
+const stepShown = computed(() => state.value === 'working' && agentChat.running && !openAsk.value)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
-const GO_WORD = 'Ready?'
-const holding = computed(() => carry.over || (state.value === 'moving' && (store.state.drag.id !== null || dots.landing)))
+const holding = computed(() => carry.over
+  // In the Inbox the card waiting above the field, carried out again, is held the same way (docs/design/inbox-carry-stack.md).
+  || (state.value === 'moving' && (store.state.drag.id !== null || dots.landing || carry.item !== null)))
 
 /* Open, the field is as wide as its caption (round 9: "size of the field should align with the text"). */
 const openWidth = computed(() => Math.min(maxWidth.value, Math.ceil(PAD_CAPTION + textWidth(circleCaption.value) + PAD_CAPTION)))
 
-const width = computed(() => {
+const baseWidth = computed(() => {
   if (carry.over) return 120
-  if (state.value === 'answer' && answerDocs.value.length) return 24 + NOTE_PAGE + behind.value + 16 + NOTE_WORDS + 32
-  if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
+  if (state.value === 'answer' && answerChips.value.length) return ANSWER_MEASURE + 2 * CHIPS_PAD
+  if (state.value === 'answer') {
+    const wide = Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD)
+    return Math.max(CIRCLE, wide, undoable.value ? UNDO_W + 2 * ANSWER_PAD : 0)
+  }
+  if (stepShown.value) return Math.min(STEP_WIDTH, maxWidth.value)
   if (stopping.value) return 132
-  // "Ready?": the pointed field's pill as wide as its word, the word in its middle (round 8).
-  if (state.value === 'go') return Math.max(136, Math.ceil(PAD_ASK + textWidth(GO_WORD) + PAD_ASK))
   // Typing, it grows around your words and never gets narrower than it was open, so the first key moves nothing.
   if (state.value === 'typing') {
     return Math.min(maxWidth.value, Math.max(openWidth.value, Math.ceil(PAD_LEFT + PAD_RIGHT + textWidth(text.value) + 5)))
   }
   if (state.value === 'open') return openWidth.value
   if (holding.value) return 120
-  if (state.value === 'moving') return Math.min(circle.pointed ? 434 : 300, maxWidth.value)
+  // The buttons stand at the stack's left end whenever they are shown, pointed at or holding the keys, and the stack stands
+  // right of them (S5.P3.010, .012): the field is wide enough for both, with the hand on it or away.
+  if (state.value === 'moving') return Math.min(tagsShown.value ? 434 : 300, maxWidth.value)
   return mascot.pong ? 132 : CIRCLE
 })
+/* Pictures waiting above the field widen it to hold them: the stack, and what stands at its left end (4 px, or the tags and 8)
+   and keeps the stack's room as CSS reads it (FieldPictures.vue). It is as wide as the stack needs and the open field was, at
+   once (docs/design/bug-reports.md). */
+const tagsShift = ref(0)
+const width = computed(() => Math.min(maxWidth.value,
+  Math.max(baseWidth.value, reporting.value ? stackRoom(pictures.list) + Math.max(8, 4 + tagsShift.value) : 0)))
 const shownLines = computed(() => Math.min(lines.value, knob('field.maxLines')))
 const height = computed(() => {
   if (state.value === 'typing') return PAD_Y * 2 + shownLines.value * LINE
-  if (state.value === 'answer' && answerDocs.value.length) return Math.max(CIRCLE, 12 + NOTE_PAGE_H + behind.value + 12)
+  if (state.value === 'answer' && answerChips.value.length) {
+    return Math.max(CIRCLE, PAD_Y * 2 + chipWords.value + chipsHeight.value + (undoable.value ? UNDO_ROW : 0))
+  }
   if (state.value === 'answer') {
     const ask = circleWords.value?.kind === 'ask' ? 44 + (leadLines.value ? leadLines.value * 22 + 8 : 0) : 0
-    return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask)
+    return Math.max(CIRCLE, PAD_Y * 2 + answerLines.value * 22 + ask + (undoable.value ? UNDO_ROW : 0))
   }
   return CIRCLE
 })
+/* The turning line stays 42 px from the left end, the circle's centre, while the circle is a pill: the pivot moves there and
+   follows the shape's own timing (circleField.css), so the line holds its place as the black widens and narrows. */
+const stepShift = computed(() => (stepShown.value ? CIRCLE / 2 - width.value / 2 : 0))
 const wide = computed(() => state.value === 'open' || state.value === 'typing' || state.value === 'answer'
   || (state.value === 'moving' && !holding.value))
-const tagsShown = computed(() => (circle.pointed && wide.value) || circle.focused || agentChat.open)
+const tagsShown = computed(() => hovered.value || (circle.pointed && wide.value) || circle.focused || agentChat.open)
 
-/* Where the line stands: the mascot's at rest, your hand over the field, your caret once the field has it. */
+/* Where the line stands: the mascot's at rest, upright under the pointer, your hand over the field, your caret once the
+   field has it. */
 const lineMode = computed(() => {
   if (carry.over) return 'mascot'
-  if (state.value === 'answer' || state.value === 'go') return 'hidden'
+  if (state.value === 'answer') return 'hidden'
+  // Under the pointer the circle only widens: its line neither leans towards a goal nor follows the hand
+  // (docs/design/field-hover.md).
+  if (hovered.value) return 'upright'
   if (!wide.value) return 'mascot'
   // Resting open in the Inbox, the field is an invitation to write, not the agent: no line until you write (lib/inbox.ts).
   if (inboxWriting.value && state.value === 'open' && !circle.focused && !hand.value) return 'hidden'
@@ -180,6 +239,8 @@ watch([lineMode, hand, caret, width, height], () => {
   if (!m) return
   const mode = lineMode.value
   if (mode === 'hand' && hand.value) m.set({ x: hand.value.x, y: hand.value.y, r: 0, sy: 1 })
+  // At once, a lean in flight included: the change comes with the pointer.
+  else if (mode === 'upright') { if (lastMode !== 'upright') m.set({ x: 0, y: 0, r: 0, sy: 1 }) }
   else if (mode === 'caret') {
     const slide = lastMode !== 'caret' && lastMode !== 'hidden'
     if (slide) void m.to({ ...caret.value, r: 0, sy: 1 }, 140, curve('large'))
@@ -217,7 +278,7 @@ function moved(): void {
 watch([text, width, height], () => void nextTick(measure))
 
 /* The answer's shape hugs its words: one line as wide as they are, more at the 376 px measure, three at most (S2.P4.040). */
-watch(answerText, async () => {
+watch([answerText, changesText], async () => {
   await nextTick()
   const el = answerMeasure.value
   if (!el) return
@@ -225,6 +286,16 @@ watch(answerText, async () => {
   // The blinking line after the words takes its 5 px on the last line.
   answerWidth.value = answerLines.value > 1 ? ANSWER_MEASURE : Math.min(ANSWER_MEASURE, Math.ceil(el.scrollWidth) + 6)
 }, { immediate: true, flush: 'post' })
+/* The chips' height, as they are drawn: a title takes one line or two, and a goal's line arrives once the goal is read. */
+let chipsWatch: ResizeObserver | null = null
+watch(chipsBox, (el) => {
+  chipsWatch?.disconnect()
+  chipsWatch = null
+  chipsMeasured.value = 0
+  if (!el || typeof ResizeObserver === 'undefined') return
+  chipsWatch = new ResizeObserver(() => { chipsMeasured.value = Math.round(el.offsetHeight) })
+  chipsWatch.observe(el)
+}, { flush: 'post' })
 /* An ask in the field carries the agent's last words on top, two lines at most (S2.P1.044). */
 watch(leadText, async () => {
   await nextTick()
@@ -241,7 +312,8 @@ watch(width, (value) => document.documentElement.style.setProperty('--moving-fie
 watch(tagsShown, async (shown) => {
   await nextTick()
   const tags = shown ? document.querySelector<HTMLElement>('.circle-tags')?.offsetWidth ?? 0 : 0
-  document.documentElement.style.setProperty('--moving-tags-shift', `${tags ? tags + 8 : 0}px`)
+  tagsShift.value = tags ? tags + 8 : 0
+  document.documentElement.style.setProperty('--moving-tags-shift', `${tagsShift.value}px`)
 }, { immediate: true })
 
 /* While the agent works the line turns; when it answers it ends upright (S2.P3.003). */
@@ -252,6 +324,11 @@ watch(() => state.value === 'working', (working, was) => {
   if (from && from !== 'none') el.animate([{ transform: from }, { transform: 'none' }], { duration: 165, easing: curve('large') })
 })
 
+/* The answer goes back into the circle and the conversation keeps it: Esc does it, and so does brushing it away with a
+   sideways swipe or a drag down (lib/brush.ts; docs/design/agent-fixes.md, fix 8). */
+function sendBack(): void {
+  agentChat.answer = null
+}
 /* The answer goes up into the conversation as its last balloon, and the field takes the caret (S2.P4.003). */
 function reply(): void {
   const words = shape.value?.querySelector('.circle-field__answer-words')?.getBoundingClientRect()
@@ -268,8 +345,23 @@ function reply(): void {
   focusField()
 }
 
+/* ⌘Z in the field is the field's own, a run of typing at a time (`lib/fieldUndo.ts`): the browser's would take a letter. */
+const words = fieldUndo({
+  get: () => commandFilter.text,
+  set: (text) => {
+    commandFilter.text = text
+    void nextTick(() => {
+      input.value?.setSelectionRange(text.length, text.length)
+      moved()
+    })
+  },
+})
+watch(() => commandFilter.text, (now) => words.changed(now))
 function onInput(event: Event): void {
-  commandFilter.text = (event.target as HTMLTextAreaElement).value
+  const value = (event.target as HTMLTextAreaElement).value
+  words.typing(commandFilter.text, (event as InputEvent).inputType ?? '')
+  commandFilter.text = value
+  words.typed(value)
   moved()
 }
 function focusField(): void {
@@ -291,8 +383,9 @@ function clear(): void {
 function send(): void {
   const words = commandFilter.text.trim()
   if (!words) return
-  // In the Inbox they become the first card in Today, so no balloon takes them up (lib/inbox.ts).
-  if (inboxWriting.value) {
+  // In the Inbox they become the first card in Today, and with pictures above the field they are the report's: no balloon
+  // takes them up (lib/inbox.ts, lib/report.ts).
+  if (inboxWriting.value || reporting.value) {
     emit('submit', words)
     return
   }
@@ -304,9 +397,21 @@ function send(): void {
 }
 function onKeyDown(event: KeyboardEvent): void {
   if (event.isComposing) return
+  const history = historyKey(event)
+  if (history) {
+    // Inside the field the key is the field's own, and never the board's (`lib/boardHistory.ts`).
+    event.preventDefault()
+    words.step(history)
+    return
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     send()
+    return
+  }
+  // On an empty field with pictures above it, Backspace picks the last and a second takes it off (docs/design/bug-reports.md).
+  if (!commandFilter.text && event.key === 'Backspace' && picturesBackspace()) {
+    event.preventDefault()
     return
   }
   // On an empty field in the moving mode, Backspace and Tab pick up what stands above it (S5.P4.002, .003).
@@ -318,6 +423,7 @@ function onKeyDown(event: KeyboardEvent): void {
     event.preventDefault()
     event.stopPropagation()
     if (commandFilter.text) clear()
+    else if (picturesEscape()) return
     else if (movingEscape()) return
     else if (agentChat.open) agentChat.open = false
     else if (windows.list.length) closeWindows()
@@ -371,7 +477,7 @@ function onWindowKeyDown(event: KeyboardEvent): void {
     return
   }
   if (event.key === 'Escape' && circleWords.value?.kind === 'answer') {
-    agentChat.answer = null
+    sendBack()
     return
   }
   if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1 || event.key === ' ') return
@@ -380,12 +486,14 @@ function onWindowKeyDown(event: KeyboardEvent): void {
   if (anyMenuOpen() || store.state.drag.id || store.state.drag.pending) return
   event.preventDefault()
   if (circleWords.value?.kind === 'answer') reply()
+  words.typing(commandFilter.text, 'insertText')
   commandFilter.text += event.key
+  words.typed(commandFilter.text)
   focusField()
 }
 function onShapeClick(): void {
-  if (state.value === 'go') void sayGo()
-  else if (circleWords.value?.kind === 'answer') reply()
+  if (brushing?.swallowed()) return  // the end of a drag is no click on the answer
+  if (circleWords.value?.kind === 'answer') reply()
   else if (!circleWords.value) focusField()
 }
 function onResize(): void { room.width = innerWidth }
@@ -394,22 +502,31 @@ defineExpose({ focusField })
 
 let stopNews: (() => void) | null = null
 let stopFinding: (() => void) | null = null
+let stopPictures: (() => void) | null = null
+let brushing: Brush | null = null
 onMounted(() => {
+  if (shape.value) brushing = brush(shape.value, () => state.value === 'answer' && circleWords.value?.kind === 'answer', sendBack)
   const match = /^\/search\/(.*)/.exec(location.pathname)
   if (match?.[1]) { try { commandFilter.text = decodeURIComponent(match[1]) } catch { commandFilter.text = match[1] } }
   window.addEventListener('keydown', onWindowKeyDown, true)
   window.addEventListener('resize', onResize)
+  hoverQuery?.addEventListener('change', onCanHover)
   document.fonts?.addEventListener('loadingdone', onFontsLoaded)
   stopNews = watchBoardNews()
-  stopFinding = followWords(() => commandFilter.text, () => store.state.board)
+  stopFinding = followWords(() => filterText.value, () => store.state.board)
+  stopPictures = watchPictureInput()
   void document.fonts?.ready.then(() => void nextTick(measure))
 })
 onBeforeUnmount(() => {
+  chipsWatch?.disconnect()
+  brushing?.stop()
   window.removeEventListener('keydown', onWindowKeyDown, true)
   window.removeEventListener('resize', onResize)
+  hoverQuery?.removeEventListener('change', onCanHover)
   document.fonts?.removeEventListener('loadingdone', onFontsLoaded)
   stopNews?.()
   stopFinding?.()
+  stopPictures?.()
   if (stillTimer) clearTimeout(stillTimer)
   if (flyingTimer) clearTimeout(flyingTimer)
 })
@@ -421,6 +538,7 @@ onBeforeUnmount(() => {
     data-cap="search"
     :data-state="state"
     :data-pong="mascot.pong ? '' : undefined"
+    :data-pointed="hovered ? '' : undefined"
     :data-focused="circle.focused ? '' : undefined"
     :data-holding="holding ? '' : undefined"
     :data-flying="flying ?? undefined"
@@ -453,6 +571,7 @@ onBeforeUnmount(() => {
             autocomplete="off"
             spellcheck="false"
             :style="{ height: `${shownLines * LINE}px`, overflowY: lines > shownLines ? 'auto' : 'hidden' }"
+            @beforeinput="words.history($event as InputEvent)"
             @input="onInput"
             @keydown="onKeyDown"
             @keyup="moved"
@@ -469,7 +588,7 @@ onBeforeUnmount(() => {
           type="button"
           class="circle-field__send"
           :class="{ 'is-shown': !!commandFilter.text }"
-          :aria-label="inboxWriting ? 'Write it down' : 'Send to the agent'"
+          :aria-label="reporting ? 'Make the report' : inboxWriting ? 'Write it down' : 'Send to the agent'"
           :tabindex="commandFilter.text ? 0 : -1"
           @click.stop="send"
         >
@@ -477,34 +596,30 @@ onBeforeUnmount(() => {
             <path d="M12 21.5V3M12 3 5 10M12 3l7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <span v-if="state === 'go'" class="circle-field__go" data-role="circle-go" role="button" aria-label="Ready? Hand your edits to the agent">{{ GO_WORD }}</span>
-        <div v-if="circleWords" class="circle-field__answer" :class="[`circle-field__answer--${circleWords.kind}`, { 'circle-field__answer--note': answerDocs.length }]" data-role="circle-answer"
-          :aria-label="circleWords.kind === 'answer' ? `${answerText}. Press any key to reply` : undefined">
-          <template v-if="answerDocs.length">
-            <span class="circle-field__note-page" :style="{ paddingTop: `${behind}px`, paddingRight: `${behind}px` }" data-role="circle-note-page">
-              <i v-if="behind" class="circle-field__note-behind" aria-hidden="true"></i>
-              <DocPage v-if="noteDoc" :doc="noteDoc" :width="NOTE_PAGE" />
-            </span>
-            <div class="circle-field__note-words">
-              <p class="circle-field__note-title" data-role="circle-note-title">{{ noteTitle }}</p>
-              <p class="circle-field__note-text">{{ answerText }}<span class="circle-field__answer-caret" aria-hidden="true"></span></p>
-            </div>
-          </template>
-          <template v-else>
+        <div v-if="circleWords" class="circle-field__answer" :class="[`circle-field__answer--${circleWords.kind}`, { 'circle-field__answer--chips': answerChips.length }]" data-role="circle-answer"
+          :aria-label="circleWords.kind === 'answer' ? `${answerSays}. Press any key to reply` : undefined">
           <p v-if="leadText" class="circle-field__answer-lead">{{ leadText }}</p>
-          <p class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <p v-if="answerText || !answerChips.length" class="circle-field__answer-words">{{ answerText }}<span v-if="circleWords.kind === 'answer'" class="circle-field__answer-caret" aria-hidden="true"></span></p>
+          <p v-if="changesText" class="circle-field__answer-changes" data-role="circle-ask-changes">{{ changesText }}</p>
+          <div v-if="answerChips.length" ref="chipsBox" class="circle-field__answer-chips">
+            <AgentChips :links="shownChips" />
+            <p v-if="moreChips" class="circle-field__answer-more" data-role="circle-answer-more">{{ moreChips }} more</p>
+          </div>
+          <!-- At the answer's end, under its words and what it made (docs/design/agent-answer-undo.md, agent-chips.md). -->
+          <AnswerUndo v-if="undoable && circleWords.kind === 'answer'" :answer="circleWords.answer" class="circle-field__answer-undo" />
           <div v-if="circleWords.kind === 'ask' && openAsk" class="circle-field__answer-choices">
             <button v-for="option in openAsk.options" :key="option.value" type="button" class="circle-field__answer-choice"
               @click.stop="decide(openAsk.requestId, option.value)">{{ option.label }}</button>
           </div>
-          </template>
         </div>
-        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}</p>
+        <p ref="answerMeasure" class="circle-field__answer-measure" aria-hidden="true">{{ answerText }}<template v-if="changesText"><br>{{ changesText }}</template></p>
         <p ref="leadMeasure" class="circle-field__answer-measure circle-field__answer-measure--lead" aria-hidden="true">{{ leadText }}</p>
         <button v-if="stopping" type="button" class="circle-field__stop" aria-label="Stop the agent" @click.stop="stop()">
           <span aria-hidden="true"></span>
         </button>
-        <span ref="pivot" class="circle-field__pivot" :class="{ 'is-turning': state === 'working' && !openAsk, 'is-stopping': stopping }">
+        <AgentStep :shown="stepShown" />
+        <span ref="pivot" class="circle-field__pivot" :class="{ 'is-turning': state === 'working' && !openAsk, 'is-stopping': stopping && !stepShown }"
+          :style="{ translate: `${stepShift}px 0` }">
         <span
           ref="line"
           class="circle-field__line"

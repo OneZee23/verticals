@@ -1,12 +1,42 @@
 #!/usr/bin/env python3
-"""A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each
-message by marks in its words: `[tool:NAME]` calls Verticals' tool NAME, `[ask]` asks permission first, `[slow]` works
-for a second and a half, `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers
-with the words after it, and `[context]` with the app context Verticals sent."""
+"""A stand-in for `claude --print --input-format stream-json` in the UI suite: no model, no network. It answers each message by
+marks in its words: `[tool:NAME]` shows Verticals' tool NAME at work, `[tool:NAME {"id": "X"}]` really calls it (over MCP, the
+way Claude does, with the connection the gateway wrote for this conversation: `--mcp-config`), `[ask]` asks permission first,
+`[ask:NAME]` asks permission for one of the writes in ASKS, shaped as the real tool is called, `[make:ID|Title]` makes the
+goal ID by calling `create` and gets the words Verticals' server answers it with, `[slow]` works for a second and a half,
+`[wait:N]` works for N seconds, `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers
+with the words after it, and `[context]` with the app context Verticals sent. A message that opens with "Check again" (a
+document's comments and edits handed over, web/src/lib/checkAgain.ts) works for a second and a half, which is the time a test
+has to rewrite the document as the real agent would, then answers in two lines. A message that opens with "Improve it" (a
+report's design asked for, web/src/lib/reportActions.ts) is answered as the real agent answers it through Verticals' tools: it
+writes a design document into the report's task, linked to it, and says it is waiting for the person's comments; this one
+reaches the API the tests' gateway was started with (FAKE_AGENT_API). A message that opens with "A person's report, in their
+words" (a report to sort and name, desktop/chat/report_kind.py) is answered as the real agent answers it: two lines, the kind
+(request when the words say what the person would like: "I'd like", "would be nice", "I wish", "I want", "could be", "should
+be", "please add"; bug otherwise) and the task's name by its result, for the two sample wordings the tests use ("A card
+dragged to Friday stays there", "A card dropped near Friday snaps to it"). `[nameless]` in the words leaves the second line
+out, and `[unclear]` answers with a sentence that names neither kind. Each start appends the arguments it was given to
+`argv.log` in its folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions),
+and every message it is sent, whole, to `received.log` beside it.
+
+The morning report (docs/design/morning-quality.md) is played when `scenario.json` in the same folder says `"morning": true`:
+the seat the gateway started it in (the writer, or the second agent that checks the report) does what that seat does against
+the real server, as `fake_morning.py` says. Without the file, a morning ask is answered like any other message.
+
+Like the CLI, it asks its host before it calls a tool that an `ask` rule on its command line matches (`--settings`, as the
+morning turns are started with `permissions.ask`: every MCP tool), whatever `--allowedTools` says; the rule wins, as the
+docs say. The host answers allow or deny, a denied call gets an error result, and each answer is appended to `decisions.log`.
+`writer_tools` and `checker_tools` in the scenario name tools that seat tries once, besides the ones its work calls."""
+import fnmatch
 import json
+import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
+
+import fake_morning
 
 
 def out(obj):
@@ -19,18 +49,241 @@ def read():
     return json.loads(line) if line.strip() else None
 
 
+CHECKED = "Check again"
+IMPROVE = "Improve it"
+SORT = "A person's report, in their words"
+WISHES = ("i'd like", "i would like", "would be nice", "i wish", "i want", "could be", "should be", "please add")
+# The task's name by its result, for the sample wordings of the report tests: what the real agent would call each.
+NAMES = (("dragged the card to friday and it jumped back", "A card dragged to Friday stays there"),
+         ("snap to friday when i drop it near it", "A card dropped near Friday snaps to it"))
+
+# `[ask:NAME]`: a write the agent asks permission for. SYNDAY01 is "Draft the outline", a goal of 8 Aug 2026 in F2.
+ASKS = {
+    "schedule": ("schedule", {"id": "SYNDAY01", "vertical": "day", "anchor_date": "2026-08-10"}),
+    "week": ("schedule", {"id": "SYNDAY01", "vertical": "week", "anchor_date": "2026-08-10"}),
+    "clear": ("schedule", {"id": "SYNDAY01", "vertical": None, "anchor_date": None}),
+    "create": ("create", {"title": "Plan the review", "vertical": "week", "anchor_date": "2026-08-10"}),
+    "update": ("update", {"id": "SYNDAY01", "done": True}),
+    "delete": ("delete", {"id": "SYNDAY01"}),
+    "unknown": ("schedule", {"id": "SYNNOPE1", "vertical": "day", "anchor_date": "2026-08-10"}),
+}
+
+
+def ask_host(full, tool_input):
+    """The CLI's permission prompt, as it is made when a rule says ask: the host answers, and True is allow."""
+    global prompts
+    prompts += 1
+    out({"type": "control_request", "request_id": f"rule-{prompts}", "request": {
+        "subtype": "can_use_tool", "tool_name": full, "input": tool_input}})
+    while (reply := read()) is not None:
+        if reply.get("type") == "control_response":
+            return (reply.get("response", {}).get("response") or {}).get("behavior") == "allow"
+    return False
+
+
+def tool_call(name, tool_input=None):
+    """A tool use and its result, as the CLI streams them: Verticals' tools by their short name, another server's in full. A
+    tool an `ask` rule matches goes to the host first; one it denies comes back as an error."""
+    full = name if name.startswith("mcp__") else f"mcp__verticals__{name}"
+    tool_input = tool_input or {}
+    out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"tool-{name}", "name": full, "input": tool_input}]}})
+    allowed = True
+    if any(fnmatch.fnmatchcase(full, rule) for rule in ASK_RULES):
+        allowed = ask_host(full, tool_input)
+        with open("decisions.log", "a") as decisions:
+            decisions.write(json.dumps({"seat": ROLE, "tool": full, "behavior": "allow" if allowed else "deny"}) + "\n")
+    time.sleep(0.05)
+    out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"tool-{name}", "is_error": not allowed,
+                                                  "content": "ok" if allowed else "The user declined this action."}]}})
+    return allowed
+
+
+def try_extra_tools():
+    """The tools the scenario has this seat try once, besides the ones its work calls (an undeclared tool, a write)."""
+    for name in SCENARIO.pop(f"{ROLE}_tools", []):
+        tool_call(name)
+
+
+def scripted(words, text):
+    """The words this seat of the morning answers with, or None to answer like any message. May end the process or never answer,
+    as the scenario asks of the second agent."""
+    global rounds, remembered
+    api, ctx = fake_morning.Api(CONF), fake_morning.context_of(text)
+    found = re.search(r"reports/morning/\d{4}-\d{2}-\d{2}\.md", words)
+    remembered = found.group(0) if found else remembered  # asked again, it remembers which report it was reading
+    if ROLE == "writer":
+        if "these checks failed" in words:
+            return fake_morning.write_report(SCENARIO, api, SCENARIO.get("ask", ""), ctx, tool_call, defects=False)
+        if "Make my morning report" in words:
+            SCENARIO["ask"] = words
+            try_extra_tools()
+            written = fake_morning.write_report(SCENARIO, api, words, ctx, tool_call)
+            return "[fail]" if SCENARIO.get("writer_mode") == "fail_after_write" else written
+        return None
+    mode = SCENARIO.get("checker_mode")
+    if mode == "silent":
+        time.sleep(3600)
+    if mode == "crash":
+        sys.exit(3)
+    again = "no verdict I could read" in words
+    if mode == "garbage" or (mode == "garbage_once" and not again):
+        return "The report looks fine to me."
+    time.sleep(SCENARIO.get("checker_delay", 0))
+    try_extra_tools()
+    answer = fake_morning.check_report(SCENARIO, api, remembered, ctx, tool_call, rounds)
+    rounds += 1
+    return answer
+
+
+def api(method, path, body=None):
+    """One call to the API the gateway was started over, as the Verticals tool the real agent would call."""
+    request = urllib.request.Request(
+        os.environ["FAKE_AGENT_API"] + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": "Bearer " + os.environ["FAKE_AGENT_TOKEN"], "Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read() or b"null")
+
+
+def improve(words):
+    """What the real agent does when asked to improve a report (desktop/chat/prompt-report.md): a design document in the
+    report's own task (doc_create, then doc_link by the task's notes), the one it has made already when it is asked again, and
+    two short lines saying it waits."""
+    goal = re.search(r"#goal/([A-Za-z0-9_-]+)", words).group(1)
+    task = api("GET", f"/api/goals/{goal}")
+    path = f"design/{goal}.md"
+    title = f"Design — {task['title'][:60]}"
+    doc = next((d for d in api("GET", "/api/docs")["docs"] if d["path"] == path), None)
+    if doc is None:
+        doc = api("POST", "/api/docs", {"path": path, "title": title,
+                                        "body": "What went wrong, what you expected, the change and its tests.\n\nWaiting for your comments."})
+    if f"doc:{path}" not in (task.get("body") or ""):
+        api("PATCH", f"/api/goals/{goal}", {"body": ((task.get("body") or "") + f"\n\n[{title}](doc:{path})").strip()})
+    return f"Wrote the design. Waiting for your comments.\n\n[{title}](#doc/{doc['id']})"
+
+
+def sort_for(words):
+    """What the real agent answers when it is asked to sort and name a report: by the person's own words."""
+    said = words.split("\n\n", 1)[-1].rsplit("\n\nIs it a bug or a request, and what is the task called?", 1)[0].lower()
+    if "[unclear]" in said:
+        return "It is hard to say from this."
+    kind = "request" if any(wish in said for wish in WISHES) else "bug"
+    name = next((named for key, named in NAMES if key in said), None)
+    return kind if "[nameless]" in said or not name else f"{kind}\n{name}"
+
+
+def tool_marks(words):
+    """`[tool:NAME]` and `[tool:NAME {json}]` marks in `words`: (name, arguments or None, start, end) for each."""
+    marks, at = [], 0
+    while (found := re.compile(r"\[tool:([a-z_]+)").search(words, at)):
+        end, arguments = found.end(), None
+        rest = words[end:]
+        trimmed = rest.lstrip()
+        if trimmed.startswith("{"):
+            try:
+                arguments, used = json.JSONDecoder().raw_decode(trimmed)
+                end += len(rest) - len(trimmed) + used
+            except ValueError:
+                arguments = None
+        close = words.find("]", end)
+        if close == -1:
+            break
+        marks.append((found.group(1), arguments, found.start(), close + 1))
+        at = close + 1
+    return marks
+
+
+def without_tool_marks(words):
+    for _name, _arguments, start, end in reversed(tool_marks(words)):
+        words = words[:start] + words[end:]
+    return words
+
+
 def answer_for(words):
+    if words.startswith(CHECKED):
+        return "Changed the words you commented on.\nLeft the rest as it was."
     if "[say]" in words:
         return words.split("[say]", 1)[1].strip()
     if "[long]" in words:
         return ("Here is the first part of a longer answer, with **bold** words.\n\n"
                 "The second part goes on about the plan, the dates and what could move next week.\n\n"
                 "The third part closes it with one more line to read.")
-    said = re.sub(r"\[[a-z:_]+\]", "", words).strip()
+    said = re.sub(r"\[(?:[a-z:_]+|make:[^\]]*|wait:[0-9.]+)\]", "", without_tool_marks(words)).strip()
     return f"Done: {said}" if said else "Done."
 
 
+class Mcp:
+    """Verticals' MCP server as Claude reaches it: the url and the headers of `--mcp-config` (the bearer token, and the
+    conversation this agent belongs to), streamable HTTP, one session for the whole run."""
+
+    def __init__(self):
+        self.server, self.session, self.version, self.next_id = None, None, "2025-06-18", 0
+        if "--mcp-config" in sys.argv:
+            try:
+                with open(sys.argv[sys.argv.index("--mcp-config") + 1]) as config:
+                    self.server = json.load(config)["mcpServers"]["verticals"]
+            except (OSError, ValueError, KeyError, IndexError):
+                self.server = None
+
+    def post(self, payload):
+        headers = {**self.server.get("headers", {}), "Content-Type": "application/json",
+                   "Accept": "application/json, text/event-stream"}
+        if self.session:
+            headers["Mcp-Session-Id"], headers["MCP-Protocol-Version"] = self.session, self.version
+        request = urllib.request.Request(self.server["url"], json.dumps(payload).encode(), headers, method="POST")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body, kind = response.read().decode(), response.headers.get("content-type", "")
+            self.session = response.headers.get("mcp-session-id") or self.session
+        if "id" not in payload:
+            return None
+        messages = [json.loads(line[5:]) for line in body.splitlines() if line.startswith("data:")] \
+            if "event-stream" in kind else [json.loads(body)]
+        return next((m for m in messages if m.get("id") == payload["id"]), None)
+
+    def request(self, method, params):
+        self.next_id += 1
+        return self.post({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params})
+
+    def call(self, name, arguments):
+        """(text, is_error) of one tool call."""
+        if self.server is None:
+            return "No connection to Verticals.", True
+        try:
+            if self.session is None:
+                started = self.request("initialize", {"protocolVersion": self.version, "capabilities": {},
+                                                      "clientInfo": {"name": "fake-claude", "version": "0"}})
+                self.version = started["result"].get("protocolVersion", self.version)
+                self.post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            reply = self.request("tools/call", {"name": name, "arguments": arguments})
+        except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError) as error:
+            return f"The call failed: {error}", True
+        if reply is None or "error" in reply:
+            return f"The call failed: {(reply or {}).get('error')}", True
+        result = reply["result"]
+        text = "".join(block.get("text", "") for block in result.get("content", []) if block.get("type") == "text")
+        return text[:2000], bool(result.get("isError"))
+
+
+mcp = Mcp()
+
+
+with open("argv.log", "a") as argv_log:
+    argv_log.write(json.dumps(sys.argv[1:]) + "\n")
+
+# The seat this process was started in, from the instructions the gateway gave it.
+SYSTEM = next((sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--append-system-prompt"), "")
+ROLE = ("checker" if "## This turn: the second check" in SYSTEM else "writer" if "## This turn: the morning report" in SYSTEM else None)
+SCENARIO, CONF = fake_morning.load("scenario.json"), fake_morning.load("fake-agent.json")
+SCRIPTED = bool(ROLE and SCENARIO and SCENARIO.get("morning") and CONF)
+rounds, remembered, prompts = 0, "", 0
+# The `ask` rules the gateway put on this process's command line (`--settings`): what the CLI would ask its host about.
+SETTINGS = next((sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--settings"), "{}")
+try:
+    ASK_RULES = json.loads(SETTINGS).get("permissions", {}).get("ask", [])
+except ValueError:
+    ASK_RULES = []
+
 started = False
+asked = 0
 for msg in iter(read, None):
     kind = msg.get("type")
     if kind == "control_request":
@@ -45,30 +298,58 @@ for msg in iter(read, None):
     if kind != "user":
         continue
     text = "".join(block.get("text", "") for block in msg["message"]["content"] if block.get("type") == "text")
+    with open("received.log", "a") as received_log:  # what the agent was sent, whole, one JSON string a line
+        received_log.write(json.dumps(text) + "\n")
     words = text.split("</app_context>")[-1].strip()
     if "[context]" in words:
         words = "[say] " + text.split("<app_context>")[-1].split("</app_context>")[0].strip()
+    said = scripted(words, text) if SCRIPTED else None
+    if said is not None:
+        words = "[say] " + said
     if not started:
         out({"type": "system", "subtype": "init", "model": "fake-model"})
         started = True
-    if "[ask]" in words:
-        out({"type": "control_request", "request_id": "ask-1", "request": {
-            "subtype": "can_use_tool", "tool_name": "mcp__verticals__update", "input": {"id": "x"}}})
+    ask = re.search(r"\[ask(?::([a-z_]+))?\]", words)
+    if ask:
+        tool, tool_input = ASKS[ask.group(1)] if ask.group(1) else ("update", {"id": "x"})
+        asked += 1
+        out({"type": "control_request", "request_id": f"ask-{asked}", "request": {
+            "subtype": "can_use_tool", "tool_name": f"mcp__verticals__{tool}", "input": tool_input}})
         while (reply := read()) is not None and reply.get("type") != "control_response":
             pass
-    for name in re.findall(r"\[tool:([a-z_]+)\]", words):
+    for number, (name, arguments, _start, _end) in enumerate(tool_marks(words)):
+        use = f"tool-{name}-{number}"
         out({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "id": f"tool-{name}", "name": f"mcp__verticals__{name}", "input": {}}]}})
-        time.sleep(0.3)
+            {"type": "tool_use", "id": use, "name": f"mcp__verticals__{name}", "input": arguments or {}}]}})
+        if arguments is None:
+            time.sleep(0.3)
+            text, failed = "ok", False
+        else:
+            text, failed = mcp.call(name, arguments)
         out({"type": "user", "message": {"content": [
-            {"type": "tool_result", "tool_use_id": f"tool-{name}", "content": "ok"}]}})
-    if "[slow]" in words:
+            {"type": "tool_result", "tool_use_id": use, "content": text, **({"is_error": True} if failed else {})}]}})
+    for goal, title in re.findall(r"\[make:([A-Za-z0-9_-]+)\|([^\]]*)\]", words):
+        out({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"make-{goal}", "name": "mcp__verticals__create", "input": {"title": title}}]}})
+        time.sleep(0.3)
+        # What the server's `create` tool says (verticals/mcp/tools.py), which tests/mcp pins.
+        out({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"make-{goal}", "content": [{"type": "text", "text": f"Created {title!r} [{goal}]"}]}]}})
+    fixed = None
+    if words.startswith(IMPROVE):
+        time.sleep(1.0)
+        fixed = improve(words)
+    elif words.startswith(SORT):
+        fixed = sort_for(words)
+    if "[slow]" in words or words.startswith(CHECKED):
         time.sleep(1.5)
+    for seconds in re.findall(r"\[wait:([0-9.]+)\]", words):
+        time.sleep(float(seconds))
     if "[fail]" in words:
         out({"type": "result", "is_error": True, "result": "The fake agent failed on purpose."})
         continue
     out({"type": "stream_event", "event": {"type": "message_start"}})
     out({"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "text"}}})
-    for piece in re.findall(r"\S+\s*|\n+", answer_for(words)):
+    for piece in re.findall(r"\S+\s*|\n+", fixed or answer_for(words)):
         out({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": piece}}})
     out({"type": "result", "is_error": False, "result": ""})

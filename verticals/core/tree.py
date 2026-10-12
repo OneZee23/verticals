@@ -67,6 +67,7 @@ from datetime import date
 import psycopg
 from psycopg.types.json import Jsonb
 
+from verticals.core import changes
 from verticals.core import vertical as vertical_mod
 from verticals.core import placement
 from verticals.core.errors import CycleRefused, NotFound, ValidationError
@@ -232,6 +233,7 @@ def attach(
     repeat_index: int | None = None,
     repeat_start_date: date | None = None,
     parked_from_vertical: str | None = None,
+    private: bool = False,
 ) -> Goal | None:
     """Insert one new row as a child of `parent_id` (root, when `parent_id` is `None`).
 
@@ -240,6 +242,8 @@ def attach(
     `renumber` when not given explicitly. `vertical`/`anchor_date`/`period_key` are stored exactly
     as given — already derived and validated by the caller (S-04's "period_key is derived, never
     accepted" is `core/goals.py`'s public-input boundary, not this internal primitive's).
+    `private` is the privacy flag `core.goals.update` writes (017_privacy.sql), stored as given: a new row is public unless
+    its caller says otherwise, and a repeat's copies pass on their source's.
 
     Returns `None`, not an exception, on a unique-key collision. The ordinary path is an `id`
     collision (IR-05); repeat materialisation can also race on its series/index unique key.
@@ -290,13 +294,13 @@ def attach(
             INSERT INTO goals
               (id, owner, parent_id, path, depth, vertical, anchor_date, period_key,
                title, body, color, tags, position, origin, repeat_rule, repeat_series_id,
-               repeat_index, repeat_start_date, parked_from_vertical)
+               repeat_index, repeat_start_date, parked_from_vertical, private)
             VALUES
               (%(id)s, %(owner)s, %(parent_id)s, %(path)s, %(depth)s,
                %(vertical)s::vertical_scale, %(anchor_date)s, %(period_key)s,
                %(title)s, %(body)s, %(color)s, %(tags)s, %(position)s, %(origin)s::goal_origin,
                %(repeat_rule)s::jsonb, %(repeat_series_id)s, %(repeat_index)s,
-               %(repeat_start_date)s, %(parked_from_vertical)s)
+               %(repeat_start_date)s, %(parked_from_vertical)s, %(private)s)
             ON CONFLICT DO NOTHING
             RETURNING {COLUMNS}
             """,
@@ -320,8 +324,11 @@ def attach(
                 "repeat_index": repeat_index,
                 "repeat_start_date": repeat_start_date,
                 "parked_from_vertical": parked_from_vertical,
+                "private": private,
             },
         ).fetchone()
+        if row is not None:
+            changes.note_made(id)  # whoever is watching this call (`core/answers.py`) hears of the goal it made
 
     return _to_goal(row) if row is not None else None
 

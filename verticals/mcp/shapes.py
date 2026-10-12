@@ -31,6 +31,7 @@ from typing import Any
 from mcp import types
 
 from verticals.core.errors import HasChildren, VerticalError
+from verticals.core.pictures import for_agent
 from verticals.models import Board, DocLink, Goal
 
 
@@ -68,10 +69,12 @@ def goal_dict(g: Goal) -> dict[str, Any]:
 def goal_detail_dict(g: Goal) -> dict[str, Any]:
     """The one shape that carries the real `body` — a card plus `body` on top, mirroring
     `api/schemas.py::goal_to_detail()`'s own `card = goal_to_card(goal); card["body"] = goal.body`
-    exactly. Used only for the `goal` tool's own top-level goal (`tools._handle_goal`), MCP's twin
-    of `GET /api/goals/{id}` — never for a nested card."""
+    exactly, except that a picture inside the body (a data URL) comes as a short placeholder, `[picture 1]`
+    (core/pictures.py): an agent reads the words, not hundreds of kilobytes of base64. Used only for the
+    `goal` tool's own top-level goal (`tools._handle_goal`), MCP's twin of `GET /api/goals/{id}` — never for
+    a nested card."""
     d = goal_dict(g)
-    d["body"] = g.body
+    d["body"] = for_agent(g.body)
     return d
 
 

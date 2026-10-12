@@ -1,8 +1,10 @@
-"""The twenty-nine MCP tools (ARCHITECTURE.md §5, docs/E2E.md S-47's original nine, plus WP-33's
+"""The thirty-three MCP tools (ARCHITECTURE.md §5, docs/E2E.md S-47's original nine, plus WP-33's
 `evidence_update`/`evidence_due` (docs/EVIDENCE.md §6), `park`, `tags`/`tag_mark`, `size_report`,
 `due_ack`, D250 WP-2's eight document tools plus D254's `doc_link`/`doc_unlink`
-(`verticals/mcp/docs.py`), and WP-A's three comment tools (docs/COMMENTS_SPEC.md,
-`verticals/mcp/comments.py`)) — schemas and dispatch. Only the original nine live whole in this
+(`verticals/mcp/docs.py`), WP-A's three comment tools (docs/COMMENTS_SPEC.md,
+`verticals/mcp/comments.py`), the privacy tool, `session_link`, which ties an agent's session
+to a task (`verticals/mcp/session.py`, docs/design/task-sessions.md), and the two for sources
+(docs/design/sources.md, `verticals/mcp/sources.py`)) — schemas and dispatch. Only the original nine live whole in this
 file; every tool added since owns its own family module (schema + handler together) and splices
 into `TOOLS`/`_HANDLERS` below — the same shape WP-33 set when it extracted
 `verticals/mcp/evidence.py` past S-90a's 750-line cap, repeated by every family since rather than
@@ -41,6 +43,7 @@ from psycopg_pool import PoolTimeout
 
 from mcp import types
 
+from verticals.core import answers as core_answers
 from verticals.core import board as core_board
 from verticals.core import docs as core_docs
 from verticals.core import evidence as core_evidence
@@ -48,14 +51,18 @@ from verticals.core import goals as core_goals
 from verticals.core import markdown as core_markdown
 from verticals.core import moves as core_moves
 from verticals.core import search as core_search
+from verticals.core.pictures import for_agent, from_agent
 from verticals.core.errors import VerticalError, ValidationError
+from verticals.mcp import answers as mcp_answers
 from verticals.mcp import comments as mcp_comments
 from verticals.mcp import docs as mcp_docs
 from verticals.mcp import due_ack as mcp_due_ack
 from verticals.mcp import evidence as mcp_evidence
 from verticals.mcp import park as mcp_park
 from verticals.mcp import privacy as mcp_privacy
+from verticals.mcp import session as mcp_session
 from verticals.mcp import sizes as mcp_sizes
+from verticals.mcp import sources as mcp_sources
 from verticals.mcp import tags as mcp_tags
 from verticals.mcp.shapes import (
     ancestor_dict,
@@ -93,15 +100,15 @@ assert core_goals.MAX_CHILDREN_DEPTH == 8
 # 750-line cap, which this module sat ten lines under before WP-33.
 TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="board", description="The whole day's board in one call: every column, direct children, ancestors and progress.", input_schema=BOARD_SCHEMA),
-    types.Tool(name="goal", description="One goal with its breadcrumb of ancestors and its direct children. Its docs field already includes every document linked to any ancestor, marked with inherited_from — no need to walk the breadcrumb yourself to find them. A doc link is plain markdown in body text ('[label](doc:path)'); doc_link/doc_unlink are the safe verbs for adding or removing one — never link a document an ancestor already links, since every descendant inherits it automatically.", input_schema=GOAL_SCHEMA),
-    types.Tool(name="outline", description="Render a subtree as one readable markdown outline, every node's id inline.", input_schema=OUTLINE_SCHEMA),
+    types.Tool(name="goal", description="One goal with its breadcrumb of ancestors and its direct children. Its docs field already includes every document linked to any ancestor, marked with inherited_from — no need to walk the breadcrumb yourself to find them. A doc link is plain markdown in body text ('[label](doc:path)'); doc_link/doc_unlink are the safe verbs for adding or removing one — never link a document an ancestor already links, since every descendant inherits it automatically. A picture inside the body comes as [picture 1], [picture 2] and so on, never its data.", input_schema=GOAL_SCHEMA),
+    types.Tool(name="outline", description="Render a subtree as one readable markdown outline, every node's id inline. A picture inside a body shows as [picture], never its data.", input_schema=OUTLINE_SCHEMA),
     types.Tool(name="search", description="Full-text and tag search over the owner's goals.", input_schema=SEARCH_SCHEMA),
     types.Tool(name="create", description="Create a goal, optionally with a nested plan of children, in one call.", input_schema=CREATE_SCHEMA),
-    types.Tool(name="update", description="Edit content (title/body/color/tags/done/foil/private/repeat) on one or many goals, or reorder one goal among its siblings. `private` hides a goal and its whole subtree from screenshots while privacy mode is on; it never shows in the app. A repeating goal's next occurrence is materialized when the current one is completed — never by the clock — under the completed row's parent, so a series follows wherever its last instance was moved.", input_schema=UPDATE_SCHEMA),
+    types.Tool(name="update", description="Edit content (title/body/color/tags/done/foil/private/repeat) on one or many goals, or reorder one goal among its siblings. `private` hides a goal and its whole subtree from screenshots while privacy mode is on; it never shows in the app. A repeating goal's next occurrence is materialized when the current one is completed — never by the clock — under the completed row's parent, so a series follows wherever its last instance was moved. The new occurrence brings the goal's steps back, unticked, in their order; a dated step moves with the goal, and every copy keeps its own `private` flag. A [picture N] placeholder kept in the body of one goal is that picture again.", input_schema=UPDATE_SCHEMA),
     types.Tool(name="schedule", description="Set or clear a goal's vertical and anchor date.", input_schema=SCHEDULE_SCHEMA),
     types.Tool(name="reparent", description="Move a goal under a new parent, or detach it to the root.", input_schema=REPARENT_SCHEMA),
     types.Tool(name="delete", description="Remove a goal. Refuses a non-empty subtree unless cascade is true.", input_schema=DELETE_SCHEMA),
-) + mcp_evidence.TOOLS + mcp_park.TOOLS + mcp_tags.TOOLS + mcp_sizes.TOOLS + mcp_due_ack.TOOLS + mcp_docs.TOOLS + mcp_comments.TOOLS + mcp_privacy.TOOLS
+) + mcp_evidence.TOOLS + mcp_park.TOOLS + mcp_tags.TOOLS + mcp_sizes.TOOLS + mcp_due_ack.TOOLS + mcp_docs.TOOLS + mcp_comments.TOOLS + mcp_privacy.TOOLS + mcp_session.TOOLS + mcp_sources.TOOLS
 
 _SCHEMAS: dict[str, dict[str, Any]] = {t.name: t.input_schema for t in TOOLS}
 
@@ -429,7 +436,8 @@ def _handle_outline(conn: psycopg.Connection, owner: str, args: dict[str, Any]) 
     if "id" not in args:
         raise ValidationError("id is required for every mode except 'map'", field="id")
 
-    md = core_markdown.outline(conn, owner=owner, id=args["id"], depth=depth)
+    # A picture inside a goal's body (a data URL) is `[picture]` here, never its data; the `goal` tool numbers them.
+    md = for_agent(core_markdown.outline(conn, owner=owner, id=args["id"], depth=depth), numbered=False)
     if mode != "full":
         md = _outline_strip_bodies(md)
     if mode == "headlines+docs":
@@ -557,6 +565,9 @@ def _handle_update(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -
         return ok(f"Moved {g.title!r} [{g.id}] after {after_id}", {"goal": goal_dict(g), "last_write_origin": "agent"})
 
     kwargs: dict[str, Any] = {f: args[f] for f in _CONTENT_FIELDS if f in args}
+    if id_ is not None and isinstance(kwargs.get("body"), str) and "[picture " in kwargs["body"]:
+        # The `goal` tool shows a picture as `[picture 1]`; one the agent kept is the picture it stood for (core/pictures.py).
+        kwargs["body"] = from_agent(kwargs["body"], core_goals.goal(conn, owner=owner, id=id_).goal.body)
     if "carryover_ignored_until" in kwargs:
         kwargs["carryover_ignored_until"] = _parse_optional_date(
             kwargs["carryover_ignored_until"], field="carryover_ignored_until"
@@ -650,19 +661,36 @@ _HANDLERS: dict[str, Any] = {
     "comment_add": mcp_comments.handle_comment_add,
     "comment_resolve": mcp_comments.handle_comment_resolve,
     "privacy": mcp_privacy.handle_privacy,
+    "sources": mcp_sources.handle_sources,
+    "source": mcp_sources.handle_source,
 }
+# Handlers that are also told where the desktop app is (`Config.gateway_url`): the link of a session to a task is the app's to keep.
+_GATEWAY_HANDLERS: dict[str, Any] = {"session_link": mcp_session.handle_session_link}
 
 
 # --- entrypoint --------------------------------------------------------------------------------
 
 
-def call_tool(conn: psycopg.Connection, *, owner: str, name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
+def call_tool(
+    conn: psycopg.Connection,
+    *,
+    owner: str,
+    name: str,
+    arguments: dict[str, Any] | None,
+    gateway_url: str = "",
+    record: list[dict[str, Any]] | None = None,
+) -> types.CallToolResult:
     """The one function `verticals/mcp/server.py` calls. Synchronous, matching `core/`'s own
     psycopg3-sync contract — the server offloads this to a thread (`anyio.to_thread.run_sync`),
     never runs it inline on the event loop. Never raises: every path — a bad schema, a refused
     `core/` call, an unreachable database, or a genuinely unexpected bug — returns a
     `CallToolResult` with `is_error` set, because an exception escaping this function would take
     the whole server process down with it (AC-139: "the server process is still alive").
+
+    `record` is a list when the call belongs to an agent answer the app's chat is following
+    (`verticals/mcp/answers.py`, docs/design/agent-answer-undo.md): a write is then bracketed by
+    `core/answers.py`, and what it changed is appended to the list for the caller to keep once the
+    transaction has committed. `None` for every other caller, which pays nothing for it.
     """
     schema = _SCHEMAS.get(name)
     if schema is None:
@@ -670,7 +698,17 @@ def call_tool(conn: psycopg.Connection, *, owner: str, name: str, arguments: dic
         return error_result(f"unknown tool {name!r}")
     try:
         validated = _validate_top_level(schema, arguments or {})
-        result = _HANDLERS[name](conn, owner, validated)
+        followed = mcp_answers.watched(name, validated) if record is not None else None
+        if name in _GATEWAY_HANDLERS:
+            # Tells the desktop app, not the board: no answer of an agent follows it (`mcp/answers.py`'s WATCHED).
+            result = _GATEWAY_HANDLERS[name](conn, owner, validated, gateway_url)
+        elif followed is None:
+            result = _HANDLERS[name](conn, owner, validated)
+        else:
+            with core_answers.watch(conn, owner=owner, ids=followed[0], subtree=followed[1]) as found:
+                result = _HANDLERS[name](conn, owner, validated)
+            if found.changes:
+                record.append(mcp_answers.write_of(name, validated, found.changes))
         # AC-139 / the mcp-suite stream rule: stderr is *expected* non-empty, at least one
         # structured line per run — "a server that logs nothing is not one anybody can run in
         # anger." A tool call is the one event guaranteed to happen in every scenario in this

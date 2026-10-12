@@ -1,27 +1,48 @@
 <script setup lang="ts">
 // Above the field while you move a goal (docs/design-handoff S5.P3, S5.P4): "Weeks" names the view, and the goal let go
 // over the field waits beside it, the same card, out of its group. Picked, one springs up with its shadow and the other
-// steps aside; the goal is dragged from here to its place.
+// steps aside; the goal is dragged from here to its place. A task carried onto the field in the Inbox waits here as well,
+// the same card with no view's name beside it, and the Inbox's own drag takes it out again (docs/design/inbox-carry-stack.md).
+// The pictures dropped on the window or pasted wait in the same row, after them (FieldPictures.vue; docs/design/bug-reports.md).
 import { computed } from 'vue'
 import { store } from '../store'
 import { findGoal } from '../lib/boardIndex'
+import { inbox } from '../lib/inbox'
+import { carry, pressCard } from '../lib/inboxCarry'
 import { goalLight } from '../lib/look'
+import { isPrivate } from '../lib/privacy'
 import { spanGoal, spans, VIEW_NAMES } from '../lib/spans'
 import { moving, tap } from '../lib/moving'
+import { pictures } from '../lib/reportPictures'
+import FieldPictures from './FieldPictures.vue'
 
 const view = computed(() => (spans.vertical ? VIEW_NAMES[spans.vertical] : null))
-/* In the Inbox the card waits beside the field at its own size instead (InboxView.vue, lib/inboxCarry.ts). */
-const goal = computed(() => (moving.goalId && store.state.activeView !== 'inbox'
-  ? findGoal(store.state.board, moving.goalId) ?? spanGoal(moving.goalId) ?? null : null))
+/* The waiting goal is a card of the board or of the spans; a task from the Inbox has its title and its value's colour,
+   which is the colour the board shows it in. */
+const task = computed(() => (moving.goalId ? inbox.goals.find((g) => g.id === moving.goalId) ?? null : null))
+const goal = computed(() => {
+  const id = moving.goalId
+  if (!id) return null
+  const card = findGoal(store.state.board, id) ?? spanGoal(id)
+  if (card) return { id, title: card.title, color: card.color }
+  return task.value ? { id, title: task.value.title, color: task.value.value_color } : null
+})
 const lit = computed(() => goalLight(goal.value?.color) ?? {})
-const inHand = computed(() => !!goal.value && store.state.drag.id === goal.value.id)
-/* The goal's own card stays out of its group while it waits here (S5.P3.017). */
-const hideSource = computed(() => (moving.goalId
+const inHand = computed(() => !!goal.value && (store.state.drag.id === goal.value.id || carry.item?.id === goal.value.id))
+const hidden = computed(() => !!goal.value && isPrivate(goal.value.id))
+/* The goal's own card stays out of its group while it waits here (S5.P3.017); in the Inbox `lib/inbox.ts` leaves it out of
+   its lists, and a copy in the hand is the same goal's. */
+const hideSource = computed(() => (moving.goalId && store.state.activeView !== 'inbox'
   ? `[data-goal-id="${CSS.escape(moving.goalId)}"]:not([data-parked]) { display: none !important; }` : ''))
 
 function onGoalDown(event: PointerEvent): void {
   const id = goal.value?.id
   if (!id || event.button !== 0) return
+  // In the Inbox no board is in view to land it on: its own drag takes the card out, and lets it go back to its place.
+  if (store.state.activeView === 'inbox' && task.value) {
+    pressCard(event, task.value)
+    return
+  }
   const row = (event.currentTarget as HTMLElement).querySelector<HTMLElement>('.goal-card__row')
   if (!row) return
   store.pointerDownCard(id, event.clientX, event.clientY, row.getBoundingClientRect(), event.pointerType, event.altKey)
@@ -29,7 +50,7 @@ function onGoalDown(event: PointerEvent): void {
 </script>
 
 <template>
-  <div v-if="view || goal" class="moving-stack" :class="{ 'moving-stack--holding': !!store.state.drag.id && !goal }" data-role="moving-stack">
+  <div v-if="view || goal || pictures.list.length" class="moving-stack" :class="{ 'moving-stack--holding': !!store.state.drag.id && !goal }" data-role="moving-stack">
     <component :is="'style'" v-if="hideSource">{{ hideSource }}</component>
     <button
       v-if="view"
@@ -42,7 +63,7 @@ function onGoalDown(event: PointerEvent): void {
     <div
       v-if="goal"
       class="moving-stack__goal"
-      :class="{ 'is-picked': moving.picked === 'goal', 'is-aside': moving.picked === 'view', 'is-in-hand': inHand }"
+      :class="{ 'is-picked': moving.picked === 'goal', 'is-aside': moving.picked === 'view', 'is-in-hand': inHand, 'goal-card--private': hidden }"
       :style="lit"
       :data-goal-id="goal.id"
       data-parked
@@ -55,12 +76,16 @@ function onGoalDown(event: PointerEvent): void {
         <span class="goal-card__title-text moving-stack__title">{{ goal.title }}</span>
       </div>
     </div>
+    <FieldPictures v-if="pictures.list.length" />
   </div>
 </template>
 
 <style>
 /* "Weeks": 36 px, 18 px corners, black, words 15/20 at 500; the goal is its card at 12 px, lit softly green from under;
-   they stand 8 px apart on one baseline, 4 px in from the field's left (S5.P3.006, .043). */
+   they stand 8 px apart on one baseline, 4 px in from the field's left (S5.P3.006, .043). Its width is the room it has once
+   the field has widened (the field's width is its target, set at once), not the room left in a field that has not yet:
+   the card has the lines it will have in every frame of the widening. At rest the room is the one it always had: the
+   field's width less 8 px, or less 4 px and the buttons when they stand at its left end. */
 .moving-stack {
   position: absolute;
   left: calc(50% - var(--moving-field-width, 300px) / 2 + 4px + var(--moving-tags-shift, 0px));
@@ -68,7 +93,8 @@ function onGoalDown(event: PointerEvent): void {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  max-width: calc(var(--moving-field-width, 300px) - 8px);
+  width: max-content;
+  max-width: calc(var(--moving-field-width, 300px) - max(8px, 4px + var(--moving-tags-shift, 0px)));
   transition: left 200ms var(--vt-ease-large);
   pointer-events: auto;
 }

@@ -1,15 +1,17 @@
 // The circle at the bottom of the board (docs/design-handoff S1.P1): one state at a time, and the caption for the job
 // it is doing. The field sets `pointed` and `focused`; the conversation's store sets working and the answer (S2.P3,
-// S2.P4); moving a goal sets `moving` (S5.P3).
+// S2.P4); moving a goal sets `moving` (S5.P3). Pointing at the resting circle only widens it (SearchBar.vue); the field
+// opens on a click, a key or ⌘K (docs/design/field-hover.md).
 import { computed, reactive } from 'vue'
 import { commandFilter } from './commandFilter'
 import { agentChat, balloons, openAsk } from './agentChat'
+import { askLine } from './askDetail'
 import { frontWindow, windows } from './windows'
+import { pictures, reporting } from './reportPictures'
 import { store } from '../store'
-import { goShown } from './go'
 
 export type CircleJob = 'board' | 'goal' | 'moving'
-export type CircleState = 'rest' | 'open' | 'typing' | 'working' | 'answer' | 'moving' | 'go'
+export type CircleState = 'rest' | 'open' | 'typing' | 'working' | 'answer' | 'moving'
 
 const CAPTIONS: Record<CircleJob, string> = {
   board: 'Find or ask',
@@ -20,6 +22,10 @@ const CAPTIONS: Record<CircleJob, string> = {
  *  simply can invite us to do that"): it rests open with its invitation, and ↵ writes your words down (`lib/inbox.ts`).
  *  Round 9: “"Write to inbox" in field actually.” */
 export const INBOX_CAPTION = 'Write to inbox'
+/** With pictures waiting above it the field is a report's (docs/design/bug-reports.md): it rests open and asks for the words,
+ *  whether something is wrong or could be better. While a file is dragged over the window it says what the drop will do. */
+export const REPORT_CAPTION = 'Say what you see and what you want'
+export const DROP_CAPTION = 'Drop pictures'
 
 export const circle = reactive({
   job: 'board' as CircleJob,
@@ -34,6 +40,8 @@ export const inboxWriting = computed(() => store.state.activeView === 'inbox' &&
 
 /** Once an answer has gone up into the conversation, the field asks the agent (S1.P1.015). */
 export const circleCaption = computed(() => {
+  if (pictures.over) return DROP_CAPTION
+  if (reporting.value) return REPORT_CAPTION
   if (inboxWriting.value) return INBOX_CAPTION
   if (circle.job !== 'board') return CAPTIONS[circle.job]
   if (frontWindow.value?.kind === 'goal') return CAPTIONS.goal
@@ -52,20 +60,21 @@ function lastAgentWords(): string {
 /** What the circle holds while the conversation is hidden: the answer, or the ask the agent waits on (S2.P4, S2.P1.044). */
 export const circleWords = computed(() => {
   if (agentChat.open) return null
-  if (openAsk.value) return { kind: 'ask' as const, text: openAsk.value.title, lead: lastAgentWords() }
-  if (agentChat.answer) return { kind: 'answer' as const, text: agentChat.answer.text }
+  if (openAsk.value) return { kind: 'ask' as const, text: openAsk.value.title, lead: lastAgentWords(), changes: askLine(openAsk.value) }
+  if (agentChat.answer) return { kind: 'answer' as const, text: agentChat.answer.text, answer: agentChat.answer.answer }
   return null
 })
 
 export const circleState = computed<CircleState>(() => {
   if (commandFilter.text) return 'typing'
   if (circle.moving) return 'moving'
-  if (circle.focused) return 'open'
+  // The report is being made from the pictures: the line turns, as it does while the agent works.
+  if (pictures.sending) return 'working'
+  if (circle.focused || reporting.value || pictures.over) return 'open'
   if (circleWords.value) return 'answer'
   if (agentChat.running) return 'working'
-  // After an edit in an open document the circle asks "Ready?" (lib/go.ts); pointing at it doesn't open the field.
-  if (goShown.value) return 'go'
-  if (circle.pointed || inboxWriting.value) return 'open'
+  // Pointing at the circle doesn't open it: it stays `rest` and the field widens it (docs/design/field-hover.md).
+  if (inboxWriting.value) return 'open'
   return 'rest'
 })
 

@@ -1,10 +1,12 @@
-/** IR-09's deliberately bounded Markdown model. Unsupported syntax stays ordinary text.
+/** IR-09's deliberately bounded Markdown model. Unsupported syntax stays ordinary text. A fenced block
+ *  (a line of three backticks and an optional name, the text, a line of three backticks) is one block of its own: set quietly
+ *  as written, never edited here, and written back exactly as it was. A fence with no closing line is not one.
  *  A link is external (`http(s):`/`mailto:`, the S-72 allowlist; the browser follows it) or
  *  in-app (`goal:<id>`/`doc:<path>`; `lib/docsView.ts::followBodyLink` follows it).
  *  An image `![alt](src)` takes its own, narrower allowlist: see `isAllowedImageSrc`. */
 export type Run =
   | { kind: 'text' | 'strong' | 'em' | 'code'; text: string }
-  | { kind: 'link'; text: string; href: string }
+  | { kind: 'link'; text: string; href: string; strong?: boolean }
   | { kind: 'image'; alt: string; src: string }
   | { kind: 'break' }
 
@@ -14,6 +16,7 @@ export type Block =
   | { tag: 'heading'; level: number; runs: Run[] }
   | { tag: 'ul' | 'ol'; items: ListItem[] }
   | { tag: 'table'; rows: Run[][][] }
+  | { tag: 'code'; info: string; lines: string[] }
 
 const CONTROL_OR_SPACE_RE = /[\s\x00-\x1f\x7f-\x9f]/g
 const ALLOWED_SCHEME_RE = /^(https?:|mailto:)/
@@ -43,10 +46,22 @@ export function internalLinkTarget(href: string): InternalLink | null {
  *  inside identifiers. */
 const INLINE_RE =
   /!\[([^\]]*)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|(?<![\w_])_([^_\s][^_]*?)_(?![\w_])|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/
+/** What bold may hold besides plain words: one link, as a parent task is written in a morning report's table
+ *  (`**[Name](goal:<id>)**`). It is one run, a bold link, and is written back as it was. */
+const BOLD_LINK_RE = /^\[([^\]]+)\]\(([^)\s]+)\)$/
 const LIST_ITEM_RE = /^(\s*)(?:[-*+]|\d+\.)\s+(.*)$/
 const ORDERED_ITEM_RE = /^\s*\d+\./
 const HEADING_RE = /^(#{1,6})\s+(.*)$/
 const TABLE_DIVIDER_CELL_RE = /^:?-{3,}:?$/
+const FENCE_OPEN_RE = /^```([^`]*)$/
+const FENCE_CLOSE_RE = /^[ \t]*```[ \t]*$/
+
+/** Where the fence that opens at `index` closes, or -1: no opening line here, or no closing line below it. */
+function fenceEnd(lines: string[], index: number): number {
+  if (!FENCE_OPEN_RE.test(lines[index])) return -1
+  for (let at = index + 1; at < lines.length; at++) if (FENCE_CLOSE_RE.test(lines[at])) return at
+  return -1
+}
 
 function splitTableRow(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
@@ -92,6 +107,16 @@ export function isAllowedImageSrc(cleaned: string): boolean {
   return ALLOWED_IMAGE_SRC_RE.test(cleaned.toLowerCase())
 }
 
+/** A picture that travels inside the text, `![alt](data:image/jpeg;base64,…)`: the one pattern of `core/pictures.py`, which cuts
+ *  the Documents desk's previews the same way on the server. */
+const INLINE_PICTURE_RE = /!\[[^\]\n]{0,250}\]\(data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=_-]*\)/gi
+
+/** The text without its pictures, for an excerpt: cut at a fixed length, a data URL would print as base64 on the page that
+ *  shows the excerpt (DocPage.vue draws no picture at all), and the words after the pictures would be cut off with it. */
+export function withoutPictures(body: string): string {
+  return body.replace(INLINE_PICTURE_RE, '')
+}
+
 /** Null for no anchor or an external one — the browser follows those itself (S-72). */
 export function internalLinkOf(anchor: HTMLAnchorElement | null): InternalLink | null {
   return anchor ? internalLinkTarget(cleanHref(anchor.getAttribute('href') ?? '')) : null
@@ -113,7 +138,12 @@ export function tokenizeInline(text: string): Run[] {
       if (isAllowedImageSrc(src)) runs.push({ kind: 'image', alt: match[1], src })
       else runs.push({ kind: 'text', text: match[0] })
     }
-    else if (match[3] !== undefined) runs.push({ kind: 'strong', text: match[3] })
+    else if (match[3] !== undefined) {
+      const bold = BOLD_LINK_RE.exec(match[3])
+      const href = bold ? cleanHref(bold[2]) : ''
+      if (bold && isAllowedHref(href)) runs.push({ kind: 'link', text: bold[1], href, strong: true })
+      else runs.push({ kind: 'strong', text: match[3] })
+    }
     else if (match[4] !== undefined) runs.push({ kind: 'em', text: match[4] })
     else if (match[5] !== undefined) runs.push({ kind: 'em', text: match[5] })
     else if (match[6] !== undefined) runs.push({ kind: 'code', text: match[6] })
@@ -135,6 +165,12 @@ export function parseBody(body: string): Block[] {
   while (index < lines.length) {
     if (!lines[index].trim()) {
       index++
+      continue
+    }
+    const fenced = fenceEnd(lines, index)
+    if (fenced >= 0) {
+      blocks.push({ tag: 'code', info: FENCE_OPEN_RE.exec(lines[index])![1].trimEnd(), lines: lines.slice(index + 1, fenced) })
+      index = fenced + 1
       continue
     }
     const heading = HEADING_RE.exec(lines[index])
@@ -172,6 +208,7 @@ export function parseBody(body: string): Block[] {
       && !HEADING_RE.test(lines[index])
       && !isTableStart(lines, index)
       && !LIST_ITEM_RE.test(lines[index])
+      && fenceEnd(lines, index) < 0
     ) {
       if (runs.length) runs.push({ kind: 'break' })
       runs.push(...tokenizeInline(lines[index]))
@@ -188,7 +225,7 @@ function serializeRuns(runs: Run[]): string {
     if (run.kind === 'strong') return `**${run.text}**`
     if (run.kind === 'em') return `*${run.text}*`
     if (run.kind === 'code') return `\`${run.text}\``
-    if (run.kind === 'link') return `[${run.text}](${run.href})`
+    if (run.kind === 'link') return run.strong ? `**[${run.text}](${run.href})**` : `[${run.text}](${run.href})`
     if (run.kind === 'image') return `![${run.alt}](${run.src})`
     return run.text
   }).join('')
@@ -202,6 +239,7 @@ export function serializeBlocks(blocks: Block[]): string {
   return blocks.map((block) => {
     if (block.tag === 'p') return serializeRuns(block.runs)
     if (block.tag === 'heading') return `${'#'.repeat(block.level)} ${serializeRuns(block.runs)}`
+    if (block.tag === 'code') return ['```' + block.info, ...block.lines, '```'].join('\n')
     if (block.tag === 'table') {
       const width = Math.max(1, ...block.rows.map((row) => row.length))
       const renderRow = (row: Run[][]) => {
@@ -269,6 +307,13 @@ function appendRun(parent: HTMLElement, run: Run): void {
       element.setAttribute('rel', 'noopener noreferrer')
     }
   }
+  if (run.kind === 'link' && run.strong) {
+    // `serializeInlineNode` writes `<strong><a>` back as `**[label](href)**`, the form it was read from.
+    const bold = document.createElement('strong')
+    bold.append(element)
+    parent.append(bold)
+    return
+  }
   parent.append(element)
 }
 
@@ -282,6 +327,19 @@ export function renderBodyElement(root: HTMLElement, body: string): void {
       heading.className = 'goal-detail__body-heading'
       for (const run of block.runs) appendRun(heading, run)
       fragment.append(heading)
+      continue
+    }
+    if (block.tag === 'code') {
+      // The kit's block-code rail, set quietly. Not editable: what is written in it (a source's check, an agent's table) is
+      // read, never typed over, and `serializeBodyElement` writes the same lines back.
+      const pre = document.createElement('pre')
+      pre.className = 't-code--block goal-detail__body-code'
+      pre.contentEditable = 'false'
+      pre.setAttribute('data-md-fence', block.info)
+      const code = document.createElement('code')
+      code.textContent = block.lines.join('\n')
+      pre.append(code)
+      fragment.append(pre)
       continue
     }
     if (block.tag === 'table') {
@@ -404,6 +462,10 @@ export function serializeBodyElement(root: HTMLElement): string {
     if (/^h[1-6]$/.test(tag)) {
       flushInline()
       blocks.push(`${'#'.repeat(Number(tag[1]))} ${serializeInline(node)}`)
+    } else if (tag === 'pre' && node.hasAttribute('data-md-fence')) {
+      flushInline()
+      const text = node.textContent ?? ''
+      blocks.push(['```' + (node.getAttribute('data-md-fence') ?? ''), ...(text === '' ? [] : text.split('\n')), '```'].join('\n'))
     } else if (tag === 'table') {
       flushInline()
       const table = serializeTableElement(node)

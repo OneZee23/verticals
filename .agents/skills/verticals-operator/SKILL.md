@@ -40,6 +40,6 @@ Board visibility alone is not proof of raw placement: carry-over rows can make a
 4. Apply the smallest mutation.
 5. Reread affected goals and direct descendants.
 6. Reread the relevant board slice and value subtree.
-7. Report exact IDs, final hierarchy/schedule, evidence status, and discrepancies.
+7. Report the final hierarchy/schedule, evidence status, and discrepancies, naming goals by title.
 
 Batch related approved writes close together to reduce visible churn, but keep every logical write independently idempotent and verifiable.

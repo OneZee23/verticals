@@ -30,6 +30,7 @@ the token is never echoed back).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import hmac
 import logging
@@ -49,6 +50,7 @@ from mcp.server.lowlevel.server import ServerRequestContext
 from verticals import config
 from verticals.db.pool import open_pool
 from verticals.mcp import tools
+from verticals.mcp.answers import SESSION_HEADER, AnswerRoutes, AnswerStore
 
 logger = logging.getLogger("verticals.mcp")
 
@@ -112,14 +114,26 @@ async def _lifespan(_server: Server, *, cfg: config.Config) -> AsyncIterator[Con
         pool.close()
 
 
-def create_server(cfg: config.Config) -> Server:
+def _session_of(ctx: ServerRequestContext) -> str | None:
+    """The chat conversation a call belongs to, from the header the app's gateway puts on its agents' connections. Over stdio
+    there is no request, so no conversation: such a call is nobody's answer."""
+    headers = getattr(getattr(ctx, "request", None), "headers", None)
+    value = headers.get(SESSION_HEADER) if headers is not None else None
+    return value if isinstance(value, str) and value else None
+
+
+def create_server(cfg: config.Config, answers: AnswerStore | None = None) -> Server:
     """Build the one `Server` instance both transports share — constructor-kwarg handler
     registration, not decorators (the installed `mcp==2.0.0` shape, confirmed by introspecting
     `Server.__init__` directly rather than assuming a remembered API). `owner` is closed over
     from `cfg`, never taken from a call's own arguments: this process answers as exactly one
     owner, the same rule `api/routes_board.py` states for the HTTP side.
+
+    `answers` is the record of what each agent answer wrote (`mcp/answers.py`): the http app shares it with its three routes;
+    a stdio server has none open, because nothing there names a conversation.
     """
-    owner = cfg.owner
+    owner, gateway_url = cfg.owner, cfg.gateway_url
+    answers = answers if answers is not None else AnswerStore()
 
     async def _on_list_tools(
         _ctx: ServerRequestContext, _params: types.PaginatedRequestParams | None
@@ -130,14 +144,22 @@ def create_server(cfg: config.Config) -> Server:
         ctx: ServerRequestContext, params: types.CallToolRequestParams
     ) -> types.CallToolResult:
         pool: ConnectionPool = ctx.lifespan_context
+        answer = answers.current(_session_of(ctx))
 
         def _run() -> types.CallToolResult:
             # IR-02: one connection, one transaction per invocation — `core/`'s own mutators
             # each wrap their body in `with conn.transaction()`; a plain read commits nothing
             # to roll back. `pool.connection()` is itself psycopg_pool's transaction-scoped
             # checkout, matching `api/deps.py::get_conn`'s identical reasoning on the HTTP side.
+            record: list[dict] | None = [] if answer else None
             with pool.connection() as conn:
-                return tools.call_tool(conn, owner=owner, name=params.name, arguments=params.arguments)
+                result = tools.call_tool(
+                    conn, owner=owner, name=params.name, arguments=params.arguments, gateway_url=gateway_url, record=record
+                )
+            # Kept only once the transaction has committed: the record never claims a change the database does not have.
+            for write in record or ():
+                answers.record(answer, write)
+            return result
 
         # core/ is synchronous psycopg3 (`db/pool.py`'s own docstring); never run it inline on
         # the event loop that is also carrying every other in-flight request.
@@ -194,23 +216,25 @@ class _BearerAuthMiddleware:
 
 
 def create_http_app(cfg: config.Config, *, host: str) -> Callable:
-    server = create_server(cfg)
+    answers = AnswerStore()
+    server = create_server(cfg, answers)
     # host in {"127.0.0.1", "localhost", "::1"} auto-enables DNS-rebinding / Origin-header
     # protection inside streamable_http_app itself (verified by reading its source) — always
     # true here, since _parse_loopback_bind already refused anything else at boot.
     inner = server.streamable_http_app(host=host)
-    return _BearerAuthMiddleware(inner, cfg.token)
+    # The answers' three routes sit between the bearer check and the MCP app, under the same token.
+    return _BearerAuthMiddleware(AnswerRoutes(inner, answers), cfg.token)
 
 
 # --- entrypoint ----------------------------------------------------------------------------------
 
 
-def _boot_or_exit(transport: str) -> config.Config:
+def _boot_or_exit(transport: str, gateway_url: str = "") -> config.Config:
     """Everything that can refuse boot, before a socket or a stdio session ever opens —
     `api/app.py::_boot_or_exit`'s own shape. Stdio needs no bind at all; http additionally
     refuses a non-loopback `VERTICALS_MCP_BIND` here, not after uvicorn is already listening."""
     try:
-        cfg = config.load()
+        cfg = dataclasses.replace(config.load(), gateway_url=config.parse_gateway_url(gateway_url))
         if transport == "http":
             _parse_loopback_bind(cfg.mcp_bind)
     except config.ConfigError as exc:
@@ -237,9 +261,11 @@ def _run_http(cfg: config.Config) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m verticals.mcp.server")
     parser.add_argument("--transport", choices=("stdio", "http"), default="stdio")
+    # Given by the desktop app that starts this server, so the link tool knows where the app keeps the sessions of tasks.
+    parser.add_argument("--gateway-url", default="", help="the desktop app's loopback address, http://127.0.0.1:<port>")
     args = parser.parse_args(argv)
 
-    cfg = _boot_or_exit(args.transport)
+    cfg = _boot_or_exit(args.transport, args.gateway_url)
     # AC-139 / the mcp-suite stream rule: stderr is *expected* non-empty, at least one
     # structured line for the run. A tool call already logs one (tools.py::call_tool), but a
     # session that never calls a tool — S-118's own `tools/list`-then-nothing shape, or a probe

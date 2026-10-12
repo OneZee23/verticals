@@ -30,6 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "chat"))
 from chat import Chat, ChatError  # noqa: E402
+import report_kind  # noqa: E402
+from report_facts import collect as report_facts  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent          # desktop/
 APP = ROOT.parent                               # repository root (or its mirror inside the app)
@@ -117,7 +119,9 @@ def environment(cfg):
                # The shipped sample board belongs to the single-owner default, "local".
                VERTICALS_TOKEN=cfg["token"], VERTICALS_OWNER="local",
                VERTICALS_BIND=f"127.0.0.1:{API_PORT}", VERTICALS_MCP_BIND=f"127.0.0.1:{MCP_PORT}",
-               VERTICALS_POOL_MIN="1", VERTICALS_POOL_MAX="4", VERTICALS_LOG_LEVEL="warning")
+               VERTICALS_POOL_MIN="1", VERTICALS_POOL_MAX="4", VERTICALS_LOG_LEVEL="warning",
+               # The Sources timer also asks Claude Code which of its MCP servers answer (docs/design/sources.md).
+               VERTICALS_CONNECTIONS="claude")
     if BUNDLED_PATH:
         # Code is precompiled and signed inside the bundle: never write .pyc into it.
         env.update(PYTHONPATH=BUNDLED_PATH, PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1")
@@ -311,6 +315,8 @@ def make_gateway(token, chat):
             if self.command == "GET" and path == "/__chat/goal":
                 goal = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                 return self.send_json({"conversations": chat.goal_conversations(goal)})
+            if self.command == "GET" and path == "/__chat/sessions":
+                return self.send_json(chat.sessions_state())
             if self.command == "GET" and path == "/__chat/probe":
                 try:
                     return self.send_json(chat.probe(parse_qs(urlparse(self.path).query).get("provider", [""])[0]))
@@ -326,10 +332,23 @@ def make_gateway(token, chat):
                               "now" if body.get("mode") == "now" else "send")
                 elif action == "permission":
                     chat.decide(body.get("session"), body.get("requestId"), body.get("value"))
+                elif action == "answers":
+                    # The answers that have ended, for the page to show their Undo where they show (docs/design/agent-answer-undo.md).
+                    return self.send_json({"answers": chat.recent_answers()})
+                elif action == "answer-state":
+                    chat.answer_state(body.get("answer"), body.get("state"))
                 elif action == "stop":
                     chat.stop(body.get("session"))
                 elif action == "reset":
                     chat.reset(body.get("session"))
+                elif action == "link":
+                    # The link tool of Verticals' MCP server ties a session begun in Claude or Codex to a task (verticals/mcp/session.py).
+                    return self.send_json({"ok": True, **chat.link_session(body.get("goal"), body.get("provider"),
+                                                                           body.get("session"), body.get("cwd"))})
+                elif action == "open":
+                    return self.send_json({"ok": True, **chat.open_session(body.get("session"))})
+                elif action == "report-kind":
+                    return self.send_json(report_kind.ask(chat, body.get("words"), body.get("settings")))
                 else:
                     return self.deny(404, "not found")
             except (ChatError, ValueError) as e:
@@ -390,9 +409,19 @@ def make_gateway(token, chat):
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def report_facts(self):
+            """What a report carries from the app: its version, and, unless `logs=0` (a request has none), the last lines of
+            its logs with every word of the board left out (docs/design/bug-reports.md, desktop/chat/report_facts.py)."""
+            if self.allowed():
+                from urllib.parse import parse_qs, urlparse
+                logs = parse_qs(urlparse(self.path).query).get("logs", ["1"])[0] != "0"
+                self.send_json(report_facts(STATE, APP, logs=logs))
+
         def route(self):
             if self.path.startswith("/__chat/"):
                 return self.chat_route()
+            if self.command == "GET" and self.path.split("?", 1)[0] == "/__report/facts":
+                return self.report_facts()
             if self.path.startswith(("/api", "/healthz")):
                 return self.proxy()
             if self.command in ("GET", "HEAD"):
@@ -464,11 +493,13 @@ def main():
         start_database(pg, cfg, env)
         db_started = True
         for name, argv in (("api", [PYTHON, "-m", "verticals.api.app"]),
-                           ("mcp", [PYTHON, "-m", "verticals.mcp.server", "--transport", "http"])):
+                           # The MCP server is told where the app keeps the sessions of tasks (its link tool tells the app).
+                           ("mcp", [PYTHON, "-m", "verticals.mcp.server", "--transport", "http",
+                                    "--gateway-url", f"http://127.0.0.1:{UI_PORT}"])):
             logfile = open(STATE / f"{name}.log", "ab")
             procs.append(subprocess.Popen([str(a) for a in argv], cwd=APP, env=env, stdout=logfile,
                                           stderr=subprocess.STDOUT, start_new_session=True))
-        chat = Chat(STATE, f"http://127.0.0.1:{MCP_PORT}/mcp", cfg["token"])
+        chat = Chat(STATE, f"http://127.0.0.1:{MCP_PORT}/mcp", cfg["token"], api_url=f"http://127.0.0.1:{API_PORT}")
         gateway = ThreadingHTTPServer(("127.0.0.1", UI_PORT), make_gateway(cfg["token"], chat))
         gateway.daemon_threads = True
         threading.Thread(target=gateway.serve_forever, daemon=True).start()

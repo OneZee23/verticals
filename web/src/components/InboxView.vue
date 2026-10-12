@@ -6,7 +6,9 @@
    as Finder's Recents; "Show all" opens a row in place onto shelves in the board's own order. A task and a document are
    one size, a quarter of the desk, and stay ghosts until the pointer brings one to life. The title and × stay at the top
    while the desk scrolls. You write in the field, which rests open here saying "Write to inbox" (`lib/circle.ts`); ↵ puts
-   your words first in Today (`lib/inbox.ts`). While you write, the desk goes quiet behind the field, as the board does. */
+   your words first in Today (`lib/inbox.ts`). While you write, the desk goes quiet behind the field, as the board does.
+   Under Documents, Sources (docs/design/sources.md): the documents the morning report reads from, as the same chips, each
+   with its state, red ones first; a source is not in Documents twice (`lib/sources.ts`). */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import DeskHead from './DeskHead.vue'
 import DocChip from './DocChip.vue'
@@ -17,8 +19,8 @@ import { commandFilter } from '../lib/commandFilter'
 import { inboxWriting } from '../lib/circle'
 import { docShelves, earlier, inbox, inboxView, loadInbox, recentDocs, shelves, today, TODAY_SHOWN } from '../lib/inbox'
 import { desk, loadDesk } from '../lib/docsDesk'
+import { cardOf, loadSources, noteOf, sources } from '../lib/sources'
 import { carry } from '../lib/inboxCarry'
-import { moving } from '../lib/moving'
 
 /* A row holds the newest; "Show all" holds everything. */
 const ROW = 24
@@ -26,17 +28,17 @@ const ROW = 24
 const todayShown = computed(() => (inboxView.allToday ? today.value : today.value.slice(0, TODAY_SHOWN)))
 const hiddenToday = computed(() => today.value.length - TODAY_SHOWN)
 
-const onDocEdited = () => void loadDesk()
+const onDocEdited = () => { void loadDesk(); void loadSources() }
 onMounted(() => {
   void loadInbox()
   void loadDesk()
+  void loadSources()
   window.addEventListener('verticals:doc-edited', onDocEdited)
 })
 onBeforeUnmount(() => window.removeEventListener('verticals:doc-edited', onDocEdited))
-// Every board load follows a write somewhere (yours, the agent's, a live event): the Inbox reads again with it.
-watch(() => store.state.board, () => void loadInbox())
-// The task beside the field goes when the move ends: placed, sent with your words, or taken off (lib/moving.ts).
-watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.beside = null })
+// Every board load follows a write somewhere (yours, the agent's, a live event, an answer to a source's check): the Inbox
+// reads again with it.
+watch(() => store.state.board, () => { void loadInbox(); void loadSources() })
 </script>
 
 <template>
@@ -84,21 +86,28 @@ watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.b
       <div v-else class="inbox-desk__row"><DocChip v-for="doc in recentDocs.slice(0, ROW)" :id="doc.id" :key="doc.id" :doc="doc" /></div>
     </section>
 
-    <p v-if="inbox.loaded && desk.loaded && !inbox.goals.length && !recentDocs.length" class="inbox-desk__empty">
+    <section v-if="sources.list.length" class="inbox-desk__section" data-role="inbox-sources">
+      <h2 class="inbox-desk__head">
+        Sources<span class="inbox-desk__count">{{ sources.list.length }}</span>
+        <button v-if="sources.list.length > 4" type="button" class="inbox-desk__all" data-role="inbox-sources-all" @click="inboxView.sources = !inboxView.sources">
+          {{ inboxView.sources ? 'Show less' : 'Show all' }}
+        </button>
+      </h2>
+      <div :class="inboxView.sources ? 'inbox-desk__grid' : 'inbox-desk__row'">
+        <DocChip
+          v-for="source in (inboxView.sources ? sources.list : sources.list.slice(0, ROW))" :id="source.id" :key="source.id"
+          :doc="cardOf(source)" :note="noteOf(source).text" :tone="noteOf(source).tone"
+        />
+      </div>
+    </section>
+
+    <p v-if="inbox.loaded && desk.loaded && !inbox.goals.length && !recentDocs.length && !sources.list.length" class="inbox-desk__empty">
       Nothing waits here. What you write in the field lands at the top.
     </p>
 
     <Teleport to="body">
-      <div v-if="carry.item" class="inbox-carried" :style="{ left: `${carry.x}px`, top: `${carry.y}px`, width: `${carry.width}px` }">
+      <div v-if="carry.item" class="inbox-carried" data-role="inbox-carried" :style="{ left: `${carry.x}px`, top: `${carry.y}px`, width: `${carry.width}px` }">
         <InboxTile :item="carry.item" />
-      </div>
-      <div
-        v-if="carry.beside && moving.goalId === carry.beside.id"
-        class="inbox-beside"
-        data-role="inbox-beside"
-        :style="{ width: `${carry.width}px`, left: `calc(50% - var(--moving-field-width, 300px) / 2 - 12px - ${carry.width}px)` }"
-      >
-        <InboxTile :item="carry.beside" />
       </div>
     </Teleport>
   </div>
@@ -146,14 +155,8 @@ watch(() => moving.goalId, (id) => { if (!id || id !== carry.beside?.id) carry.b
   .inbox-desk__row > * { width: calc((100% - 16px) / 2); }
   .inbox-desk__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-/* The task in the hand, and the task waiting beside the field: on the field's line, 12 px to its left, at the tile's size. */
+/* The task in the hand, at the tile's size; let go over the field it waits there as a card (MovingStack.vue). */
 .inbox-carried { position: fixed; z-index: 290; pointer-events: none; transform: rotate(-1deg) scale(1.02); }  /* under the field (300), which takes it */
 .inbox-carried .inbox-tile { background: #fff; box-shadow: 0 0 0 .5px rgb(16 18 32 / 6%), 0 24px 60px -10px rgb(16 18 32 / 30%); }
-.inbox-beside { position: fixed; z-index: 299; bottom: 24px; max-width: calc(50vw - 160px);
-  transition: left 300ms var(--vt-ease-large); animation: inbox-beside-in 300ms var(--vt-ease-large) both; }
-.inbox-beside .inbox-tile { background: #fff;
-  box-shadow: 0 0 0 .5px rgb(16 18 32 / 5%), 0 1px 3px rgb(16 18 32 / 4%), 0 8px 22px -12px rgb(16 18 32 / 14%); }
-@keyframes inbox-beside-in { from { opacity: 0; transform: translateX(40px) scale(.96); } }
-@media (prefers-reduced-motion: reduce) { .inbox-beside { transition: none; animation: none; } }
 .inbox-desk__empty { margin: 6px 0 0; font: 400 15px/22px var(--font-body, Commissioner, system-ui, sans-serif); color: rgb(45 48 54 / 52%); }
 </style>

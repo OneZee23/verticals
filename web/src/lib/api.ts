@@ -355,8 +355,12 @@ export function getGoal(id: string, prefetch = false): Promise<GoalDetail> {
   )
 }
 
-export function patchGoal(id: string, patch: UpdatePatch, keepalive = false): Promise<GoalCard> {
-  return request<GoalCard>(`/api/goals/${encodeURIComponent(id)}`, {
+/** The answer to a patch. A tick of a repeating goal also names the occurrence it made (`next_occurrence`), so the page can
+ *  take that one back with the tick (docs/design/board-undo.md); a replay, which finds it there, names none. */
+export type PatchedGoal = GoalCard & { next_occurrence?: GoalCard }
+
+export function patchGoal(id: string, patch: UpdatePatch, keepalive = false): Promise<PatchedGoal> {
+  return request<PatchedGoal>(`/api/goals/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
     keepalive,
@@ -438,13 +442,30 @@ export function parkGoal(id: string): Promise<GoalCard> {
   return request<GoalCard>(`/api/goals/${encodeURIComponent(id)}/park`, { method: 'POST' })
 }
 
+/** A comment you left in the last morning report, now on its task, as the server saved it. */
+export interface LandedComment { goal_id: string; title: string; text: string; thread_id: string }
+
+/** `POST /api/morning?date=` (docs/design/agent-fixes.md, fixes 3 and 2): the server's answer to "may I ask for this
+ *  morning's report?". `asked` is true for the one call of the owner's day that takes it, whichever window or browser
+ *  makes it, and then `task_id` is the one open "Morning report" task, made or moved to that day, and `landed` the comments you
+ *  left in the last report, now saved on their tasks word for word (docs/design/morning-quality.md). */
+export function beginMorning(date: string): Promise<{ asked: boolean; task_id: string | null; landed?: LandedComment[] }> {
+  return request<{ asked: boolean; task_id: string | null; landed?: LandedComment[] }>(`/api/morning${qs({ date })}`, { method: 'POST' })
+}
+
 /** `DELETE /api/goals/{id}?cascade=`. Without `cascade`, a non-empty subtree is `core.goals.
  *  delete`'s own `HasChildren` (409) — the caller decides whether to retry with cascade, this
- *  function never guesses. `store.ts::removeSample` is the one caller today. */
+ *  function never guesses. `lib/goalDelete.ts` is its caller. */
 export function deleteGoal(id: string, cascade = false): Promise<void> {
   return request<void>(`/api/goals/${encodeURIComponent(id)}${qs({ cascade })}`, {
     method: 'DELETE',
   })
+}
+
+/** Brings a deleted goal back with its subgoals under the same ids (`POST /api/goals/{id}/restore`); `restored` counts the
+ *  goals that came back, the goal itself included. A goal that was never deleted, or deleted too long ago, is a 404. */
+export function restoreGoal(id: string): Promise<GoalCard & { restored: number }> {
+  return request<GoalCard & { restored: number }>(`/api/goals/${encodeURIComponent(id)}/restore`, { method: 'POST' })
 }
 
 /** D237: open the SSE change feed. Raw `fetch`, not `request()` — the body is an endless
@@ -673,5 +694,57 @@ export function resolveComment(threadId: string, resolved: boolean): Promise<Com
   return request<CommentThread>(`/api/comments/${encodeURIComponent(threadId)}/resolve`, {
     method: 'POST',
     body: JSON.stringify({ resolved }),
+  })
+}
+
+// --- sources (verticals/api/routes_sources.py, core/sources.py; docs/design/sources.md) ---------
+
+/** A source: a document under `sources/` with the state its check last left. `status` is what the Inbox colours: ok,
+ *  red (two failures at least five minutes apart) or grey, which `why` explains and which is never red. */
+export interface SourceView {
+  id: string
+  path: string
+  title: string | null
+  /** http, mcp, cmd, file, dns, or `connections` (the app's own check of the agent's servers); null with no check. */
+  kind: string | null
+  where: 'here' | 'anywhere' | null
+  status: 'ok' | 'red' | 'grey'
+  why: 'waiting' | 'new' | 'stale' | 'no_check' | 'unreadable' | null
+  /** The check's one line about its last answer ("last exit code 127"); kept for the answer to the check as it is now. */
+  detail: string
+  value: number | null
+  ms: number | null
+  checked_at: string | null
+  /** When a red source's failures began. */
+  since: string | null
+  needs_approval: boolean
+  approved: boolean
+  /** The hash of the check as shown: Approve sends it back, so a check edited meanwhile is refused (409). */
+  check_hash: string | null
+  /** The check in words: what it runs or asks, how often, and what it wants. */
+  summary: string | null
+  /** Why a check nobody can read cannot be read. */
+  error: string | null
+  updated_at: string
+  failures: number
+  next_check_at: string | null
+  /** The top of the document, for its page on the desk. */
+  excerpt?: string
+  /** The tools the morning report may call to read this source (`mcp__<server>__<tool>`), from its check block. */
+  reads?: string[]
+  /** Where the last morning report stopped reading it: the next report starts here (`GET /api/sources?day=`). */
+  cutoff?: string | null
+}
+
+export function fetchSources(): Promise<{ sources: SourceView[] }> {
+  return request('/api/sources')
+}
+
+/** `POST /api/sources/{id}/approve`: the owner approves the exact check they were shown (an address, a tool, a command, a file
+ *  or a name lookup: every check the agent writes asks once). */
+export function approveSource(id: string, checkHash: string): Promise<SourceView> {
+  return request<SourceView>(`/api/sources/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ check_hash: checkHash }),
   })
 }

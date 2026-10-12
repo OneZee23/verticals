@@ -216,7 +216,7 @@ UPDATE_SCHEMA: dict[str, Any] = {
                 "end_date": {"type": ["string", "null"], "format": "date"},
             },
             "required": ["frequency"],
-            "description": "Structured repeat rule. Null clears recurrence. Targets one id only, which must be scheduled and childless. `end_date` is the only end condition — there is no occurrence count.",
+            "description": "Structured repeat rule. Null clears recurrence. Targets one id only, which must be scheduled; a goal with steps repeats too. `end_date` is the only end condition — there is no occurrence count.",
         },
         "size_expected": {
             "oneOf": [

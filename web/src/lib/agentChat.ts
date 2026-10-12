@@ -4,6 +4,7 @@
 // the agent is unavailable there and the field only finds.
 import { computed, reactive } from 'vue'
 import { stepPhrase } from './agentSteps'
+import { answersAvailable, refreshAnswers } from './answerUndo'
 import { commandFilter } from './commandFilter'
 import { goalChangesSince } from './goalChanges'
 
@@ -46,8 +47,15 @@ export interface Ask {
   options: { label: string; value: string }[]
   done: boolean
   chosen?: string
+  /** The write the agent asks to make, as it calls it (the gateway sends it for a Claude ask): lib/askDetail.ts draws it. */
+  tool?: string
+  input?: Record<string, unknown>
 }
-export interface Balloon { key: string; who: 'you' | 'agent'; text: string; error?: boolean; ask?: Ask; pending?: boolean }
+export interface Balloon {
+  key: string; who: 'you' | 'agent'; text: string; error?: boolean; ask?: Ask; pending?: boolean
+  /** The answer the message belongs to: what its writes changed is kept under it (`lib/answerUndo.ts`). */
+  answer?: string
+}
 
 const KEY = {
   threads: 'vt-chat:threads',
@@ -87,7 +95,7 @@ export const agentChat = reactive({
   /** The phrase of the step the agent is on while it works (S2.P3). */
   step: 'Thinking',
   /** The words of the last finished turn, for the circle while the conversation is hidden (S2.P4). */
-  answer: null as { text: string; at: number } | null,
+  answer: null as { text: string; at: number; answer?: string } | null,
   /** The conversation shows over the board or the window (S2.P1). */
   open: false,
   /** You are talking with the agent: typing or a click on the field brings the conversation back; a second Esc leaves
@@ -106,9 +114,10 @@ export const balloons = computed<Balloon[]>(() => {
   const out: Balloon[] = []
   let turn: Balloon | null = null
   let brk = false
+  let answer: string | undefined
   const agentBalloon = (index: number) => {
     if (!turn) {
-      turn = { key: `a${index}`, who: 'agent', text: '' }
+      turn = { key: `a${index}`, who: 'agent', text: '', answer }
       out.push(turn)
     }
     return turn
@@ -122,6 +131,7 @@ export const balloons = computed<Balloon[]>(() => {
         break
       case 'turn_start':
         turn = null
+        answer = typeof event.answer === 'string' ? event.answer : undefined
         break
       case 'text_start':
         brk = !!turn?.text
@@ -137,6 +147,7 @@ export const balloons = computed<Balloon[]>(() => {
         balloon.ask = {
           requestId: String(event.requestId), title: String(event.title ?? ''), body: String(event.body ?? ''),
           options: (event.options as Ask['options']) ?? [], done: false,
+          ...(typeof event.tool === 'string' ? { tool: event.tool, input: (event.input as Ask['input']) ?? {} } : {}),
         }
         break
       }
@@ -267,14 +278,16 @@ let pendingGoal: GoalRef | null = null
  *  message (S3.P1.005). */
 let goalSince: number | null = null
 
-export function openThread(id: string, goal: GoalRef | null = null): void {
+/** `provider`: the agent a session already has, when this browser has not talked in it: a session begun in Claude or Codex is
+ *  resumed by its own agent, so what the agent knows is what the session holds (docs/design/task-sessions.md). */
+export function openThread(id: string, goal: GoalRef | null = null, provider?: string): void {
   pendingGoal = goal
   agentChat.current = id
   save(KEY.current, id)
   agentChat.history = load<ChatEvent[]>(KEY.events(id), [])
   agentChat.cursor = load(KEY.cursor(id), { boot: null, seq: 0 })
   const thread = agentChat.threads.find((x) => x.id === id)
-  let selection = thread?.selection ? { ...thread.selection } : defaultSelection(load(KEY.lastAgent, 'claude'))
+  let selection = thread?.selection ? { ...thread.selection } : defaultSelection(provider ?? load(KEY.lastAgent, 'claude'))
   if (agentChat.agents.length && !agentChat.agents.some((agent) => agent.id === selection.provider && agent.available)) {
     selection = defaultSelection(agentChat.agents.find((agent) => agent.available)?.id ?? 'claude')
   }
@@ -290,12 +303,18 @@ export function newThread(goal: GoalRef | null = null): void {
   openThread(crypto.randomUUID(), goal)
 }
 
+/** A new conversation about a goal with the agent chosen for it, in the settings the chat has for that agent: Start work. */
+export function newThreadWith(goal: GoalRef, provider: string): void {
+  goalSince = null
+  openThread(crypto.randomUUID(), goal, provider)
+}
+
 /** Discuss with agent: the goal's latest conversation, wherever it was started in Verticals, or a new one about it
  *  (S3.P1.002, .003). True when an earlier conversation goes on. */
 export async function openForGoal(goal: GoalRef): Promise<boolean> {
-  let latest: { session: string; lastTurnAt: number } | null = null
+  let latest: { session: string; lastTurnAt: number; provider?: string } | null = null
   try {
-    const { conversations } = await api<{ conversations?: { session: string; lastTurnAt: number }[] }>(`goal?id=${encodeURIComponent(goal.id)}`)
+    const { conversations } = await api<{ conversations?: { session: string; lastTurnAt: number; provider?: string }[] }>(`goal?id=${encodeURIComponent(goal.id)}`)
     latest = conversations?.[0] ?? null
   } catch {
     latest = null
@@ -303,7 +322,7 @@ export async function openForGoal(goal: GoalRef): Promise<boolean> {
   const local = agentChat.threads.filter((thread) => thread.goal?.id === goal.id).sort((a, b) => b.updatedAt - a.updatedAt)[0]
   const id = latest?.session ?? local?.id
   if (!id) { newThread(goal); return false }
-  openThread(id, goal)
+  openThread(id, goal, latest?.provider)
   goalSince = latest?.lastTurnAt ? latest.lastTurnAt * 1000 : local?.updatedAt ?? null
   return true
 }
@@ -324,14 +343,21 @@ function follow(event: ChatEvent): void {
   switch (event.t) {
     case 'turn_start':
       agentChat.running = true
-      agentChat.step = 'Thinking'
+      // A turn that goes on with a morning report (the second agent's check, the fixing turn) keeps the step the gateway named.
+      if (!event.stage) agentChat.step = 'Thinking'
       reply = ''
       break
     case 'activity':
       agentChat.running = true
       break
     case 'tool':
-      agentChat.step = stepPhrase(String(event.name ?? ''))
+      // A tool that reads one of your sources names it (`step`, from the gateway); any other has its fixed phrase.
+      agentChat.step = typeof event.step === 'string' && event.step ? event.step : stepPhrase(String(event.name ?? ''))
+      break
+    case 'step':
+      // What the gateway itself is doing around a morning report: "Checking the report", "Fixing the report".
+      agentChat.running = true
+      if (typeof event.label === 'string' && event.label) agentChat.step = event.label
       break
     case 'text_start':
       brk = !!reply
@@ -346,20 +372,31 @@ function follow(event: ChatEvent): void {
     case 'permission_done':
       if (agentChat.running) touchThread({ status: 'working' })
       break
+    case 'goal':
+      // The gateway: the agent made a goal in a conversation about no goal, so the conversation is now that goal's
+      // (docs/design/agent-chips.md). Discuss on the goal goes on with it, and your next words carry the goal.
+      if (!currentThread.value?.goal && typeof event.id === 'string') touchThread({ goal: { id: event.id, title: String(event.title ?? '') } })
+      break
     case 'done':
+      // A morning report written but not yet checked: this turn ended, the answer is not told (`next` names what comes).
+      if (event.next) { agentChat.running = true; break }
       agentChat.running = false
       // The server's clock, the one the goal's record keeps.
       if (currentThread.value?.goal) goalSince = typeof event.at === 'number' ? event.at * 1000 : Date.now()
       touchThread({ status: event.error ? 'failed' : 'idle' })
       // With the conversation open the answer is its balloon at once; only a hidden one lands in the circle (S2.P4.034),
       // and not while you type: then it waits in the conversation and your words stay (S2.P4.025).
-      if (!event.error && reply.trim() && awaitingReplies > 0 && !agentChat.open && !commandFilter.text) agentChat.answer = { text: reply, at: Date.now() }
+      if (!event.error && reply.trim() && awaitingReplies > 0 && !agentChat.open && !commandFilter.text) {
+        agentChat.answer = { text: reply, at: Date.now(), answer: typeof event.answer === 'string' ? event.answer : undefined }
+      }
       awaitingReplies = Math.max(0, awaitingReplies - 1)
       reply = ''
+      void refreshAnswers() // what the answer wrote is its Undo now (docs/design/agent-answer-undo.md)
       break
     case 'exit':
       agentChat.running = false
       touchThread({ status: 'failed' })
+      void refreshAnswers()
       break
   }
 }
@@ -398,11 +435,50 @@ function connect(): void {
 function pageContext(goal: GoalRef | undefined) {
   return {
     today: new Date().toLocaleDateString('sv-SE'),
+    // Your clock to the minute, "2026-10-12 07:00": the morning report reads each source up to it.
+    now: new Date().toLocaleString('sv-SE').slice(0, 16),
     tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     url: location.pathname + location.search + location.hash,
     title: document.title,
     heading: (document.querySelector<HTMLElement>('.goal-card--detail-open .goal-card__title-text, main h1, h1')?.innerText ?? '').slice(0, 200),
     goal,
+  }
+}
+
+/** Something wrong, or something that could be better: what a report is (docs/design/bug-reports.md). */
+export type ReportKind = 'bug' | 'request'
+/** What the agent tells of a report from the person's words: which kind it is, and the name of its task by its result ("A
+ *  card dragged to Friday stays there"), or none, when the agent could not name it. */
+export interface ReportVerdict {
+  kind: ReportKind
+  name: string | null
+}
+/** The longest the page waits for the agent to tell, a little over what the gateway waits for it (desktop/chat/report_kind.py). */
+const REPORT_KIND_WAIT_MS = 30_000
+/** A task's name the page takes from the gateway: one line, a few words (the gateway holds it to 8 words and 100 characters). */
+const NAME_LIMIT = 100
+
+/** Which kind of report these words are, and what to call its task, told by the agent from the words alone, so the person
+ *  picks and names nothing. A request with no name when there is no agent, when it is slow or cannot tell: that shape loses
+ *  nothing (the words, the pictures, the version), and the task takes the person's own words. */
+export async function reportKind(words: string): Promise<ReportVerdict> {
+  const unknown: ReportVerdict = { kind: 'request', name: null }
+  if (!agentChat.available) return unknown
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REPORT_KIND_WAIT_MS)
+  try {
+    const res = await fetch('/__chat/report-kind', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({ words, settings: agentChat.selection ?? {} }),
+    })
+    const data = await res.json().catch(() => ({})) as { kind?: unknown; name?: unknown }
+    if (!res.ok) return unknown
+    const name = typeof data.name === 'string' ? data.name.replace(/\s+/g, ' ').trim() : ''
+    return { kind: data.kind === 'bug' ? 'bug' : 'request', name: name && name.length <= NAME_LIMIT ? name : null }
+  } catch {
+    return unknown
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -454,8 +530,8 @@ export async function quietTurn(text: string, extra: Record<string, unknown> = {
       if (event.t === 'turn_start') words = ''
       else if (event.t === 'text_start') fresh = !!words
       else if (event.t === 'text') { words += (fresh ? '\n' : '') + String(event.text ?? ''); fresh = false }
-      else if (event.t === 'done') finish(event.error ? '' : words)
-      else if (event.t === 'exit') finish('')
+      else if (event.t === 'done') { void refreshAnswers(); finish(event.error ? '' : words) }
+      else if (event.t === 'exit') { void refreshAnswers(); finish('') }
       else if (event.t === 'permission') abandon()
     }
     events.onerror = () => { if (events.readyState === EventSource.CLOSED) finish('') }
@@ -481,5 +557,8 @@ export async function decide(requestId: string, value: string): Promise<void> {
 export async function startAgentChat(): Promise<void> {
   await refreshAgents()
   if (!agentChat.available) return
+  // The gateway keeps what the agent's answers wrote, so one given while this window was closed has its Undo when it opens.
+  answersAvailable(true)
+  void refreshAnswers()
   openThread(agentChat.current ?? crypto.randomUUID())
 }

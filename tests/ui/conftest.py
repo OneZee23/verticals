@@ -56,6 +56,7 @@ from playwright.sync_api import (
 
 from tests.harness.report import artifact, scenario_id_of
 from tests.ui.gesture_counter import GestureCounter
+from tests.ui.undo_helpers import sent_body
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = REPO_ROOT / "web"
@@ -77,6 +78,10 @@ VIEWPORT = {"width": 1458, "height": 779}
 UI_REDUCED_MOTION = "reduce"
 # The pinned date, verbatim from E2E.md §1 instrumentation entry 3 and repeated in §6's own line.
 PINNED_CLOCK_ISO = "2026-08-08T09:00:00+03:00"
+# The day that clock says. The morning report (web `lib/morning.ts`) is asked for once the morning hour has come and the
+# server takes the day on the first ask (`POST /api/morning`); the pinned clock is past the hour, so a session with an
+# agent starts with its day already taken (`test_agent_conversation.py`'s `ui_agent`) unless the scenario is about the ask.
+PINNED_DAY = PINNED_CLOCK_ISO[:10]
 
 ARTIFACTS_ROOT = REPO_ROOT / "artifacts" / "ui"
 
@@ -329,6 +334,8 @@ def _spawn_backend(dsn: str, owner: str, port: int, log_path: Path, tmp_path: Pa
         VERTICALS_POOL_MIN="2",
         VERTICALS_POOL_MAX="10",
         VERTICALS_LOG_LEVEL="warning",
+        # The sources timer is off: the answers a scenario shows are written by the scenario, at the times it chooses.
+        VERTICALS_SOURCES_TICK="0",
     )
     # Append, never truncate: a restart must not erase the first process's log, which is the only
     # record of what the backend was doing before the scenario killed it.
@@ -510,7 +517,8 @@ class UiSession:
     failed_requests: list[str] = field(default_factory=list)
     bad_responses: list[str] = field(default_factory=list)
     #: Every completed request this session's page has issued, in order:
-    #: `{"method", "url", "status", "headers"}`. Not part of E2E.md §6's teardown dump (that is
+    #: `{"method", "url", "status", "headers", "body"}` (`body`: what a write carried, cut at 400
+    #: characters, so a scenario that counts writes can say which ones it counted). Not part of E2E.md §6's teardown dump (that is
     #: `failed_requests`/`bad_responses` only) — this is a general request log so an individual
     #: scenario can assert its own exact request count/content (S-64's "exactly 1 request to
     #: `/api/goals`", S-65's create POST, S-125's `GET /api/search?q=cycl` and its Origin-header
@@ -544,27 +552,6 @@ class UiSession:
         return self.page.evaluate("window.__dialogRecords || []")
 
 
-# The morning report (web `lib/morning.ts`): once the morning hour has come the app asks the agent for the day's report on
-# its own, and the pinned clock (09:00) is past it. A scenario about something else must not get that extra turn, so every
-# page starts with the day's report marked as asked, at the clock the app itself reads (set again once the document is
-# there, after the clock is installed). The one scenario about the report turns this off with
-# `sessionStorage['vt-morning-test'] = 'on'`.
-_MORNING_ASKED_SCRIPT = """
-(() => {
-  const mark = () => {
-    try {
-      if (sessionStorage.getItem('vt-morning-test') === 'on') return;
-      const d = new Date();
-      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      localStorage.setItem(`vt-morning:${day}`, 'test');
-    } catch (e) { /* storage off: nothing to mark */ }
-  };
-  mark();
-  document.addEventListener('DOMContentLoaded', mark);
-})();
-"""
-
-
 def _make_ui_session(
     *, browser: Browser, backend: Server, static_base_url: str, request: pytest.FixtureRequest,
     reduced_motion: str,
@@ -574,7 +561,6 @@ def _make_ui_session(
         reduced_motion=reduced_motion,
     )
     context.add_init_script(script=_DIALOG_RECORDER_SCRIPT)
-    context.add_init_script(script=_MORNING_ASKED_SCRIPT)
     page = context.new_page()
 
     console_errors: list[str] = []
@@ -629,6 +615,7 @@ def _make_ui_session(
                 "url": req.url,
                 "status": req.response().status if req.response() else None,
                 "headers": req.headers,
+                "body": sent_body(req),
             }
         ),
     )

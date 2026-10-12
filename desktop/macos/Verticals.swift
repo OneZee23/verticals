@@ -226,8 +226,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         webView.isHidden = false
         let reopen = UserDefaults.standard.string(forKey: "ReopenPage").flatMap { URL(string: $0) }
         UserDefaults.standard.removeObject(forKey: "ReopenPage")
-        let page = reopen.flatMap { $0.host == uiURL.host && $0.port == uiURL.port ? $0 : nil } ?? uiURL
+        // A task's link that came while the board was starting is where it opens.
+        let task = pendingTask.flatMap { AppLinks.boardURL(task: $0, ui: uiURL) }
+        pendingTask = nil
+        let page = task ?? reopen.flatMap { $0.host == uiURL.host && $0.port == uiURL.port ? $0 : nil } ?? uiURL
         webView.load(URLRequest(url: page))
+    }
+
+    // MARK: a task's link
+
+    // `verticals://goal/<id>` (docs/design/task-sessions.md): a session begun for a task starts with it, Terminal and Codex show it
+    // as a link, and a click comes here. The window comes forward and the board opens that task; before the board is up the link
+    // waits for it, and a link in the page itself comes here directly.
+    var pendingTask: String?
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let id = urls.lazy.compactMap({ AppLinks.taskID($0) }).first else { return }
+        openTask(id)
+    }
+
+    func openTask(_ id: String) {
+        pendingTask = id
+        guard window != nil else { return }  // still launching: showUI opens it
+        if window.isVisible { NSApp.activate(ignoringOtherApps: true) } else { showWindow(nil) }
+        showPendingTask()
+    }
+
+    // On the board's own page the address only changes after `#` (the page opens the task, and Back returns); anywhere else the
+    // board loads at the task's address.
+    func showPendingTask() {
+        guard serving, let id = pendingTask else { return }
+        pendingTask = nil
+        if let url = webView.url, url.host == uiURL.host, url.port == uiURL.port, !webView.isLoading {
+            webView.callAsyncJavaScript("location.hash = fragment", arguments: ["fragment": AppLinks.fragment(task: id)],
+                                        in: nil, in: .page, completionHandler: nil)
+        } else if let target = AppLinks.boardURL(task: id, ui: uiURL) {
+            webView.load(URLRequest(url: target))
+        }
     }
 
     func fail(_ message: String) {
@@ -344,10 +379,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let state = item(serving ? "Board and MCP are running" : backend?.isRunning == true ? "Starting…" : "Stopped, see app.log", nil)
         state.isEnabled = false
         menu.addItem(state)
-        let connect = item("Connect Claude Code", serving && FileManager.default.fileExists(atPath: mcpHeaders.path)
-                           ? #selector(connectClaude(_:)) : nil)
-        connect.toolTip = "Lets Claude Code in any folder use this board through the verticals-desktop MCP server"
-        menu.addItem(connect)
+        // The click is the consent: nothing is written into Claude Code's or Codex's settings before it. The tick says it was done here.
+        let ready = serving && FileManager.default.fileExists(atPath: mcpHeaders.path)
+        let claudeItem = item("Use Verticals in Claude Code", ready ? #selector(connectClaude(_:)) : nil)
+        claudeItem.state = UserDefaults.standard.bool(forKey: Self.inClaudeCode) ? .on : .off
+        claudeItem.toolTip = "Adds Verticals to Claude Code in every folder, as the \(AppLinks.claudeServer) MCP server (claude mcp add-json --scope user)"
+        menu.addItem(claudeItem)
+        let codexItem = item("Use Verticals in Codex", ready ? #selector(connectCodex(_:)) : nil)
+        codexItem.state = UserDefaults.standard.bool(forKey: Self.inCodex) ? .on : .off
+        codexItem.toolTip = "Adds Verticals to Codex, as the \(AppLinks.codexServer) MCP server (codex mcp add)"
+        menu.addItem(codexItem)
         let login = item("Open at Login", #selector(toggleLogin(_:)))
         switch SMAppService.mainApp.status {
         case .enabled: login.state = .on
@@ -377,31 +418,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // Claude Code reads the token from the owner-only file the launcher writes, never from its own config.
     var mcpHeaders: URL { stateDir.appendingPathComponent("mcp-headers.json") }
 
+    static let inClaudeCode = "VerticalsInClaudeCode", inCodex = "VerticalsInCodex"
+
     @objc func connectClaude(_ sender: Any?) {
-        let headers = mcpHeaders.path.replacingOccurrences(of: "'", with: "'\\''")
-        let server = ["type": "http", "url": mcpURL, "headersHelper": "cat '\(headers)'"]
-        guard let data = try? JSONSerialization.data(withJSONObject: server), let json = String(data: data, encoding: .utf8) else { return }
+        guard let add = AppLinks.claudeAddArguments(mcpURL: mcpURL, headersFile: mcpHeaders.path) else { return }
+        connect("Claude Code", tool: "claude", key: Self.inClaudeCode, remove: AppLinks.claudeRemoveArguments, add: add,
+                done: "New Claude Code sessions in any folder can use the board through the \(AppLinks.claudeServer) MCP server while Verticals runs.")
+    }
+
+    @objc func connectCodex(_ sender: Any?) {
+        let python = resources.appendingPathComponent("python/bin/python3").path
+        let relay = root.appendingPathComponent("desktop/chat/mcp_proxy.py").path
+        connect("Codex", tool: "codex", key: Self.inCodex, remove: AppLinks.codexRemoveArguments,
+                add: AppLinks.codexAddArguments(python: python, relay: relay, mcpURL: mcpURL, headersFile: mcpHeaders.path),
+                done: "New Codex sessions can use the board through the \(AppLinks.codexServer) MCP server while Verticals runs.")
+    }
+
+    // Replaces an earlier connection under the same name, then says what happened; the tick is kept for the menu.
+    func connect(_ name: String, tool: String, key: String, remove: [String], add: [String], done: String) {
         Task {
-            _ = await claude("mcp", "remove", "--scope", "user", "verticals-desktop")
-            let (code, output) = await claude("mcp", "add-json", "--scope", "user", "verticals-desktop", json)
+            _ = await agent(tool, remove)
+            let (code, output) = await agent(tool, add)
+            UserDefaults.standard.set(code == 0, forKey: key)
             let alert = NSAlert()
             if code == 0 {
-                alert.messageText = "Claude Code is connected"
-                alert.informativeText = "New Claude Code sessions in any folder can use the board through the verticals-desktop MCP server while Verticals runs."
+                alert.messageText = "\(name) is connected"
+                alert.informativeText = done
             } else {
-                alert.messageText = "Couldn't connect Claude Code"
-                alert.informativeText = code == 127 ? "The claude command isn't installed." : output
+                alert.messageText = "Couldn't connect \(name)"
+                alert.informativeText = code == 127 ? "The \(tool) command isn't installed." : output
             }
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
     }
 
-    func claude(_ args: String...) async -> (Int32, String) {
+    func agent(_ tool: String, _ args: [String]) async -> (Int32, String) {
         await withCheckedContinuation { done in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["claude"] + args
+            process.arguments = [tool] + args
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = agentPath
             process.environment = env
@@ -493,12 +549,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // Links that leave the app (target=_blank or another origin) open in the default browser.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = action.request.url { NSWorkspace.shared.open(url) }
+        if let url = action.request.url {
+            if let id = AppLinks.taskID(url) { openTask(id) } else { NSWorkspace.shared.open(url) }
+        }
         return nil
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = action.request.url, let id = AppLinks.taskID(url) {
+            openTask(id)
+            return decisionHandler(.cancel)
+        }
         if let url = action.request.url, url.host != uiURL.host || url.port != uiURL.port,
            action.navigationType == .linkActivated {
             NSWorkspace.shared.open(url)
@@ -535,11 +597,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     // The page keeps its content below the title bar by `--titlebar-height`, in its own zoomed pixels; full screen has
-    // none. `verticalsPageZoom` tells the dev panel's zoom buttons where they start.
+    // none. `verticalsPageZoom` tells the dev panel's zoom buttons where they start. The Reduce Motion answer rides in
+    // the same script (below), because this call replaces every user script.
     func syncTitlebar() {
         let height = window.styleMask.contains(.fullScreen) ? 0 : window.frame.height - window.contentLayoutRect.height
         let js = "document.documentElement.style.setProperty('--titlebar-height', '\(Int((height / webView.pageZoom).rounded()))px');"
-            + "window.verticalsPageZoom = \(webView.pageZoom)"
+            + "window.verticalsPageZoom = \(webView.pageZoom);"
+            + reduceMotionScript
         let scripts = webView.configuration.userContentController
         scripts.removeAllUserScripts()
         scripts.addUserScript(WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -575,6 +639,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let reloadItem = item("Reload", #selector(reload(_:)), "r")
         reloadItem.target = self
         view.addItem(reloadItem)
+        let motionItem = item("Reduce Motion", #selector(toggleReduceMotion(_:)), "")
+        motionItem.target = self
+        view.addItem(motionItem)
         view.addItem(item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         let win = NSMenu(title: "Window")
         win.addItem(item("Minimize", #selector(NSWindow.miniaturize(_:)), "m"))
@@ -585,6 +652,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             main.addItem(top)
         }
         NSApp.mainMenu = main
+    }
+}
+
+// MARK: Reduce Motion (View menu), docs/design/column-bounce.md
+//
+// The checkmark shows macOS's own Reduce motion until the person clicks it; from then on it shows their choice, kept in the
+// app's defaults (`ReduceMotion`). A web view can't be told to change what it reads from macOS, so the app puts its answer
+// on <html> as `data-reduce-motion`, "on" or "off", from the start of every page and now (`syncTitlebar` sends it). With no
+// choice made it puts nothing there and the page asks macOS itself, as a browser does. Everything in the page that obeys
+// `prefers-reduced-motion` obeys the answer: styles through web/vite.config.ts, scripts through web/src/lib/motion.ts.
+extension AppDelegate: NSMenuItemValidation {
+    var reduceMotionChoice: Bool? { UserDefaults.standard.object(forKey: "ReduceMotion") as? Bool }
+    var reduceMotion: Bool { reduceMotionChoice ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    var reduceMotionScript: String {
+        guard let choice = reduceMotionChoice else { return "document.documentElement.removeAttribute('data-reduce-motion');" }
+        return "document.documentElement.setAttribute('data-reduce-motion', '\(choice ? "on" : "off")');"
+    }
+
+    @objc func toggleReduceMotion(_ sender: Any?) {
+        UserDefaults.standard.set(!reduceMotion, forKey: "ReduceMotion")
+        syncTitlebar()
+    }
+
+    // The checkmark is read when the menu opens, so it follows macOS while the person has not chosen.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleReduceMotion(_:)) { item.state = reduceMotion ? .on : .off }
+        return true
     }
 }
 

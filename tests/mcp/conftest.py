@@ -233,6 +233,7 @@ class McpHttpServer:
     url: str  # includes the /mcp path
     token: str
     log_path: Path
+    pid: int = 0  # the server process, for a scenario that holds it (SIGSTOP) without restarting it
 
 
 def _wait_tcp(host: str, port: int, proc: subprocess.Popen, log_path: Path, timeout: float = 10.0) -> None:
@@ -297,7 +298,7 @@ def mcp_http_subprocess(
         )
         try:
             _wait_tcp("127.0.0.1", port, proc, log_path)
-            yield McpHttpServer(url=f"http://127.0.0.1:{port}/mcp", token=token, log_path=log_path)
+            yield McpHttpServer(url=f"http://127.0.0.1:{port}/mcp", token=token, log_path=log_path, pid=proc.pid)
         finally:
             _terminate(proc, port)
 
