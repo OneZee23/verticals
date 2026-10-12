@@ -171,6 +171,17 @@ def test_codex_gets_the_morning_guide_in_the_same_turn() -> None:
     assert "## This turn: the morning report" not in chat.codex_instructions(chat.clean_settings({"provider": "codex"}))
 
 
+def test_codex_as_the_second_agent_gets_the_check_prompt_not_the_writers_and_only_reads() -> None:
+    """Codex is not on the machines these tests run on, so this is all that is pinned of it as the second agent: what it is told
+    and the mode it runs in (docs/design/morning-quality.md)."""
+    chat = _chat()
+    settings = {**chat.clean_settings({"provider": "codex", "sources": "connected"}), "role": chat.CHECKER}
+    text = chat.codex_instructions(settings)
+    assert "## This turn: the second check" in text and "## This turn: the morning report" not in text
+    assert 'server "verticals_desktop"' in text
+    assert chat.codex_mode(settings) == "read-only"
+
+
 def test_the_app_ships_every_skill_the_chat_reads() -> None:
     """Fix 1: the chat reads the operator skill and, for the morning turn, the morning-report skill from the folder it
     runs in; the app's bundle copies both, or the guide silently shrinks to the few lines of prompt-morning.md."""
