@@ -56,8 +56,11 @@ const label = computed(() => {
   transition: opacity var(--vt-dur-fade) ease-out;
 }
 .goal-card.goal-card > .goal-card__row:has(> .session-mark) > .goal-card__text { padding-right: 30px; }
-.goal-card:is(:hover, .goal-card--menu-open, .goal-card--landed-hover) > .goal-card__row > .session-mark,
+.goal-card:is(.goal-card--menu-open, .goal-card--landed-hover) > .goal-card__row > .session-mark,
 .goal-card > .goal-card__row:has(.goal-actions__trigger:focus-visible) > .session-mark { opacity: 0; transition: none; }
+@media (hover: hover) and (pointer: fine) {
+  .goal-card:hover > .goal-card__row > .session-mark { opacity: 0; transition: none; }
+}
 /* The open card's dots stay, so the mark stands beside them. */
 .goal-card.goal-card--detail-open > .goal-card__row > .session-mark { right: 21px; opacity: 1; }
 /* The circle, small: the same black disc and white line, the line turning half a turn every 1.6 s as the field's does (circleField.css). */
