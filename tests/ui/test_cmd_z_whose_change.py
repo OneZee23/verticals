@@ -308,7 +308,7 @@ def test_a_question_wider_than_the_window_keeps_take_back_on_its_row_and_wraps_t
 
 
 @pytest.mark.parametrize("width", [390, 320])
-def test_the_question_fits_a_narrow_window_with_its_titles_cut_and_its_words_whole(ui_answers: UiSession, width: int) -> None:
+def test_in_a_narrow_window_a_pill_takes_a_second_line_before_its_title_is_cut_too_short(ui_answers: UiSession, width: int) -> None:
     session = ui_answers
     page = board(session)
     undo, _ = keys(page)
@@ -330,8 +330,18 @@ def test_the_question_fits_a_narrow_window_with_its_titles_cut_and_its_words_who
         first, second = stands_in_the_window(page, width)
         assert first["y"] + first["height"] <= second["y"] + 0.5, "the pills stand one under the other when they do not fit side by side"
         own, theirs = choices(page)
-        assert re.fullmatch(r"Completed “[^”]*[^ ”]…”", own), f"the title is cut, the dots right after its last letter: {own!r}"
-        assert re.fullmatch(r"Moved “[^”]*[^ ”]…” to this month by the agent", theirs), f"the title is cut, the words are not: {theirs!r}"
+
+        # One line is enough for the person's own pill, with 12 letters or more of its title left: it stays on one line, cut.
+        assert re.fullmatch(r"Completed “(?P<title>[^”]*[^ ”])…”", own), f"the title is cut, the dots right after its last letter: {own!r}"
+        assert first["height"] < 45, f"the pill keeps one line: {first}"
+        assert len(re.fullmatch(r"Completed “(?P<title>[^”]*)…”", own).group("title")) >= 12
+
+        # One line would leave the answer's title a few letters: its pill takes a second line, and is never taller than two.
+        title = re.fullmatch(r"Moved “(?P<title>[^”]*[^ ”])…” to this month by the agent", theirs)
+        assert title, f"the title is cut, the words around it are not: {theirs!r}"
+        assert len(title.group("title")) >= 12, f"the title is not left a few letters: {theirs!r}"
+        assert 45 < second["height"] <= 62.5, f"the pill takes a second line and no more: {second}"
+
         assert page.evaluate("document.documentElement.scrollWidth") <= max(page_width, width), "the question adds no width to the page"
         for at in range(2):
             page.locator(CHOICE).nth(at).click(trial=True)  # in reach of a finger: visible, still and not covered
@@ -347,6 +357,23 @@ def test_the_question_fits_a_narrow_window_with_its_titles_cut_and_its_words_who
         assert alone["x"] + alone["width"] <= width
         page.locator(CHOICE).click()
         wait_for(page, lambda: goal(conn, "SYNORD02"), order, "the answer is taken back from its pill")
+
+
+def test_a_short_title_that_does_not_fit_one_line_is_shown_whole_on_a_second_line(ui_answers: UiSession) -> None:
+    session = ui_answers
+    page = board(session)
+    undo, _ = keys(page)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        ask(session, ONE)  # "Order two": nine letters, more than the 320 px line leaves them after the words around it
+        page.set_viewport_size({"width": 320, "height": 844})
+        page.wait_for_timeout(500)
+        asked(session, undo)
+
+        [pill] = stands_in_the_window(page, 320)
+        assert choices(page) == ["Moved “Order two” to this month by the agent"], "the title is whole, the words are whole"
+        assert 45 < pill["height"] <= 62.5, f"on a second line, and no more: {pill}"
+        page.locator(CHOICE).click()
+        wait_for(page, lambda: goal(conn, "SYNORD02")[1], "week", "and it is a pill like the others: a click takes the answer back")
 
 
 # --- an answer is not a step of the keys -----------------------------------------------------------------------------------
