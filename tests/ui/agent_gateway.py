@@ -26,6 +26,9 @@ def main() -> None:
     os.environ["VERTICALS_DESKTOP_API_PORT"] = api_port
     os.environ["VERTICALS_DESKTOP_STATE"] = str(state)
     os.environ["PATH"] = f"{HERE / 'fake_agent'}:{os.environ.get('PATH', '')}"
+    # What the fake agent writes the board through, as the real one does through Verticals' MCP tools.
+    os.environ["FAKE_AGENT_API"] = f"http://127.0.0.1:{api_port}"
+    os.environ["FAKE_AGENT_TOKEN"] = token
     state.mkdir(parents=True, exist_ok=True)
     os.environ.update(HOME=str(state / "home"), CLAUDE_CONFIG_DIR=str(state / "claude-config"),
                       CODEX_HOME=str(state / "codex-home"), VERTICALS_WATCH_SECONDS="0.2")

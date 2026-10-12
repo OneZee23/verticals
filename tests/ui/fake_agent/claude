@@ -6,7 +6,15 @@ by calling `create` and gets the words Verticals' server answers it with, `[slow
 `[long]` answers in three paragraphs, `[fail]` ends the turn with an error, `[say]` answers with the words after it, and
 `[context]` with the app context Verticals sent. A message that opens with "Check again" (a document's comments and edits
 handed over, web/src/lib/checkAgain.ts) works for a second and a half, which is the time a test has to rewrite the document
-as the real agent would, then answers in two lines. Each start appends the arguments it was given to `argv.log` in its
+as the real agent would, then answers in two lines. A message that opens with "Improve it" (a report's design asked for,
+web/src/lib/reportActions.ts) is answered as the real agent answers it through Verticals' tools: it writes a design document
+into the report's task, linked to it, and says it is waiting for the person's comments; this one reaches the API the tests'
+gateway was started with (FAKE_AGENT_API). A message that opens with "A person's report, in their words" (a report to sort and
+name, desktop/chat/report_kind.py) is answered as the real agent answers it: two lines, the kind (request when the words say
+what the person would like: "I'd like", "would be nice", "I wish", "I want", "could be", "should be", "please add"; bug
+otherwise) and the task's name by its result, for the two sample wordings the tests use ("A card dragged to Friday stays
+there", "A card dropped near Friday snaps to it"). `[nameless]` in the words leaves the second line out, and `[unclear]`
+answers with a sentence that names neither kind. Each start appends the arguments it was given to `argv.log` in its
 folder, so a scenario can read what the gateway really asked of the CLI (its mode, tools and instructions), and every message
 it is sent, whole, to `received.log` beside it.
 
@@ -20,9 +28,11 @@ docs say. The host answers allow or deny, a denied call gets an error result, an
 `writer_tools` and `checker_tools` in the scenario name tools that seat tries once, besides the ones its work calls."""
 import fnmatch
 import json
+import os
 import re
 import sys
 import time
+import urllib.request
 
 import fake_morning
 
@@ -38,6 +48,13 @@ def read():
 
 
 CHECKED = "Check again"
+IMPROVE = "Improve it"
+SORT = "A person's report, in their words"
+WISHES = ("i'd like", "i would like", "would be nice", "i wish", "i want", "could be", "should be", "please add")
+# The task's name by its result, for the sample wordings of the report tests: what the real agent would call each.
+NAMES = (("dragged the card to friday and it jumped back", "A card dragged to Friday stays there"),
+         ("snap to friday when i drop it near it", "A card dropped near Friday snaps to it"))
+
 # `[ask:NAME]`: a write the agent asks permission for. SYNDAY01 is "Draft the outline", a goal of 8 Aug 2026 in F2.
 ASKS = {
     "schedule": ("schedule", {"id": "SYNDAY01", "vertical": "day", "anchor_date": "2026-08-10"}),
@@ -114,6 +131,42 @@ def scripted(words, text):
     answer = fake_morning.check_report(SCENARIO, api, remembered, ctx, tool_call, rounds)
     rounds += 1
     return answer
+
+
+def api(method, path, body=None):
+    """One call to the API the gateway was started over, as the Verticals tool the real agent would call."""
+    request = urllib.request.Request(
+        os.environ["FAKE_AGENT_API"] + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": "Bearer " + os.environ["FAKE_AGENT_TOKEN"], "Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read() or b"null")
+
+
+def improve(words):
+    """What the real agent does when asked to improve a report (desktop/chat/prompt-report.md): a design document in the
+    report's own task (doc_create, then doc_link by the task's notes), the one it has made already when it is asked again, and
+    two short lines saying it waits."""
+    goal = re.search(r"#goal/([A-Za-z0-9_-]+)", words).group(1)
+    task = api("GET", f"/api/goals/{goal}")
+    path = f"design/{goal}.md"
+    title = f"Design — {task['title'][:60]}"
+    doc = next((d for d in api("GET", "/api/docs")["docs"] if d["path"] == path), None)
+    if doc is None:
+        doc = api("POST", "/api/docs", {"path": path, "title": title,
+                                        "body": "What went wrong, what you expected, the change and its tests.\n\nWaiting for your comments."})
+    if f"doc:{path}" not in (task.get("body") or ""):
+        api("PATCH", f"/api/goals/{goal}", {"body": ((task.get("body") or "") + f"\n\n[{title}](doc:{path})").strip()})
+    return f"Wrote the design. Waiting for your comments.\n\n[{title}](#doc/{doc['id']})"
+
+
+def sort_for(words):
+    """What the real agent answers when it is asked to sort and name a report: by the person's own words."""
+    said = words.split("\n\n", 1)[-1].rsplit("\n\nIs it a bug or a request, and what is the task called?", 1)[0].lower()
+    if "[unclear]" in said:
+        return "It is hard to say from this."
+    kind = "request" if any(wish in said for wish in WISHES) else "bug"
+    name = next((named for key, named in NAMES if key in said), None)
+    return kind if "[nameless]" in said or not name else f"{kind}\n{name}"
 
 
 def answer_for(words):
@@ -193,6 +246,12 @@ for msg in iter(read, None):
         # What the server's `create` tool says (verticals/mcp/tools.py), which tests/mcp pins.
         out({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": f"make-{goal}", "content": [{"type": "text", "text": f"Created {title!r} [{goal}]"}]}]}})
+    fixed = None
+    if words.startswith(IMPROVE):
+        time.sleep(1.0)
+        fixed = improve(words)
+    elif words.startswith(SORT):
+        fixed = sort_for(words)
     if "[slow]" in words or words.startswith(CHECKED):
         time.sleep(1.5)
     if "[fail]" in words:
@@ -200,6 +259,6 @@ for msg in iter(read, None):
         continue
     out({"type": "stream_event", "event": {"type": "message_start"}})
     out({"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "text"}}})
-    for piece in re.findall(r"\S+\s*|\n+", answer_for(words)):
+    for piece in re.findall(r"\S+\s*|\n+", fixed or answer_for(words)):
         out({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": piece}}})
     out({"type": "result", "is_error": False, "result": ""})

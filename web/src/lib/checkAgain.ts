@@ -93,7 +93,7 @@ export async function checkAgain(): Promise<void> {
     })
     // A morning report gone through has nothing left to wait for: its open task is done. The one task is linked to every
     // morning's report (core/morning.py), so only the report of the day it stands in finishes it, not an earlier one
-    // (docs/design/agent-fixes.md, fix 2).
+    // (docs/design/agent-fixes.md, fix 2; this was `lib/go.ts`'s rule before Check again took its place).
     if (!doc.path.startsWith(`${MORNING_FOLDER}/`)) return
     for (const link of doc.linked_goals) {
       const goal = store.state.board?.columns.flatMap((c) => c.goals).find((g) => g.id === link.goal_id)

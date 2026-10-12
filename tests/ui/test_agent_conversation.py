@@ -26,7 +26,6 @@ from tests.ui.conftest import (
     F2_OWNER, PINNED_CLOCK_ISO, PINNED_DAY, REPO_ROOT, TEST_TOKEN, VIEWPORT, Server, UiSession, _backend, _free_port,
     _make_ui_session, _shutdown, _wait_http_ok,
 )
-from tests.ui.doc_comments import AGAIN, PILLS
 from tests.ui.views import FIELD
 
 
@@ -341,9 +340,9 @@ def test_the_next_morning_moves_the_one_task_to_its_day_instead_of_making_anothe
 def test_check_again_on_a_morning_report_finishes_the_task_only_for_the_day_it_stands_in(
     ui_agent: UiSession, report_day: str, finishes: bool,
 ) -> None:
-    """Fix 2: the one task is linked to every morning's report, so Check again on an earlier report leaves it open and on
-    the report of the day the task stands in (the pinned 2026-08-08) it is done. (Written for "Ready?", which Check again
-    took the place of: docs/design/doc-comments-inline.md.)"""
+    """Fix 2: the one task is linked to every morning's report, so Check again on an earlier report leaves it open and on the
+    report of the day the task stands in (the pinned 2026-08-08) it is done. (This was "Ready?" before PR #45 put Check
+    again in its place; the rule moved with it into `lib/checkAgain.ts`.)"""
     path = f"reports/morning/{report_day}.md"
     with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:
         task = goals.create(conn, owner=F2_OWNER, title="Morning report", vertical="day",
@@ -357,10 +356,8 @@ def test_check_again_on_a_morning_report_finishes_the_task_only_for_the_day_it_s
     page.locator(f'{BALLOON}[data-who="agent"] a', has_text="the report").click()
     expect(page.locator('.vt-window[data-window="doc"]')).to_have_count(1)
     page.evaluate("id => window.dispatchEvent(new CustomEvent('verticals:doc-edited', { detail: { id } }))", doc)
-    again = page.locator(f"{PILLS} {AGAIN}")
-    expect(again).to_have_text("Check again", timeout=10000)
-    again.click()
-    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Changed the words you commented on.", timeout=15000)
+    page.locator('[data-role="doc-check-again"]').click()
+    expect(page.locator('[data-role="circle-answer"]')).to_contain_text("Changed the words you commented on", timeout=15000)
 
     def done() -> bool:
         with psycopg.connect(ui_agent.backend.dsn, autocommit=True) as conn:

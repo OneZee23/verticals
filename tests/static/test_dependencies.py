@@ -43,6 +43,10 @@ ANALYTICS_AND_UPDATERS = {"sentry", "posthog", "segment", "mixpanel", "analytics
 ALLOWED_URL_PREFIXES = (
     "http://www.w3.org/",
     "https://vuejs.org/error-reference/",
+    # Send to developers (docs/design/bug-reports.md, web/src/lib/reportSend.ts): the repository's own new-issue page, an
+    # address the person opens by pressing a link and reading what it carries before they submit it. The page loads nothing
+    # from it and sends nothing to it.
+    "https://github.com/konstantinopolskii/verticals/issues/new",
 )
 
 

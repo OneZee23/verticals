@@ -107,6 +107,16 @@ export function isAllowedImageSrc(cleaned: string): boolean {
   return ALLOWED_IMAGE_SRC_RE.test(cleaned.toLowerCase())
 }
 
+/** A picture that travels inside the text, `![alt](data:image/jpeg;base64,…)`: the one pattern of `core/pictures.py`, which cuts
+ *  the Documents desk's previews the same way on the server. */
+const INLINE_PICTURE_RE = /!\[[^\]\n]{0,250}\]\(data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=_-]*\)/gi
+
+/** The text without its pictures, for an excerpt: cut at a fixed length, a data URL would print as base64 on the page that
+ *  shows the excerpt (DocPage.vue draws no picture at all), and the words after the pictures would be cut off with it. */
+export function withoutPictures(body: string): string {
+  return body.replace(INLINE_PICTURE_RE, '')
+}
+
 /** Null for no anchor or an external one — the browser follows those itself (S-72). */
 export function internalLinkOf(anchor: HTMLAnchorElement | null): InternalLink | null {
   return anchor ? internalLinkTarget(cleanHref(anchor.getAttribute('href') ?? '')) : null

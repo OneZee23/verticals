@@ -99,6 +99,69 @@ def load_check_prompt():
 
 MORNING_PROMPT = load_morning_prompt()
 CHECK_PROMPT = load_check_prompt()
+
+
+# ---------------------------------------------------------------- reports (docs/design/bug-reports.md)
+
+# The folders people clone Verticals into, looked in after the person's own word for where it is. A checkout is a git
+# repository with this project's pyproject.toml and the desktop launcher in it.
+SOURCE_PLACES = ("verticals", "Verticals", "Developer/verticals", "Projects/verticals", "Code/verticals", "src/verticals",
+                 "GitHub/verticals", "Documents/GitHub/verticals")
+# Where an agent keeps the skills it was given, by agent (Claude Code, the shared folder, Codex).
+SKILL_FOLDERS = (".claude/skills", ".agents/skills", ".codex/skills")
+
+
+def is_checkout(path):
+    """Whether `path` is a git checkout of Verticals' source."""
+    try:
+        return ((path / ".git").exists() and (path / "desktop" / "launcher.py").is_file()
+                and re.search(r'^name\s*=\s*"verticals"', (path / "pyproject.toml").read_text(), re.M) is not None)
+    except OSError:
+        return False
+
+
+def find_source(state_dir=None, home=None, code_root=None):
+    """A checkout of Verticals' source on this Mac, or None. The agent that makes a change and opens its pull request needs
+    one; the installed app ships without. In this order: the person's word for it, `VERTICALS_SOURCE` or `source` in the app's
+    config.json (nothing else of that file is read); the repository this code runs from, when it runs from a checkout; the
+    folders people clone into. A report's task and its documents come without one, and only the pull request waits."""
+    home = Path(home) if home else Path.home()
+    named = [os.environ.get("VERTICALS_SOURCE")]
+    try:
+        config = json.loads((Path(state_dir) / "config.json").read_text()) if state_dir else {}
+        named.append(config.get("source") if isinstance(config, dict) else None)
+    except (OSError, ValueError):
+        pass
+    candidates = [Path(n).expanduser() for n in named if isinstance(n, str) and n.strip()]
+    candidates += [Path(code_root) if code_root else HERE.parents[1], *(home / place for place in SOURCE_PLACES)]
+    return next((c for c in candidates if is_checkout(c)), None)
+
+
+def shaping_skills(home=None):
+    """The names of the skills for shaping a change that this Mac's agents have, found by the word in their folder's name. The
+    prompt names them only when they are there, so it never sends an agent to a skill it does not have."""
+    home = Path(home) if home else Path.home()
+    found = set()
+    for folder in SKILL_FOLDERS:
+        try:
+            found.update(p.name for p in (home / folder).iterdir() if "shaping" in p.name.lower() and (p / "SKILL.md").is_file())
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def report_prompt(state_dir=None, full=False, home=None, code_root=None):
+    """The chat's instructions for the reports the app makes, with the checkout it found and, in a conversation that has the
+    agent's own tools, the shaping skills this Mac has (docs/design/bug-reports.md)."""
+    skills = shaping_skills(home) if full else []
+    use = (f"Use these skills for it: {', '.join(skills)}." if skills
+           else "Use the skills you have for shaping and design, if there are any.")
+    source = find_source(state_dir, home, code_root)
+    where = (f"The source of Verticals on this Mac is a git checkout at {source}." if source else
+             "No checkout of Verticals' source was found on this Mac. Ask where it is; if there is none, say the pull request must wait.")
+    return (HERE / "prompt-report.md").read_text().strip().replace("{skills}", use) + "\n\n" + where + "\n"
+
+
 # The one value a message's `sources` may take: the morning report's turn (web lib/morning.ts), which gets the morning
 # guide and its own rules. `clean_settings` passes exactly this value on and nothing else (docs/design/agent-fixes.md, fix 1).
 CONNECTED = "connected"
@@ -394,11 +457,12 @@ class RpcProcess(JsonProcess):
 # ---------------------------------------------------------------- agents
 
 class ClaudeAgent:
-    """`claude --print` stream-json; mirrors Enjoy's Claude client."""
+    """`claude --print` stream-json; mirrors Enjoy's Claude client. `prompt` replaces the chat's own system prompt for a
+    conversation that is not the chat's (report_kind.py)."""
 
     provider = "claude"
 
-    def __init__(self, chat, s, settings, resume_id, cwd=None, rebuild_prompt=False):
+    def __init__(self, chat, s, settings, resume_id, cwd=None, rebuild_prompt=False, prompt=None):
         self.chat, self.s, self.settings = chat, s, settings
         self.session_id = resume_id or str(uuid.uuid4())
         self.streamed = False
@@ -422,7 +486,11 @@ class ClaudeAgent:
         # What this seat runs without a question: on the command line, and again in handle() for when the CLI asks anyway.
         self.allowed = [f"mcp__verticals__{t}" for t in allowed] + list(self.reads)
         mode = ASK_FIRST if self.connected else settings.get("permission") or BOARD_ONLY
-        brief = (CHECK_PROMPT if self.checker else MORNING_PROMPT) if self.connected else ACCESS_PROMPT[self.full]
+        # What this conversation is told on top of the board prompt: a morning turn's guide; in any other, the reports'
+        # instructions and what its access reaches (docs/design/bug-reports.md). A conversation of another kind (report_kind.py)
+        # brings its whole prompt.
+        brief = (CHECK_PROMPT if self.checker else MORNING_PROMPT) if self.connected else (
+            report_prompt(getattr(chat, "state_dir", None), self.full) + "\n" + ACCESS_PROMPT[self.full])
         args = [which("claude"), "--print", "--verbose", "--include-partial-messages",
                 "--input-format", "stream-json", "--output-format", "stream-json",
                 "--permission-mode", ASK_FIRST if mode == BOARD_ONLY else mode,
@@ -431,7 +499,7 @@ class ClaudeAgent:
                 "--settings", json.dumps(claude_settings),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
                 "--allowedTools", ",".join(self.allowed),
-                "--append-system-prompt", PROMPT + "\n" + brief,
+                "--append-system-prompt", prompt if prompt is not None else PROMPT + "\n" + brief,
                 "--resume" if resume_id else "--session-id", self.session_id]
         if settings.get("model") and settings["model"] != "default":
             args += ["--model", settings["model"]]
@@ -554,11 +622,11 @@ def codex_policy(mode, cwd=None):
     return out
 
 
-def codex_instructions(settings):
-    """What Codex is told at the start of a thread: the board prompt, the morning turn's guide after it, and Verticals
-    under the name Codex knows its server by."""
+def codex_instructions(settings, state_dir=None):
+    """What Codex is told at the start of a thread: the board prompt, the morning turn's guide after it (or, in any other turn,
+    the reports' instructions), and Verticals under the name Codex knows its server by."""
     morning = CHECK_PROMPT if settings.get("role") == CHECKER else MORNING_PROMPT
-    text = PROMPT + ("\n" + morning if settings.get("sources") == CONNECTED else "")
+    text = PROMPT + ("\n" + morning if settings.get("sources") == CONNECTED else "\n" + report_prompt(state_dir))
     return text.replace('server "verticals"', 'server "verticals_desktop"')
 
 
@@ -622,7 +690,7 @@ class CodexAgent:
                                          "capabilities": {"experimentalApi": True}})
         self.proc.notify("initialized", {})
         params = {**codex_policy(codex_mode(settings)), "cwd": str(self.cwd),
-                  "developerInstructions": codex_instructions(settings),
+                  "developerInstructions": codex_instructions(settings, chat.state_dir),
                   "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False},
                   "serviceTier": "fast" if settings.get("fast") else None}
         if settings.get("model"):

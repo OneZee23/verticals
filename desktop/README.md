@@ -33,6 +33,10 @@ launcher has its own ports, database, state directory and UI build.
   thread by `codex://threads/<id>`, a Claude session in Terminal by `claude --resume <id>` from its folder). A session begun
   from a task starts with its link, `verticals://goal/<id>`; the MCP tool `session_link` (the MCP server is told where the
   gateway is by `--gateway-url`) ties a session begun in Claude Code or Codex to a task, and it is the only way one is linked.
+- `chat/report_facts.py`, `chat/report_kind.py` and `chat/prompt-report.md` — what a report carries from the app
+  (`GET /__report/facts`: the version, the Mac, and for a bug the last lines of `app.log`, `api.log` and `agent.log` with
+  every word of the board left out), whether the words are a bug or a request (`POST /__chat/report-kind`), and what the
+  agent is told about reports (docs/design/bug-reports.md; see Reports below).
 - `macos/` — `Verticals.swift` (native window, WKWebView), `AppLinks.swift` (the `verticals://goal/<id>` link and the lines
   that connect Claude Code and Codex, no window in it, checked by `tests/static/test_app_links.py`), `Updater.swift` (checks,
   downloads and installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
@@ -198,6 +202,44 @@ matching `.dmg` from the release page.
 - Agents see the screen context and use only the Verticals MCP tools (Claude runs with no built-in
   tools). Links to goals, docs and board dates open inside Verticals.
 - Uses the local CLI's own sign-in; every answer counts against that account's limits.
+
+## Reports
+
+Something is wrong, or could be better: pictures dropped on the window (or pasted into the field) wait above the field, and with
+them there what you type says what you see and what you want. ↵ makes a report (docs/design/bug-reports.md): a document with
+your words, the pictures and the version, and a task with no date that holds it. There is nothing to pick: the agent tells
+which kind it is from your words, once, and gets the words alone (`chat/report_kind.py` asks the Claude Code the chat runs, in a
+conversation nobody sees, with no tools and no MCP servers; the pictures and the logs never go to a model). In the same answer it
+names the task by its result, as the board names its tasks ("A card dragged to Friday stays there"), in the language of your words
+and in at most 8 words; the report keeps your words as you wrote them, and with no name (no agent, a slow or unsure one) the task
+takes your words. A bug, something that
+went wrong, is made under `reports/bugs/` and also holds the last lines of the app's and the agent's logs; a request, something
+that could be better, is made under `reports/requests/` and holds none (`GET /__report/facts?logs=0` opens no log). When the agent
+cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a request: that shape loses nothing. A document holds
+512 KiB, so the pictures are drawn smaller as JPEGs until they fit with the words and logs.
+
+- **Send to developers** is a link to a new GitHub issue on this repository, filled in with the report's text as the
+  document stands (the pictures cannot travel in a link: the issue ends with how many there were and to drag them in). It
+  reads as what it is: `labels=bug` for a bug and `labels=enhancement` for a request, the repository's own labels (GitHub
+  applies a label from a link only for someone who may label), and a request has no logs in it. GitHub does not publish its
+  link limit; a link is kept to 6,000 characters, the oldest log lines going first and the issue saying how many. With ⌥
+  held it is an email draft with the same text, to no address (`DEVELOPERS_EMAIL` in `web/src/lib/reportSend.ts` is empty;
+  the repository publishes none).
+- **What an agent reads of a report:** its pictures are data URLs inside the text, hundreds of kilobytes of base64, so every MCP read
+  of a document or a goal (`doc_get`, `doc_revision`, `doc_create`/`doc_save`/`doc_restore`'s answers, `goal`) returns each as
+  `[picture 1]`, `[picture 2]` and so on with every word as it is (`verticals/core/pictures.py`), and a placeholder the agent keeps
+  in a body it saves (`doc_save`, `update` of one goal) is the picture again, so editing a report's words never costs it its
+  pictures. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
+  text without its pictures.
+- **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
+  knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the
+  Mac's user name; the number of entries left out is told in the report.
+- **Improve it** asks the agent for a design document in the report's task. Once the person agrees (a comment and Check
+  again, or a word in the chat), the agent makes the change in a checkout of the source, with its tests, and opens a pull
+  request whose address it adds to the task's notes. The installed app ships without a checkout: the gateway looks for one at
+  `VERTICALS_SOURCE`, then `source` in the state folder's `config.json`, then the repository it runs from, then the usual
+  folders (`~/verticals`, `~/Developer/verticals`, …). With none, or with Verticals-only access, the task and its documents
+  still come and only the pull request waits.
 
 ## Security notes
 

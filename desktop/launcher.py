@@ -30,6 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "chat"))
 from chat import Chat, ChatError  # noqa: E402
+import report_kind  # noqa: E402
+from report_facts import collect as report_facts  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent          # desktop/
 APP = ROOT.parent                               # repository root (or its mirror inside the app)
@@ -340,6 +342,8 @@ def make_gateway(token, chat):
                                                                            body.get("session"), body.get("cwd"))})
                 elif action == "open":
                     return self.send_json({"ok": True, **chat.open_session(body.get("session"))})
+                elif action == "report-kind":
+                    return self.send_json(report_kind.ask(chat, body.get("words"), body.get("settings")))
                 else:
                     return self.deny(404, "not found")
             except (ChatError, ValueError) as e:
@@ -400,9 +404,19 @@ def make_gateway(token, chat):
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def report_facts(self):
+            """What a report carries from the app: its version, and, unless `logs=0` (a request has none), the last lines of
+            its logs with every word of the board left out (docs/design/bug-reports.md, desktop/chat/report_facts.py)."""
+            if self.allowed():
+                from urllib.parse import parse_qs, urlparse
+                logs = parse_qs(urlparse(self.path).query).get("logs", ["1"])[0] != "0"
+                self.send_json(report_facts(STATE, APP, logs=logs))
+
         def route(self):
             if self.path.startswith("/__chat/"):
                 return self.chat_route()
+            if self.command == "GET" and self.path.split("?", 1)[0] == "/__report/facts":
+                return self.report_facts()
             if self.path.startswith(("/api", "/healthz")):
                 return self.proxy()
             if self.command in ("GET", "HEAD"):
