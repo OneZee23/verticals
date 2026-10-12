@@ -22,6 +22,10 @@ def test_an_agent_reads_the_words_and_a_placeholder_for_each_picture() -> None:
     assert len(REPORT) > 2500 and len(read) < 200, "the base64 is what made it large"
 
 
+def test_an_outline_of_many_goals_shows_a_picture_unnumbered() -> None:
+    assert pictures.for_agent(f"a\n{ONE}\nb\n{TWO}", numbered=False) == "a\n[picture]\nb\n[picture]"
+
+
 def test_a_text_with_no_picture_is_read_as_it_is() -> None:
     for text in ("", "Words.", "![a web picture](https://example.com/a.png) and [a link](https://example.com)",
                  "![an svg](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=) is not a picture here",

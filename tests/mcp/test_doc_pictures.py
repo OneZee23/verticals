@@ -110,13 +110,14 @@ async def _goal_body(dsn: str, tmp_path: Path):
     async with open_mcp_stdio(dsn, tmp_path, label="pictures-goal") as (session, streams):
         wrote = await session.call_tool("update", {"id": "SYNDAY01", "body": body})
         read = await session.call_tool("goal", {"id": "SYNDAY01"})
+        outline = await session.call_tool("outline", {"id": "SYNDAY01"})
         kept = await session.call_tool("update", {"id": "SYNDAY01", "body": "What really happened.\n\n[picture 1]\n\nAnd after."})
         stored_after_kept = _goal_stored(dsn)
         # Many goals take one body: a placeholder is only text there, as no one goal's picture is meant.
         many = await session.call_tool("update", {"ids": ["SYNDAY01", "SYNCOL01"], "body": "Same.\n\n[picture 1]"})
         stored_after_many = _goal_stored(dsn)
         streams.assert_hygiene(token=TEST_TOKEN)
-    return body, wrote, read, kept, stored_after_kept, many, stored_after_many
+    return body, wrote, read, outline, kept, stored_after_kept, many, stored_after_many
 
 
 def _goal_stored(dsn: str, id_: str = "SYNDAY01") -> str:
@@ -127,10 +128,14 @@ def _goal_stored(dsn: str, id_: str = "SYNDAY01") -> str:
 
 
 def test_a_goal_with_a_picture_reads_as_a_placeholder_and_keeps_it_when_its_words_change(f2_dsn: str, tmp_path: Path) -> None:
-    body, wrote, read, kept, after_kept, many, after_many = anyio.run(_goal_body, f2_dsn, tmp_path)
+    body, wrote, read, outline, kept, after_kept, many, after_many = anyio.run(_goal_body, f2_dsn, tmp_path)
 
     assert wrote.is_error is False, wrote.content[0].text if wrote.content else wrote
     assert read.structured_content["goal"]["body"] == "What happened.\n\n[picture 1]\n\nAnd after."
+    # An outline carries every body of its subtree, and shows a picture in one as [picture] (no number could mean one picture
+    # among many goals), never its data.
+    text = outline.content[0].text
+    assert "What happened." in text and "[picture]" in text and "base64" not in text and "data:image" not in text
     assert kept.is_error is False
     assert after_kept == "What really happened.\n\n" + f"![shot](data:image/png;base64,{TINY})" + "\n\nAnd after."
     assert many.is_error is False and after_many == "Same.\n\n[picture 1]"

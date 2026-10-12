@@ -32,8 +32,10 @@ _PLACEHOLDER_RE = re.compile(r"\[picture (\d+)\]")
 _MARK_RE = re.compile(r"data:image/", re.IGNORECASE)
 
 
-def for_agent(body: str) -> str:
-    """The text as an agent reads it: each picture a placeholder `[picture N]`, N counting from 1 in the order they stand."""
+def for_agent(body: str, *, numbered: bool = True) -> str:
+    """The text as an agent reads it: each picture a placeholder `[picture N]`, N counting from 1 in the order they stand.
+    Unnumbered, `[picture]`, for a text made of many (an outline of goals), where no one number could mean one picture; it is
+    only to be read, and an agent that means to edit a goal reads that goal."""
     if not _MARK_RE.search(body):
         return body
     count = 0
@@ -41,7 +43,7 @@ def for_agent(body: str) -> str:
     def placeholder(_: re.Match[str]) -> str:
         nonlocal count
         count += 1
-        return f"[picture {count}]"
+        return f"[picture {count}]" if numbered else "[picture]"
 
     return _PICTURE_RE.sub(placeholder, body)
 

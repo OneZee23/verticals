@@ -48,7 +48,7 @@ from verticals.core import goals as core_goals
 from verticals.core import markdown as core_markdown
 from verticals.core import moves as core_moves
 from verticals.core import search as core_search
-from verticals.core.pictures import from_agent
+from verticals.core.pictures import for_agent, from_agent
 from verticals.core.errors import VerticalError, ValidationError
 from verticals.mcp import comments as mcp_comments
 from verticals.mcp import docs as mcp_docs
@@ -95,7 +95,7 @@ assert core_goals.MAX_CHILDREN_DEPTH == 8
 TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="board", description="The whole day's board in one call: every column, direct children, ancestors and progress.", input_schema=BOARD_SCHEMA),
     types.Tool(name="goal", description="One goal with its breadcrumb of ancestors and its direct children. Its docs field already includes every document linked to any ancestor, marked with inherited_from — no need to walk the breadcrumb yourself to find them. A doc link is plain markdown in body text ('[label](doc:path)'); doc_link/doc_unlink are the safe verbs for adding or removing one — never link a document an ancestor already links, since every descendant inherits it automatically. A picture inside the body comes as [picture 1], [picture 2] and so on, never its data.", input_schema=GOAL_SCHEMA),
-    types.Tool(name="outline", description="Render a subtree as one readable markdown outline, every node's id inline.", input_schema=OUTLINE_SCHEMA),
+    types.Tool(name="outline", description="Render a subtree as one readable markdown outline, every node's id inline. A picture inside a body shows as [picture], never its data.", input_schema=OUTLINE_SCHEMA),
     types.Tool(name="search", description="Full-text and tag search over the owner's goals.", input_schema=SEARCH_SCHEMA),
     types.Tool(name="create", description="Create a goal, optionally with a nested plan of children, in one call.", input_schema=CREATE_SCHEMA),
     types.Tool(name="update", description="Edit content (title/body/color/tags/done/foil/private/repeat) on one or many goals, or reorder one goal among its siblings. `private` hides a goal and its whole subtree from screenshots while privacy mode is on; it never shows in the app. A repeating goal's next occurrence is materialized when the current one is completed — never by the clock — under the completed row's parent, so a series follows wherever its last instance was moved. A [picture N] placeholder kept in the body of one goal is that picture again.", input_schema=UPDATE_SCHEMA),
@@ -430,7 +430,8 @@ def _handle_outline(conn: psycopg.Connection, owner: str, args: dict[str, Any]) 
     if "id" not in args:
         raise ValidationError("id is required for every mode except 'map'", field="id")
 
-    md = core_markdown.outline(conn, owner=owner, id=args["id"], depth=depth)
+    # A picture inside a goal's body (a data URL) is `[picture]` here, never its data; the `goal` tool numbers them.
+    md = for_agent(core_markdown.outline(conn, owner=owner, id=args["id"], depth=depth), numbered=False)
     if mode != "full":
         md = _outline_strip_bodies(md)
     if mode == "headlines+docs":
