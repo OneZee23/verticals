@@ -14,6 +14,9 @@ it and writes it back exactly as it was (`web/src/lib/bodyMarkdown.ts`), so a sa
 the check or its hash. The block is the only copy of the check; the table beside it keeps answers, never a second check.
 
 Five kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns`. A sixth, `connections`, is written only by the app.
+Any of the five may also say `reads`: the tools of the owner's other MCP servers that read this source for the morning report,
+each as Claude Code names it (`mcp__chat__list_messages`). They sit in the block so the one Approve covers them: the hash
+below changes with them, and the morning turn calls a source's tools only while that hash is the approved one.
 Unknown fields are refused, so a typo cannot quietly drop a limit. Every kind the agent writes is gated: each reaches
 something (an address, a server, a program, a file, a name resolver) and can carry something out or bring something in, so
 each runs only once the owner has approved the exact check, which is the hash below (`Check.hash`). Only the app's own
@@ -45,9 +48,9 @@ GATED = frozenset(KINDS)
 ON_THIS_MAC = frozenset({"cmd", "file"})
 WHERES = ("here", "anywhere")
 
-# The reading verbs a tool name may start with: the morning turn's own test for another server's tool
-# (`desktop/chat/chat.py::reads_only`, copied here as a list; `core/` does not import the gateway), plus the two words a
-# health tool uses. An `mcp` check calls one tool every hour, so it may only be a tool that reads.
+# The reading verbs the tool of an `mcp` check may start with, plus the words a health tool uses. The app calls that one
+# tool every hour with no model and the owner approved it, so a name that reads is a safety net under the Approve. It is not
+# how the morning turn judges a tool: that turn calls the tools a source's `reads` names and asks for any other.
 READ_VERBS = frozenset({
     "get", "list", "search", "fetch", "read", "retrieve", "find", "query", "lookup", "show", "describe", "inspect",
     "whoami", "health", "status", "ping", "check",
@@ -63,6 +66,7 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 NO_FIXES = "None. Anything else stays red."
 
 MAX_URL = 2048
+MAX_READS = 40
 MAX_ARGV = 32
 MAX_ARG = 2048
 MAX_PATTERN = 300
@@ -71,11 +75,11 @@ MAX_EXPECT = 20
 
 # Per kind: the fields it takes (in the order a block is written), the ones it must have, and what an omitted one means.
 _FIELDS: dict[str, tuple[str, ...]] = {
-    "http": ("url", "status", "expect", "value", "min", "max", "say", "timeout"),
-    "mcp": ("url", "tool", "args", "expect", "value", "min", "max", "say", "timeout"),
-    "cmd": ("argv", "exit", "parse", "min", "max", "say", "timeout"),
-    "file": ("path", "max_age_hours", "last_line"),
-    "dns": ("host",),
+    "http": ("url", "status", "expect", "value", "min", "max", "say", "timeout", "reads"),
+    "mcp": ("url", "tool", "args", "expect", "value", "min", "max", "say", "timeout", "reads"),
+    "cmd": ("argv", "exit", "parse", "min", "max", "say", "timeout", "reads"),
+    "file": ("path", "max_age_hours", "last_line", "reads"),
+    "dns": ("host", "reads"),
     "connections": (),
 }
 _REQUIRED = {"http": ("url",), "mcp": ("url", "tool"), "cmd": ("argv",), "file": ("path",), "dns": ("host",), "connections": ()}
@@ -89,6 +93,12 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
 }
 _MAX_TIMEOUT = {"http": 30, "mcp": 30, "cmd": 60}
 _HOST_RE = re.compile(r"^[A-Za-z0-9._:\-\[\]]{1,253}$")
+# A tool as Claude Code names it, `mcp__<server>__<tool>`: what the morning turn is allowed to call (`reads` below). The
+# server's name has no double underscore in it, so the first `__` after the prefix ends it.
+_TOOL_RE = re.compile(r"^mcp__([A-Za-z0-9][A-Za-z0-9_.\-]{0,80}?)__([A-Za-z0-9][A-Za-z0-9_.\-]{0,120})$")
+# Verticals itself is never a source of its own report: a tool of this server named here would be a write allowed by the
+# line of a document, past the owner's Approve of the tools it names. The gateway refuses it again when it reads them.
+_OWN_SERVERS = ("verticals",)
 
 
 def _bad(field: str, message: str) -> ValidationError:
@@ -112,6 +122,23 @@ def reads_only(tool: str) -> bool:
     """A tool name that starts with a reading verb: `get_status`, `list-events`, `searchThreads`."""
     first = re.split(r"[-_]|(?<=[a-z])(?=[A-Z])", tool)[0].lower()
     return first in READ_VERBS
+
+
+def reading_tools(raw: object) -> list[str]:
+    """The tools a source names for reading it in the morning, checked: a list of Claude Code's tool names, each once, none
+    of Verticals' own (a source cannot hand the morning turn a write of the board)."""
+    if not isinstance(raw, list) or not raw or len(raw) > MAX_READS:
+        raise _bad("reads", f"reads must be a list of 1 to {MAX_READS} tools, each written mcp__<server>__<tool>")
+    tools: list[str] = []
+    for tool in raw:
+        found = _TOOL_RE.match(tool) if isinstance(tool, str) else None
+        if found is None:
+            raise _bad("reads", f"{tool!r} is not a tool written mcp__<server>__<tool>")
+        if found.group(1).lower().startswith(_OWN_SERVERS):
+            raise _bad("reads", f"{tool!r} is a tool of Verticals itself: a source names the tools of other servers")
+        if tool not in tools:
+            tools.append(tool)
+    return tools
 
 
 def is_source_path(path: str) -> bool:
@@ -253,6 +280,8 @@ def _normalise(kind: str, raw: Mapping[str, Any]) -> dict[str, Any]:
         if not _number(hours) or not 0 < hours <= 24 * 365:
             raise _bad("max_age_hours", "max_age_hours must be a number of hours above 0")
         out["max_age_hours"] = _tidy(hours)
+    if "reads" in raw:
+        out["reads"] = reading_tools(raw["reads"])
     if "timeout" in raw:
         seconds = raw["timeout"]
         if not _number(seconds) or not 0 < seconds <= _MAX_TIMEOUT[kind]:
@@ -311,7 +340,19 @@ class Check:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def summary(self) -> str:
-        """What the check does, in the words the owner reads before approving it."""
+        """What the check does, in the words the owner reads before approving it, then the tools the morning report may
+        call to read the source, each server once."""
+        said = self._what()
+        tools = self.fields.get("reads") or []
+        if not tools:
+            return said
+        servers: dict[str, list[str]] = {}
+        for tool in tools:
+            found = _TOOL_RE.match(tool)
+            servers.setdefault(found.group(1), []).append(found.group(2))
+        return said + " The morning report may call " + "; ".join(f"{_and(names)} on {name}" for name, names in servers.items()) + "."
+
+    def _what(self) -> str:
         f = self.fields
         wants: list[str] = []
         if self.kind == "http":

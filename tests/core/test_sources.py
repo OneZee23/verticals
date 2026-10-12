@@ -331,3 +331,32 @@ def test_the_connections_document_is_made_once_and_left_alone_after(db: psycopg.
     core_docs.save(db, owner=OWNER, id=first, expected_revision=1, body=source.body + "\nThe owner's note.\n")
     assert core.ensure_connections(db, owner=OWNER) == first
     assert "The owner's note." in core.find(db, owner=OWNER, ref=first).body
+
+
+# --- the tools that read a source, and where the last report stopped (docs/design/morning-quality.md) ----------------------
+
+CHAT_READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
+
+
+def test_a_view_carries_the_tools_that_read_the_source_and_they_are_only_the_approved_ones_to_use(db: psycopg.Connection) -> None:
+    source = _source(db, "team-chat", {**NAME, "reads": CHAT_READS})
+    seen = _look(db, source, T0 + MIN)
+    assert (seen.reads, seen.approved, seen.needs_approval) == (tuple(CHAT_READS), True, False)
+    assert seen.as_dict()["reads"] == CHAT_READS and seen.as_dict()["cutoff"] is None
+    # A tool added to the list is a different check: the owner has not approved it, and the view says so beside the list.
+    changed = _edit(db, source, {**NAME, "reads": [*CHAT_READS, "mcp__chat__get_thread"]}, approve=False)
+    waiting = _look(db, changed, T0 + MIN)
+    assert (len(waiting.reads), waiting.approved, waiting.needs_approval, waiting.why) == (3, False, True, core.WAITING)
+    assert "get_thread" in waiting.summary
+
+
+def test_a_source_with_no_reads_has_none(db: psycopg.Connection) -> None:
+    assert _look(db, _source(db, "web", NAME), T0 + MIN).reads == ()
+    assert _look(db, _source(db, "log", FILE), T0 + MIN).as_dict()["reads"] == []
+
+
+def test_the_list_puts_the_cut_off_of_each_source_beside_it(db: psycopg.Connection) -> None:
+    chat, mail = _source(db, "team-chat", NAME), _source(db, "mail", HTTP)
+    found = {v.id: v for v in core.views(db, owner=OWNER, now=T0 + MIN, cutoffs={chat.id: "2026-10-11T06:58:00+02:00"})}
+    assert found[chat.id].cutoff == "2026-10-11T06:58:00+02:00" and found[chat.id].as_dict()["cutoff"] == "2026-10-11T06:58:00+02:00"
+    assert found[mail.id].cutoff is None

@@ -18,14 +18,22 @@ import sys
 import threading
 import time
 import tomllib
+import urllib.error
+import urllib.request
 import uuid
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:  # the launcher puts this folder on the path; loading this file by its path does the same
+# The gateway's own modules live beside this file: the morning report's turns, and where a task's sessions live. Found whether
+# the gateway is started through the launcher (which puts this folder on the path) or this file is loaded by its path (the
+# tests do).
+if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import agent_sessions  # noqa: E402  (where a session lives, when it moved, how it opens: docs/design/task-sessions.md)
+from morning_flow import MorningFlow  # noqa: E402
 
 SKILL = HERE.parents[1] / ".agents" / "skills" / "verticals-operator"
 MORNING_SKILL = HERE.parents[1] / ".agents" / "skills" / "verticals-morning-report"
@@ -71,32 +79,80 @@ def load_morning_prompt():
     if skill.exists():
         text = skill.read_text()
         parts.append(text.split("---", 2)[2].strip() if text.startswith("---") else text.strip())
-        for ref, title in (("source-reconciliation.md", "source reconciliation"), ("report-contract.md", "report contract")):
+        for ref, title in (("source-reconciliation.md", "source reconciliation"), ("report-contract.md", "report contract"),
+                           ("second-check.md", "the second check")):
             if (MORNING_SKILL / "references" / ref).exists():
                 parts.append(f"## Reference: {title}\n\n" + (MORNING_SKILL / "references" / ref).read_text().strip())
     return "\n\n".join(parts) + "\n"
 
 
+def load_check_prompt():
+    """The second agent's turn (desktop/chat/morning_flow.py): its own rules, then the morning-report skill's contract for the
+    report's shape and its ten checks. It does not get the skill's own guide for writing a report: it does not write one."""
+    parts = [(HERE / "prompt-check.md").read_text().strip()]
+    for ref, title in (("source-reconciliation.md", "source reconciliation"), ("report-contract.md", "report contract"),
+                       ("second-check.md", "the second check")):
+        if (MORNING_SKILL / "references" / ref).exists():
+            parts.append(f"## Reference: {title}\n\n" + (MORNING_SKILL / "references" / ref).read_text().strip())
+    return "\n\n".join(parts) + "\n"
+
+
 MORNING_PROMPT = load_morning_prompt()
+CHECK_PROMPT = load_check_prompt()
 # The one value a message's `sources` may take: the morning report's turn (web lib/morning.ts), which gets the morning
 # guide and its own rules. `clean_settings` passes exactly this value on and nothing else (docs/design/agent-fixes.md, fix 1).
 CONNECTED = "connected"
-# The Verticals writes the morning report makes on its own, unattended: its document and the document's link to its task.
-# The task is the server's, made or moved to today before the ask (core/morning.py, docs/design/agent-fixes.md, fix 2), so
-# `create` and `schedule` are not among them: a second task or a move would ask the owner first.
-MORNING_WRITES = ["doc_create", "doc_save", "doc_link"]
-# Outside Verticals, the morning report only reads: a tool of another connected server runs when its name starts with a
-# reading verb (google-calendar list-events, telethon fetch_history, coin search_base); any other is declined, so an
-# unattended turn never sends, marks, reacts, books or deletes anything.
-READ_VERBS = {"get", "list", "search", "fetch", "read", "retrieve", "find", "query", "lookup", "show", "describe",
-              "inspect", "whoami", "health", "status"}
+# The Verticals writes the morning report makes on its own, unattended: its document and the document's link to its task, and
+# the evidence of what it closes. The task is the server's, made or moved to today before the ask (core/morning.py,
+# docs/design/agent-fixes.md, fix 2), so `create` and `schedule` are not among them: a second task or a move would ask the
+# owner first. Closing what is done is one more, by what it is called with and not by its name (`closes_only`).
+MORNING_WRITES = ["doc_create", "doc_save", "doc_link", "evidence_update"]
+# The second agent's seat in the morning flow (morning_flow.py): it reads and answers, and writes nothing.
+CHECKER = "checker"
+# Every MCP tool a morning turn calls comes to this gateway to be judged, whoever allowed it. The turn keeps the owner's own
+# settings, servers and tools (the sources' tools are theirs), and `--settings` on the command line adds one `ask` rule that
+# matches all of them: `mcp__*` is the docs' glob for every MCP tool. Rule lists from several settings files are combined, and
+# the CLI checks deny rules first, then ask, then allow, the first match deciding (Claude Code docs: Settings, "Lists merge
+# instead of overriding"; Permissions, "Manage permissions"), so an allow rule in the owner's own files cannot let a tool run
+# on its own. A deny rule of the owner's still blocks. The gateway's judgement of each ask is `ClaudeAgent.handle`.
+MORNING_ASKS = ["mcp__*"]
+# A tool as Claude Code names it, `mcp__<server>__<tool>`: what a source's check block may name for reading it
+# (verticals/core/source_checks.py::reading_tools says it again at the server, where it is written).
+TOOL_NAME = re.compile(r"^mcp__([A-Za-z0-9][A-Za-z0-9_.\-]{0,80}?)__([A-Za-z0-9][A-Za-z0-9_.\-]{0,120})$")
 
 
-def reads_only(tool):
-    """True for a tool of another MCP server whose name starts with a reading verb."""
-    name = tool.split("__")[-1]
-    first = re.split(r"[-_]|(?<=[a-z])(?=[A-Z])", name)[0].lower()
-    return first in READ_VERBS
+def declared_reads(chat):
+    """The tools the morning turn may call outside Verticals: those a source document names for reading it, each with the
+    source's name (`{tool: title}`). Only a source whose check the owner has approved counts (the tools are in the block the
+    owner approves, and a changed block asks again), and never a tool of Verticals itself, whatever a document says. Anything
+    else is asked of the owner, or declined for the second agent. Read from the server when the turn starts; a server that cannot
+    be reached declares nothing."""
+    try:
+        listed = chat.api("GET", "/api/sources")
+    except Exception as e:  # noqa: BLE001 — no list, no tools: the turn then asks for each
+        if getattr(chat, "log", None):
+            chat.log.warning("declared reads unavailable %s", clip(e, 160))
+        return {}
+    tools = {}
+    for source in listed.get("sources") or []:
+        if not isinstance(source, dict) or not (source.get("approved") or source.get("needs_approval") is False):
+            continue
+        for tool in source.get("reads") or []:
+            found = TOOL_NAME.match(tool) if isinstance(tool, str) else None
+            if found and not found.group(1).lower().startswith("verticals"):
+                tools.setdefault(tool, str(source.get("title") or source.get("path") or "a source")[:80])
+    return tools
+
+
+def closes_only(tool_input):
+    """An `update` that only ticks goals done: one id or several, `done` true, nothing else. The morning report closes what the
+    sources show is done; any other change to a goal is asked of the owner."""
+    if not isinstance(tool_input, dict):
+        return False
+    keys = set(tool_input)
+    return tool_input.get("done") is True and keys <= {"id", "ids", "done", "client_token"} and ("id" in keys) != ("ids" in keys)
+
+
 MAX_EVENTS = 5000
 WATCH_SECONDS = 2  # how often the files of the sessions of tasks are looked at (a stat each)
 MISSING_SECONDS = 20  # how long a session with no file is left alone before it is searched for again
@@ -106,7 +162,7 @@ ENV_KEEP = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BED
             "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
 READ_TOOLS = ["board", "goal", "outline", "search", "evidence_due", "tags", "size_report",
               "doc_get", "doc_tree", "doc_history", "doc_revision", "comments",
-              "privacy"]
+              "privacy", "sources"]
 
 # Agent descriptors: labels and details are Enjoy's own (see its provider registry).
 AGENTS = {
@@ -352,12 +408,21 @@ class ClaudeAgent:
         # The morning report's turn (web lib/morning.ts) also reaches the owner's own connected tools, read-only, and
         # saves its document in Verticals without asking. Nobody watches it, so it never runs in the chat's mode:
         # "Bypass permissions" or "Auto" would let a tool of another server run before this gateway could judge it. It
-        # always asks first, and handle() answers: another server's tool only if its name reads, a Verticals write beyond
-        # the report goes to the owner (docs/design/agent-fixes.md, fix 4).
+        # always asks first, and every MCP tool it calls comes here (`MORNING_ASKS`): handle() runs the tools its sources
+        # declare for reading them and Verticals' own reading tools, closes what is done, and puts any other tool to the
+        # owner; the second agent has nobody to ask and is declined (docs/design/morning-quality.md). It keeps the owner's
+        # own settings and servers, so the sources' tools are there to call.
         self.connected = settings.get("sources") == CONNECTED
+        self.checker = self.connected and settings.get("role") == CHECKER
+        if self.connected:
+            claude_settings["permissions"] = {"ask": MORNING_ASKS}
         self.full = full_access(settings) and not self.connected
-        allowed = READ_TOOLS + (MORNING_WRITES if self.connected else [])
+        self.reads = declared_reads(chat) if self.connected else {}
+        allowed = READ_TOOLS + (MORNING_WRITES if self.connected and not self.checker else [])
+        # What this seat runs without a question: on the command line, and again in handle() for when the CLI asks anyway.
+        self.allowed = [f"mcp__verticals__{t}" for t in allowed] + list(self.reads)
         mode = ASK_FIRST if self.connected else settings.get("permission") or BOARD_ONLY
+        brief = (CHECK_PROMPT if self.checker else MORNING_PROMPT) if self.connected else ACCESS_PROMPT[self.full]
         args = [which("claude"), "--print", "--verbose", "--include-partial-messages",
                 "--input-format", "stream-json", "--output-format", "stream-json",
                 "--permission-mode", ASK_FIRST if mode == BOARD_ONLY else mode,
@@ -365,8 +430,8 @@ class ClaudeAgent:
                 *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_mcp),
                 "--settings", json.dumps(claude_settings),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
-                "--allowedTools", ",".join(f"mcp__verticals__{t}" for t in allowed),
-                "--append-system-prompt", PROMPT + "\n" + (MORNING_PROMPT if self.connected else ACCESS_PROMPT[self.full]),
+                "--allowedTools", ",".join(self.allowed),
+                "--append-system-prompt", PROMPT + "\n" + brief,
                 "--resume" if resume_id else "--session-id", self.session_id]
         if settings.get("model") and settings["model"] != "default":
             args += ["--model", settings["model"]]
@@ -418,8 +483,10 @@ class ClaudeAgent:
             for block in msg.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
                     name = short(block.get("name", ""))
+                    # A declared tool reads one of the sources: the field says which (web lib/agentChat.ts).
+                    step = {"step": f"Reading {self.reads[name]}"} if name in self.reads else {}
                     s.emit({"t": "tool", "id": block.get("id"), "name": name, "title": name,
-                            "input": block.get("input", {})})
+                            "input": block.get("input", {}), **step})
                     s.emit({"t": "activity", "label": f"Using {name}"})
                 elif block.get("type") == "text" and not self.streamed and block.get("text"):
                     s.emit({"t": "text_start"})
@@ -434,8 +501,21 @@ class ClaudeAgent:
             req, rid = msg["request"], msg.get("request_id")
             tool, tool_input = req.get("tool_name", ""), req.get("input", {})
             self.pending[rid] = tool_input
-            if not tool.startswith("mcp__verticals__") and not self.full:
-                return self.decide(rid, "accept" if self.connected and reads_only(tool) else "decline")
+            if self.connected:
+                # Every MCP tool of a morning turn comes here (`MORNING_ASKS`). What the seat may run is what is on its command
+                # line: Verticals' reading tools, the tools its approved sources declare, and for the agent that writes the
+                # report its own writes. That agent also closes what is done. The second agent has nobody to ask and is declined
+                # for anything else; the agent that writes puts a tool no source lists, or a write in Verticals beyond the
+                # report, to the reader. It has no shell, files or web (`--tools ""`), so anything that is not an MCP tool is
+                # declined and not asked about.
+                if tool in self.allowed:
+                    return self.decide(rid, "accept")
+                if self.checker or not tool.startswith("mcp__"):
+                    return self.decide(rid, "decline")
+                if tool == "mcp__verticals__update" and closes_only(tool_input):
+                    return self.decide(rid, "accept")
+            elif not tool.startswith("mcp__verticals__") and not self.full:
+                return self.decide(rid, "decline")
             s.ask(self, rid, f"Allow Claude to use {short(tool)}?",
                   "\n\n".join(filter(None, [req.get("decision_reason"), json.dumps(tool_input, indent=2, ensure_ascii=False)])),
                   [("Allow once", "accept"), ("Decline", "decline")], tool=short(tool), tool_input=tool_input)
@@ -477,7 +557,8 @@ def codex_policy(mode, cwd=None):
 def codex_instructions(settings):
     """What Codex is told at the start of a thread: the board prompt, the morning turn's guide after it, and Verticals
     under the name Codex knows its server by."""
-    text = PROMPT + ("\n" + MORNING_PROMPT if settings.get("sources") == CONNECTED else "")
+    morning = CHECK_PROMPT if settings.get("role") == CHECKER else MORNING_PROMPT
+    text = PROMPT + ("\n" + morning if settings.get("sources") == CONNECTED else "")
     return text.replace('server "verticals"', 'server "verticals_desktop"')
 
 
@@ -709,6 +790,8 @@ class Session:
         self.chat, self.id = chat, id
         self.agent = None
         self.events, self.seq = [], 0
+        self.flow = None                 # the morning report's turns, while there are several (morning_flow.py)
+        self.holding = None              # the flow keeps a turn's words here until it knows which turn is the last
         self.cond = threading.Condition()
         self.running = False
         self.queue = []                  # (text, context, settings) sent after the current turn
@@ -721,6 +804,9 @@ class Session:
     # -- events
 
     def emit(self, event):
+        if self.holding is not None and event["t"] in ("text", "text_start"):
+            self.holding.append(event)
+            return
         with self.cond:
             self.seq += 1
             self.events.append((self.seq, event))
@@ -764,6 +850,15 @@ class Session:
     def turn_done(self, error, detail):
         if not self.running:
             return
+        # The morning report is several turns (writing, checking, fixing); the flow takes each turn's end and ends the answer.
+        if self.flow is not None and self.flow.took(error, detail):
+            return
+        self.finish(error, detail)
+
+    def finish(self, error, detail):
+        """The answer ends: its words are recorded, the owner is told it is done, and the next queued message starts."""
+        if not self.running:
+            return
         self.running = False
         self.tools.clear()
         ms = int((time.time() - (self.started_at or time.time())) * 1000)
@@ -781,6 +876,8 @@ class Session:
         if self.agent is not agent:
             return
         self.agent = None
+        if self.flow is not None:
+            self.flow.abandon()
         if self.running:
             self.running = False
             self.emit({"t": "exit", "code": code, "detail": detail if code else ""})
@@ -788,8 +885,11 @@ class Session:
 
 
 class Chat:
-    def __init__(self, state_dir: Path, mcp_url: str, token: str, watch_every: float | None = None):
+    def __init__(self, state_dir: Path, mcp_url: str, token: str, api_url: str | None = None, watch_every: float | None = None):
         self.state_dir, self.mcp_url, self.token = state_dir, mcp_url, token
+        # The Verticals API the gateway itself talks to: the sources the morning turn reads, and the second agent's verdict
+        # (morning_flow.py). Without it the morning report is made as before, with no second check.
+        self.api_url = api_url.rstrip("/") if api_url else None
         self.log = open_log(state_dir)
         self.log.info("gateway start pid=%d", os.getpid())
         self.sessions: dict[str, Session] = {}
@@ -885,6 +985,33 @@ class Chat:
                 "lastTurnAt": turn, "agentSession": entry.get("sessionId"), "cwd": entry.get("cwd"),
                 "movedAt": max(turn, stat[1] if stat else 0), "outside": outside,
                 "working": bool(live and live.running) or (outside and bool(stat) and now - stat[1] < agent_sessions.WORKING_SECONDS)}
+
+    def api(self, method, path, body=None, timeout=20):
+        """One call to the Verticals API as the owner's app, answered as JSON. Raises ChatError with what the server said."""
+        if not self.api_url:
+            raise ChatError("The Verticals API is not known to the gateway")
+        request = urllib.request.Request(
+            self.api_url + path, method=method, data=None if body is None else json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                said = json.loads(e.read() or b"{}").get("message") or e.reason
+            except ValueError:
+                said = e.reason
+            raise ChatError(f"{method} {path.split('?')[0]}: {e.code} {said}") from e
+        except (OSError, ValueError) as e:
+            raise ChatError(f"{method} {path.split('?')[0]}: {e}") from e
+
+    def describe(self, context):
+        """What an agent is told about the screen and the day, as `format_context` writes it."""
+        return format_context(context)
+
+    def make_agent(self, seat, settings, resume=None):
+        """An agent of the settings' kind seated in `seat` (a conversation, or the second agent's quiet seat)."""
+        return AGENT_CLASSES[settings["provider"]](self, seat, settings, resume)
 
     def goal_conversations(self, goal_id):
         """A goal's sessions, the one that moved last first: Discuss with agent continues the first (docs/design-handoff S3.P1,
@@ -1179,8 +1306,11 @@ class Chat:
             return
         threading.Thread(target=self.start_turn, args=(s, text, context, settings), daemon=True).start()
 
-    def start_turn(self, s: Session, text, context, settings):
-        s.running, s.started_at, s.reply = True, time.time(), ""
+    def start_turn(self, s: Session, text, context, settings, stage=None):
+        # A later turn of the morning report (the fixing turn, `stage`) goes on with the answer the ask began.
+        s.running, s.reply = True, ""
+        if stage is None:
+            s.started_at = time.time()
         s.settings = settings
         stored = self.load().get(s.id, {})
         provider = settings["provider"]
@@ -1202,7 +1332,7 @@ class Chat:
                 if changed_provider or (resume is None and stored.get("transcript")):
                     handoff = format_handoff(stored.get("transcript") or [], text)
             s.emit({"t": "turn_start", "provider": provider, "model": settings.get("model"),
-                    "effort": settings.get("effort")})
+                    "effort": settings.get("effort"), **({"stage": stage} if stage else {})})
             if agent is None:
                 s.emit({"t": "activity", "label": "Starting…"})
                 self.log.info("agent_start provider=%s resume=%s handoff=%d session=%s", provider, bool(resume), len(handoff),
@@ -1225,9 +1355,14 @@ class Chat:
                 body = agent_sessions.task_link(goal["id"]) + "\n\n" + body
             if handoff:
                 body += handoff + "\n\n"
+            if stage is None and settings.get("sources") == CONNECTED:
+                # The morning report: written, checked by a second agent, fixed once if a check fails, and told when it is ready.
+                flow = MorningFlow.begin(self, s, settings, context, text)
+                s.flow, s.holding = flow, [] if flow else None
             agent.send(body + text)
         except (ChatError, OSError) as e:
             s.running = False
+            s.flow, s.holding = None, None
             self.log.warning("turn_failed_to_start %s session=%s", clip(e), str(s.id)[:8])
             s.emit({"t": "done", "error": True, "detail": str(e), "ms": 0})
 
@@ -1243,17 +1378,23 @@ class Chat:
     def stop(self, id):
         s = self.session(id)
         s.queue.clear()
+        if s.flow is not None:
+            s.flow.stop()
         if s.running and s.agent:
             s.agent.interrupt()
 
     def reset(self, id):
         s = self.sessions.pop(id, None)
+        if s and s.flow is not None:
+            s.flow.abandon()
         if s and s.agent:
             s.agent.close()
 
     def shutdown(self):
         self.stopping.set()
         for s in list(self.sessions.values()):
+            if s.flow is not None:
+                s.flow.abandon()
             if s.agent:
                 s.agent.close()
         self.log.info("gateway stop")
@@ -1340,10 +1481,23 @@ def result_text(content):
     return ""
 
 
+def clock(ctx):
+    """The time now in the owner's zone, to the minute: the morning report ends each source's window at the time it began. The
+    app says it (`now`, from the owner's own clock); without it the zone it names, else this Mac's clock."""
+    said = str(ctx.get("now") or "")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", said):
+        return said
+    try:
+        zone = ZoneInfo(str(ctx.get("tz"))[:60]) if ctx.get("tz") else None
+    except Exception:  # noqa: BLE001 — a name this Mac does not know is the Mac's own clock
+        zone = None
+    return (datetime.now(zone) if zone else datetime.now().astimezone()).strftime("%Y-%m-%d %H:%M")
+
+
 def format_context(ctx):
     ctx = ctx if isinstance(ctx, dict) else {}
     lines = [f"Today: {str(ctx.get('today', time.strftime('%Y-%m-%d')))[:40]}"
-             + (f" ({str(ctx.get('tz'))[:60]})" if ctx.get("tz") else "")]
+             + (f" ({str(ctx.get('tz'))[:60]})" if ctx.get("tz") else ""), f"Now: {clock(ctx)}"]
     for key, label, limit in (("url", "Screen", 500), ("title", "Screen title", 300), ("heading", "Open item", 300),
                               ("selection", "Selected text", 2000)):
         if ctx.get(key):

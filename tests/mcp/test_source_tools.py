@@ -292,3 +292,57 @@ async def _refusals(f2_dsn: str, tmp_path: Path) -> None:
 
 def test_a_bad_check_is_refused_with_why_and_writes_nothing(f2_dsn: str, tmp_path: Path) -> None:
     anyio.run(_refusals, f2_dsn, tmp_path)
+
+
+# --- the tools that read a source, and where the last report stopped (docs/design/morning-quality.md) -------------------
+
+CHAT = {"title": "Team chat", "gives": "What the team wrote.", "how": "Read the dialogs, then the unread ones.",
+        "since": "the last report's cut-off"}
+READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary"]
+LAST_REPORT = """Checked against the sources by a second agent: all 10 passed.
+
+## Sources
+
+Times in Europe/Berlin.
+
+| Source | Window | Read | Tasks | Inbox | Done | Put off | Context | Gap |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [Team chat](doc:sources/team-chat.md) | 2026-10-10 07:00 – 2026-10-11 06:58 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+"""
+
+
+async def _reads_and_cutoff(f2_dsn: str, tmp_path: Path) -> None:
+    async with open_mcp_stdio(f2_dsn, tmp_path, label="source-reads") as (session, streams):
+        check = {"kind": "dns", "host": "localhost", "reads": READS}
+        made = await session.call_tool("source", {**CHAT, "check": check})
+        assert made.is_error is False, made.content
+        source = made.structured_content["source"]
+        # The tools are in the check the owner approves, and the owner reads them beside Approve.
+        assert source["reads"] == READS and source["needs_approval"] is True
+        assert source["summary"].endswith("The morning report may call list_messages and unread_summary on chat.")
+        body = (await session.call_tool("doc_get", {"path": "sources/team-chat.md"})).structured_content["doc"]["body"]
+        assert '"reads"' in body and "mcp__chat__list_messages" in body
+
+        # No report before it: no cut-off, and the document's own "Since when" says where to start.
+        first = await session.call_tool("sources", {"day": "2026-10-12"})
+        assert first.structured_content["sources"][0]["cutoff"] is None
+
+        await session.call_tool("doc_create", {"path": "reports/morning/2026-10-11.md", "title": "Morning report — 11 October 2026",
+                                               "body": LAST_REPORT})
+        listed = await session.call_tool("sources", {"day": "2026-10-12"})
+        assert listed.structured_content["sources"][0]["cutoff"] == "2026-10-11T06:58:00+02:00"
+        one = await session.call_tool("sources", {"id": "sources/team-chat.md", "day": "2026-10-12"})
+        assert one.structured_content["source"]["cutoff"] == "2026-10-11T06:58:00+02:00"
+        # The same report is the day's own, not the one before it: its cut-off is not offered to itself.
+        same_day = await session.call_tool("sources", {"day": "2026-10-11"})
+        assert same_day.structured_content["sources"][0]["cutoff"] is None
+        assert (await session.call_tool("sources", {"day": "yesterday"})).is_error is True
+
+        # A source cannot hand the morning turn a tool of Verticals itself.
+        refused = await session.call_tool("source", {**CHAT, "title": "Sneaky", "check": {**check, "reads": ["mcp__verticals__delete"]}})
+        assert refused.is_error is True and "Verticals itself" in refused.content[0].text
+        streams.assert_hygiene(token=TEST_TOKEN)
+
+
+def test_a_source_names_the_tools_that_read_it_and_the_list_says_where_the_last_report_stopped(f2_dsn: str, tmp_path: Path) -> None:
+    anyio.run(_reads_and_cutoff, f2_dsn, tmp_path)

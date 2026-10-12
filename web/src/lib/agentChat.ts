@@ -336,14 +336,21 @@ function follow(event: ChatEvent): void {
   switch (event.t) {
     case 'turn_start':
       agentChat.running = true
-      agentChat.step = 'Thinking'
+      // A turn that goes on with a morning report (the second agent's check, the fixing turn) keeps the step the gateway named.
+      if (!event.stage) agentChat.step = 'Thinking'
       reply = ''
       break
     case 'activity':
       agentChat.running = true
       break
     case 'tool':
-      agentChat.step = stepPhrase(String(event.name ?? ''))
+      // A tool that reads one of your sources names it (`step`, from the gateway); any other has its fixed phrase.
+      agentChat.step = typeof event.step === 'string' && event.step ? event.step : stepPhrase(String(event.name ?? ''))
+      break
+    case 'step':
+      // What the gateway itself is doing around a morning report: "Checking the report", "Fixing the report".
+      agentChat.running = true
+      if (typeof event.label === 'string' && event.label) agentChat.step = event.label
       break
     case 'text_start':
       brk = !!reply
@@ -364,6 +371,8 @@ function follow(event: ChatEvent): void {
       if (!currentThread.value?.goal && typeof event.id === 'string') touchThread({ goal: { id: event.id, title: String(event.title ?? '') } })
       break
     case 'done':
+      // A morning report written but not yet checked: this turn ended, the answer is not told (`next` names what comes).
+      if (event.next) { agentChat.running = true; break }
       agentChat.running = false
       // The server's clock, the one the goal's record keeps.
       if (currentThread.value?.goal) goalSince = typeof event.at === 'number' ? event.at * 1000 : Date.now()
@@ -415,6 +424,8 @@ function connect(): void {
 function pageContext(goal: GoalRef | undefined) {
   return {
     today: new Date().toLocaleDateString('sv-SE'),
+    // Your clock to the minute, "2026-10-12 07:00": the morning report reads each source up to it.
+    now: new Date().toLocaleString('sv-SE').slice(0, 16),
     tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     url: location.pathname + location.search + location.hash,
     title: document.title,

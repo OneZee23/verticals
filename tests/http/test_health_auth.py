@@ -65,6 +65,8 @@ EXPECTED_OPERATIONS = {
     ("GET", "/api/docs/desk"),
     # The agent's fixes (docs/design/agent-fixes.md, fixes 2 and 3): the morning's one ask a day.
     ("POST", "/api/morning"),
+    # The second agent's verdict (docs/design/morning-quality.md): the gateway hands it over, the server writes it into the report.
+    ("POST", "/api/morning/check"),
     # Sources (docs/design/sources.md): the list the Inbox draws and the owner's Approve of a check.
     ("GET", "/api/sources"),
     ("POST", "/api/sources/{id}/approve"),

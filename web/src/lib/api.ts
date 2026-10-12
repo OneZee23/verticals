@@ -438,11 +438,15 @@ export function parkGoal(id: string): Promise<GoalCard> {
   return request<GoalCard>(`/api/goals/${encodeURIComponent(id)}/park`, { method: 'POST' })
 }
 
+/** A comment you left in the last morning report, now on its task, as the server saved it. */
+export interface LandedComment { goal_id: string; title: string; text: string; thread_id: string }
+
 /** `POST /api/morning?date=` (docs/design/agent-fixes.md, fixes 3 and 2): the server's answer to "may I ask for this
  *  morning's report?". `asked` is true for the one call of the owner's day that takes it, whichever window or browser
- *  makes it, and then `task_id` is the one open "Morning report" task, made or moved to that day. */
-export function beginMorning(date: string): Promise<{ asked: boolean; task_id: string | null }> {
-  return request<{ asked: boolean; task_id: string | null }>(`/api/morning${qs({ date })}`, { method: 'POST' })
+ *  makes it, and then `task_id` is the one open "Morning report" task, made or moved to that day, and `landed` the comments you
+ *  left in the last report, now saved on their tasks word for word (docs/design/morning-quality.md). */
+export function beginMorning(date: string): Promise<{ asked: boolean; task_id: string | null; landed?: LandedComment[] }> {
+  return request<{ asked: boolean; task_id: string | null; landed?: LandedComment[] }>(`/api/morning${qs({ date })}`, { method: 'POST' })
 }
 
 /** `DELETE /api/goals/{id}?cascade=`. Without `cascade`, a non-empty subtree is `core.goals.
@@ -716,6 +720,10 @@ export interface SourceView {
   next_check_at: string | null
   /** The top of the document, for its page on the desk. */
   excerpt?: string
+  /** The tools the morning report may call to read this source (`mcp__<server>__<tool>`), from its check block. */
+  reads?: string[]
+  /** Where the last morning report stopped reading it: the next report starts here (`GET /api/sources?day=`). */
+  cutoff?: string | null
 }
 
 export function fetchSources(): Promise<{ sources: SourceView[] }> {

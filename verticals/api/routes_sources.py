@@ -8,10 +8,13 @@ shown, so a check edited in between is refused (409) instead of approved unseen.
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from verticals.api.deps import get_conn, verify_bearer_token
+from verticals.core import morning_windows
 from verticals.core import sources as core_sources
 from verticals.sources.scheduler import utcnow
 
@@ -24,12 +27,15 @@ class ApproveRequest(BaseModel):
 
 
 @router.get("/api/sources")
-def list_sources(request: Request, response: Response) -> dict:
+def list_sources(request: Request, response: Response, day: date | None = None) -> dict:
     """Every document under `sources/` with its state, what needs a look first: red, waiting, then the rest. Each carries
-    the start of its text, as the Documents desk does, so a tile draws its page without a second read."""
+    the start of its text, as the Documents desk does, so a tile draws its page without a second read, the tools that read
+    it in the morning (`reads`) and where the last report stopped reading it (`cutoff`, for the report of `day`, which is today
+    when the day is left out)."""
     owner = request.app.state.config.owner
     with get_conn(request) as conn:
-        views = core_sources.views(conn, owner=owner, now=utcnow())
+        cutoffs = morning_windows.cutoffs(conn, owner=owner, before=day or date.today())
+        views = core_sources.views(conn, owner=owner, now=utcnow(), cutoffs=cutoffs)
         response.headers["X-Query-Count"] = str(conn.query_count)
     return {"sources": [view.as_dict() for view in views]}
 

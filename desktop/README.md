@@ -14,7 +14,8 @@ launcher has its own ports, database, state directory and UI build.
 - `chat/` — chat backend (`chat.py`: Claude via `claude --print` stream-json, Codex via
   `codex app-server`), `mcp_proxy.py` (stdio → HTTP MCP relay for Codex), `prompt-intro.md`
   (the system prompt is this intro plus `.agents/skills/verticals-operator`, read at startup; the morning report's
-  turn adds `prompt-morning.md` and `.agents/skills/verticals-morning-report`),
+  turn adds `prompt-morning.md` and `.agents/skills/verticals-morning-report`; `morning_flow.py` runs its turns: the
+  writing one, a second agent's check with `prompt-check.md`, and one fixing turn if a check fails),
   `ui/assets/` (the agents' and models' marks). The conversation itself is drawn by the app
   (`web/src/lib/agentChat.ts`, `AgentConversation.vue`). A conversation belongs to a goal when Discuss with agent began
   it, or when the agent makes its first goal in it: the gateway reads the new goal's id from what the `create` tool answers

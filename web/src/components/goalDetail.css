@@ -123,6 +123,8 @@
   tab-size: 2;
 }
 .goal-detail__body-code > code { font: inherit; }
+/* The morning report's first block (docs/design/morning-quality.md): what the agent could not read, in the app's red, on top. */
+.goal-detail__body-code[data-md-fence='unread'] { border-left-color: #c93a5b; color: #c93a5b; }
 .goal-detail__body > :is(ul, ol) {
   margin: 16px 0 32px 12px;
   padding-left: 18px;

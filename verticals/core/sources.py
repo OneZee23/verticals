@@ -20,7 +20,8 @@ Three rules live here and nowhere else:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -136,6 +137,10 @@ class View:
     next_check_at: datetime | None = None
     excerpt: str = ""
     body: str | None = None
+    # The tools of the owner's other servers that read this source for the morning report (the check block's `reads`), and
+    # where the last morning report stopped reading it, as an ISO time with its offset (docs/design/morning-quality.md).
+    reads: tuple[str, ...] = ()
+    cutoff: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         out = {
@@ -144,6 +149,7 @@ class View:
             "checked_at": _iso(self.checked_at), "since": _iso(self.since), "needs_approval": self.needs_approval,
             "approved": self.approved, "check_hash": self.check_hash, "summary": self.summary, "error": self.error,
             "updated_at": _iso(self.updated_at), "failures": self.failures, "next_check_at": _iso(self.next_check_at),
+            "reads": list(self.reads), "cutoff": self.cutoff,
         }
         if self.excerpt:
             out["excerpt"] = self.excerpt
@@ -234,13 +240,19 @@ def view(source: Source, now: datetime, *, excerpt: bool = False, body: bool = F
         updated_at=source.updated_at, failures=row.failures if answered else 0,
         next_check_at=row.next_check_at if answered and not source.waiting else None,
         excerpt=source.body[:EXCERPT] if excerpt else "", body=source.body if body else None,
+        reads=tuple(check.fields.get("reads") or ()) if check else (),
     )
 
 
-def views(conn: psycopg.Connection, *, owner: str, now: datetime, excerpt: bool = True) -> list[View]:
+def views(
+    conn: psycopg.Connection, *, owner: str, now: datetime, excerpt: bool = True, cutoffs: Mapping[str, str] | None = None
+) -> list[View]:
     """Every source with its state, what needs a look first: red, then waiting, then the rest, then by name. The tiles
-    draw each source's page, so they ask for the excerpt; the agent's list does not need it."""
+    draw each source's page, so they ask for the excerpt; the agent's list does not need it. `cutoffs` is where the last
+    morning report stopped reading each source, by the source's id (`core/morning.py::cutoffs`)."""
     out = [view(s, now, excerpt=excerpt) for s in sources(conn, owner=owner)]
+    if cutoffs:
+        out = [replace(v, cutoff=cutoffs[v.id]) if v.id in cutoffs else v for v in out]
     out.sort(key=lambda v: (_RANK[v.why or v.status], (v.title or v.path).lower(), v.path))
     return out
 

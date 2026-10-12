@@ -6,6 +6,7 @@ agent is `tests/ui/fake_agent/claude` behind the real desktop gateway and chat s
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -30,15 +31,16 @@ from tests.ui.views import FIELD
 
 
 @contextmanager
-def _agent_gateway(backend: Server, tmp_path: Path) -> Iterator[str]:
-    """The desktop gateway over this test's backend, its agent the fake one (`tests/ui/agent_gateway.py`)."""
+def _agent_gateway(backend: Server, tmp_path: Path, env: dict[str, str] | None = None) -> Iterator[str]:
+    """The desktop gateway over this test's backend, its agent the fake one (`tests/ui/agent_gateway.py`). `env` adds to the
+    gateway's environment (a short limit for a second agent that never answers)."""
     port = _free_port()
     log_path = tmp_path / "gateway.log"
     with open(log_path, "w") as logfile:
         proc = subprocess.Popen(
             [sys.executable, str(REPO_ROOT / "tests" / "ui" / "agent_gateway.py"), str(port), str(backend.port),
              str(tmp_path / "desktop-state"), TEST_TOKEN],
-            cwd=REPO_ROOT, stdout=logfile, stderr=subprocess.STDOUT, start_new_session=True,
+            cwd=REPO_ROOT, stdout=logfile, stderr=subprocess.STDOUT, start_new_session=True, env={**os.environ, **(env or {})},
         )
     base_url = f"http://127.0.0.1:{port}"
     try:

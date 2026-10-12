@@ -196,3 +196,45 @@ def test_a_file_name_comes_from_the_title() -> None:
     assert sc.slug("   ") == "source" and sc.slug("Почта") == "source"
     assert sc.is_source_path("sources/calendar.md") and not sc.is_source_path("reports/morning/2026-10-11.md")
     assert not sc.is_source_path("sources/notes.txt")
+
+
+# --- the tools that read a source in the morning (docs/design/morning-quality.md) --------------------------------------
+
+READS = ["mcp__chat__list_messages", "mcp__chat__unread_summary", "mcp__mail__search_mail"]
+
+
+def test_a_source_names_the_tools_that_read_it_in_the_block_that_the_owner_approves() -> None:
+    with_reads = _check({**DNS, "reads": READS + [READS[0]]})  # a tool named twice is named once
+    assert with_reads.fields["reads"] == READS and with_reads.hash != _check(DNS).hash
+    # The names count in the hash in their order, so a tool added or taken out asks the owner again.
+    assert _check({**DNS, "reads": READS[:2]}).hash != with_reads.hash
+    assert _check({**DNS, "reads": READS}).hash == with_reads.hash
+    # A check that says nothing about it is the check it always was.
+    assert _check(DNS).as_dict() == {"kind": "dns", "where": "anywhere", "host": "example.test"}
+    for raw in (HTTP, MCP, CMD, FILE):
+        assert _check({**raw, "reads": READS[:1]}).fields["reads"] == READS[:1]
+    body = sc.build_body(gives="Chats.", how="Read them.", since="The last report.", check=with_reads, fixes=[])
+    assert sc.parse_check(body) == with_reads
+
+
+def test_the_summary_the_owner_reads_beside_approve_says_which_tools_the_morning_may_call() -> None:
+    summary = _check({**DNS, "reads": READS}).summary()
+    assert summary == ("Looks up example.test every hour and wants it to resolve. The morning report may call "
+                       "list_messages and unread_summary on chat; search_mail on mail.")
+    assert "morning report" not in _check(DNS).summary()
+
+
+def test_a_source_cannot_name_a_tool_of_verticals_or_anything_that_is_not_a_tool() -> None:
+    for tool in ("mcp__verticals__delete", "mcp__Verticals__update", "mcp__verticals-desktop__schedule", "mcp__verticals_desktop__create"):
+        assert "Verticals itself" in _refused({**DNS, "reads": [tool]}, "reads"), tool
+    for bad in ("list_messages", "chat__list_messages", "mcp__chat", "mcp____x", "mcp__chat__*", " mcp__a__b", 7, None):
+        assert "mcp__<server>__<tool>" in _refused({**DNS, "reads": [bad]}, "reads"), bad
+    assert "list of 1 to" in _refused({**DNS, "reads": "mcp__chat__list_messages"}, "reads")  # one name is not a list
+    assert "list of 1 to" in _refused({**DNS, "reads": []}, "reads")
+    assert "list of 1 to" in _refused({**DNS, "reads": [f"mcp__s__t{n}" for n in range(sc.MAX_READS + 1)]}, "reads")
+    assert len(_check({**DNS, "reads": [f"mcp__s__t{n}" for n in range(sc.MAX_READS)]}).fields["reads"]) == sc.MAX_READS
+
+
+def test_the_apps_own_check_takes_no_reads() -> None:
+    with pytest.raises(ValidationError):
+        sc.Check.from_dict({"kind": "connections", "reads": READS[:1]}, app=True)
