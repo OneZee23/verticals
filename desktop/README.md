@@ -23,6 +23,9 @@ launcher has its own ports, database, state directory and UI build.
   `api.log` and `mcp.log`: a small rotating file (three files of 200 kB at most) of what the agent was asked to be and did,
   that is, event kinds, tool names, flags, durations and exit details, never your words, the agent's, tool inputs or
   titles, so a bug report can carry its last lines.
+- `chat/report_facts.py` and `chat/prompt-report.md` — what a report carries from the app (`GET /__report/facts`: the
+  version, the Mac, and the last lines of `app.log`, `api.log` and `agent.log` with every word of the board left out) and
+  what the agent is told about reports (docs/design/bug-reports.md; see Reports below).
 - `macos/` — `Verticals.swift` (native window, WKWebView), `Updater.swift` (checks, downloads and
   installs updates), `UpdateIndicator.swift` (the Update button in the title bar) and `bundle.py`
   (self-contained `Verticals.app` + `.dmg`).
@@ -166,6 +169,28 @@ matching `.dmg` from the release page.
 - Agents see the screen context and use only the Verticals MCP tools (Claude runs with no built-in
   tools). Links to goals, docs and board dates open inside Verticals.
 - Uses the local CLI's own sign-in; every answer counts against that account's limits.
+
+## Reports
+
+Pictures dropped on the window (or pasted into the field) wait above the field; with them there, what you type says what
+happened, and ↵ makes a report: a document under `reports/bugs/` with your words, the pictures, the version and the last
+lines of the app's and the agent's logs, and a task with no date that holds it (docs/design/bug-reports.md). No agent is
+asked. A document holds 512 KiB, so the pictures are drawn smaller as JPEGs until they fit with the words and logs.
+
+- **Send to developers** is a link to a new GitHub issue on this repository, filled in with the report's text as the
+  document stands (the pictures cannot travel in a link: the issue ends with how many there were and to drag them in).
+  GitHub does not publish its link limit; a link is kept to 6,000 characters, the oldest log lines going first and the issue
+  saying how many. With ⌥ held it is an email draft with the same text, to no address (`DEVELOPERS_EMAIL` in
+  `web/src/lib/reportSend.ts` is empty; the repository publishes none).
+- **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
+  knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the
+  Mac's user name; the number of entries left out is told in the report.
+- **Improve it** asks the agent for a design document in the report's task. Once the person agrees (a comment and Check
+  again, or a word in the chat), the agent makes the change in a checkout of the source, with its tests, and opens a pull
+  request whose address it adds to the task's notes. The installed app ships without a checkout: the gateway looks for one at
+  `VERTICALS_SOURCE`, then `source` in the state folder's `config.json`, then the repository it runs from, then the usual
+  folders (`~/verticals`, `~/Developer/verticals`, …). With none, or with Verticals-only access, the task and its documents
+  still come and only the pull request waits.
 
 ## Security notes
 
