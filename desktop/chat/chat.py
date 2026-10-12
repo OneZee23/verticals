@@ -496,7 +496,7 @@ class ClaudeAgent:
                 "--input-format", "stream-json", "--output-format", "stream-json",
                 "--permission-mode", ASK_FIRST if mode == BOARD_ONLY else mode,
                 "--permission-prompts", "host", "--permission-prompt-tool", "stdio",
-                *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_config(s.id)),
+                *([] if self.connected or self.full else ["--strict-mcp-config"]), "--mcp-config", str(chat.claude_config(getattr(s, "id", None))),
                 "--settings", json.dumps(claude_settings),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
                 "--allowedTools", ",".join(self.allowed),
@@ -690,7 +690,11 @@ class CodexAgent:
         self.thread_id, self.turn_id = None, None
         self.approvals = {}      # request id -> [(label, response)]
         self.streamed = set()    # agentMessage item ids that got deltas
-        env = child_env({"VERTICALS_MCP_URL": chat.mcp_url, "VERTICALS_MCP_TOKEN": chat.token, "VERTICALS_MCP_SESSION": s.id})
+        # The conversation its calls belong to (docs/design/agent-answer-undo.md); a seat that is no conversation (the morning
+        # report's second agent, morning_flow.py) has none, and its calls are nobody's answer.
+        conversation = getattr(s, "id", None)
+        env = child_env({"VERTICALS_MCP_URL": chat.mcp_url, "VERTICALS_MCP_TOKEN": chat.token,
+                         **({"VERTICALS_MCP_SESSION": conversation} if conversation else {})})
         self.proc = RpcProcess(codex_args(chat), self.cwd, env, self.notify, self.request, self.exited)
         self.proc.request("initialize", {"clientInfo": {"name": "verticals-desktop", "title": "Verticals", "version": "0.1.0"},
                                          "capabilities": {"experimentalApi": True}})
@@ -996,16 +1000,17 @@ class Chat:
 
     # -- the agents' connection to the MCP server
 
-    def claude_config(self, session_id):
+    def claude_config(self, session_id=None):
         """One conversation's Claude connects to the app's MCP server with the token and the conversation's id in its headers: every
-        call it makes says whose it is, and the server keeps what the answers of that conversation wrote. Owner-only files: the
-        MCP bearer token must not appear in `ps` output."""
-        path = self.state_dir / f"chat-mcp-{session_id}.json"
+        call it makes says whose it is, and the server keeps what the answers of that conversation wrote. A seat that is no
+        conversation (the morning report's second agent, morning_flow.py) connects with none, and its calls are nobody's answer.
+        Owner-only files: the MCP bearer token must not appear in `ps` output."""
+        path = self.state_dir / (f"chat-mcp-{session_id}.json" if session_id else "chat-mcp.json")
         if not path.exists():
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump({"mcpServers": {"verticals": {"type": "http", "url": self.mcp_url, "headers": {
-                    "Authorization": f"Bearer {self.token}", "X-Verticals-Session": session_id}}}}, f)
+                    "Authorization": f"Bearer {self.token}", **({"X-Verticals-Session": session_id} if session_id else {})}}}}, f)
         return path
 
     # -- the record of what each answer wrote (verticals/mcp/answers.py, docs/design/agent-answer-undo.md)
@@ -1530,7 +1535,7 @@ class Chat:
                 s.flow.abandon()
             if s.agent:
                 s.agent.close()
-        for config in self.state_dir.glob("chat-mcp-*.json"):
+        for config in self.state_dir.glob("chat-mcp*.json"):
             config.unlink(missing_ok=True)
         self.log.info("gateway stop")
         for handler in list(self.log.handlers):

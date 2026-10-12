@@ -2,11 +2,12 @@
 raw sources, a check that fails sends it back for one fixing turn, and the owner is told it is ready only after that.
 
 It sits inside the gateway's own turn machinery (`chat.py`): the writing turn is the turn the app asked for, and every turn after
-it is started the way a message starts one, so each is an answer of its own on the stream (`turn_start`, then `done` with `next`
-saying that the report is not ready yet). The writing turn is one turn, so everything the agent writes on the board in it is one
-answer, which the answer's own Undo takes back at once (docs/design/agent-answer-undo.md, PR #50); the check writes nothing, and
-the fixing turn is an answer of its own. The owner sees one reply: the words of the last turn that spoke, held back until the
-check is done, and one final `done`.
+it is started the way a message starts one, so each is a turn of its own on the stream (`turn_start`, then `done` with `next`
+saying that the report is not ready yet). Everything the agent writes on the board, in the writing turn and in the fixing turn,
+is one answer, which the answer's own Undo takes back at once (docs/design/morning-quality.md, docs/design/agent-answer-undo.md):
+every turn of the flow names it, and it ends with the final `done`. The check writes nothing, and its calls carry no
+conversation. The owner sees one reply: the words of the last turn that spoke, held back until the check is done, and one final
+`done`.
 
 The second agent is a fresh agent of the same kind at a lower effort. It only reads: the morning turn's tools, nothing it asks is
 put to the owner, and the verdict goes to the server in its own words (`POST /api/morning/check`), which writes it into the report
@@ -255,7 +256,7 @@ class MorningFlow:
         self.seat.text, self.failure = "", ""
         self.turn_over.clear()
         self.s.emit({"t": "turn_start", "provider": self.settings["provider"], "model": self.settings.get("model"),
-                     "effort": self.seat.settings.get("effort"), "stage": "check"})
+                     "effort": self.seat.settings.get("effort"), "stage": "check", "answer": self.s.answer})
         self.checker.send(f"<app_context>\n{self.chat.describe(self.context)}\n</app_context>\n\n{text}")
         answered = self.turn_over.wait(CHECK_LIMIT)
         if self.finished:
