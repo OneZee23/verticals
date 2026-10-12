@@ -7,8 +7,9 @@
 // the page, so the two never stand in the same place.
 // A question (⌘Z asking whose change it meant, docs/design/agent-answer-undo.md) is the same pill with "Take back" and the
 // candidates as pills. When that is wider than the window, "Take back" keeps a row of its own and the pills go under it, side
-// by side while they fit and one under the other when they do not; a pill is never wider than the notice, its goal's title is
-// cut with “…” and the words around the title never are, unless the words alone are too wide, and then they go on to a second line.
+// by side while they fit and one under the other when they do not. A pill is never wider than the notice: it tries one line, with
+// its goal's title cut with “…”; when that would leave the title fewer than 12 letters it takes a second line and the title gets
+// that room, and past two lines the title is cut again. The words around the title are never cut.
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editsText } from '../lib/boardHistory'
 import { dismiss, hold, notice, release, type NoticeChoice, type Segment } from '../lib/fieldNotice'
@@ -24,25 +25,31 @@ const choiceEls = ref<HTMLElement[]>([])
 const cuts = ref<Record<string, string>>({})
 /** A question that does not fit on one row: its words on a row of their own, the pills under them. */
 const stacked = ref(false)
-/** The pills (by their place) whose words go on to a second line, because they are too wide for the notice with their title
- *  cut to its dots. */
+/** The pills (by their place) that take a second line: with their title cut to fit one line it would be left too short to tell
+ *  which goal it is, or their words alone are wider than the notice. */
 const wrapped = ref<Record<string, boolean>>({})
 let fitting = 0
 
 /** Two lines at 15/22 with 9 px above and below: as tall as a pill whose words go on to a second line may be. */
 const TWO_LINES = 62
+/** A title cut on one line to fewer letters than this names no goal anyone can tell: its pill takes a second line instead. */
+const MIN_LETTERS = 12
 
 const overflows = (el: HTMLElement): boolean => el.scrollWidth > el.clientWidth
 const runsOver = (el: HTMLElement): boolean => (wrapped.value[el.dataset.choice ?? ''] ? el.scrollHeight > TWO_LINES : overflows(el))
 
 interface Title { key: string; text: string; length: number }
 
-/** The longest start of the titles that does not run over, found by halving. Two titles (“into”, “out of”) give up the same share of
- *  their length. `false`: another notice has come, or this one has gone. */
+/** The titles whole if they do not run over, else the longest start of them that does not, found by halving. Two titles (“into”,
+ *  “out of”) give up the same share of their length. `false`: another notice has come, or this one has gone. */
 async function shorten(mine: number, titles: Title[], spills: () => boolean): Promise<boolean> {
   const longest = Math.max(0, ...titles.map((title) => title.length))
   const cutTo = (keep: number): Record<string, string> =>
     Object.fromEntries(titles.map((title) => [title.key, cutTitle(title.text, Math.round((title.length * keep) / longest))]))
+  cuts.value = { ...cuts.value, ...cutTo(longest) }
+  await nextTick()
+  if (mine !== fitting || !line.value) return false
+  if (!spills()) return true
   let fits = 0
   let over = longest
   while (fits < over - 1) {
@@ -57,6 +64,13 @@ async function shorten(mine: number, titles: Title[], spills: () => boolean): Pr
   await nextTick()
   return mine === fitting && !!line.value
 }
+
+/** Whether a title has been cut to fewer letters than `MIN_LETTERS`, or than all it has when it has fewer than that. */
+const cutTooShort = (titles: Title[]): boolean =>
+  titles.some((title) => {
+    const shown = cuts.value[title.key]
+    return shown !== undefined && shown !== title.text && glyphs(shown).length - 1 < Math.min(MIN_LETTERS, title.length)
+  })
 
 /* A title that does not fit is cut in the text, so the “…” stands right after its last letter, with no space before it and
    the quote right after it (the browser's ellipsis cuts at a pixel and leaves gaps). The pill is as wide as its words up to
@@ -86,9 +100,9 @@ async function fit(): Promise<void> {
     if (!runsOverAlone()) continue
     const titles = quotes(choice.label, String(at))
     if (!(await shorten(mine, titles, runsOverAlone))) return
-    // The words alone are wider than the notice, with the title down to its dots: they go on to a second line, and the title takes
-    // back the room that gives.
-    if (own() && overflows(own()!)) {
+    // One line has cut the title too short to tell the goal, or the words alone are wider than the notice: the pill takes a second
+    // line, and the title takes the room that gives.
+    if (own() && (overflows(own()!) || cutTooShort(titles))) {
       wrapped.value = { ...wrapped.value, [String(at)]: true }
       await nextTick()
       if (!(await shorten(mine, titles, runsOverAlone))) return
