@@ -37,6 +37,17 @@ IMPROVE = "Improve it"
 SORT = "A person's report, in their words"
 WISHES = ("i'd like", "i would like", "would be nice", "i wish", "i want", "could be", "should be", "please add")
 
+# `[ask:NAME]`: a write the agent asks permission for. SYNDAY01 is "Draft the outline", a goal of 8 Aug 2026 in F2.
+ASKS = {
+    "schedule": ("schedule", {"id": "SYNDAY01", "vertical": "day", "anchor_date": "2026-08-10"}),
+    "week": ("schedule", {"id": "SYNDAY01", "vertical": "week", "anchor_date": "2026-08-10"}),
+    "clear": ("schedule", {"id": "SYNDAY01", "vertical": None, "anchor_date": None}),
+    "create": ("create", {"title": "Plan the review", "vertical": "week", "anchor_date": "2026-08-10"}),
+    "update": ("update", {"id": "SYNDAY01", "done": True}),
+    "delete": ("delete", {"id": "SYNDAY01"}),
+    "unknown": ("schedule", {"id": "SYNNOPE1", "vertical": "day", "anchor_date": "2026-08-10"}),
+}
+
 
 def api(method, path, body=None):
     """One call to the API the gateway was started over, as the Verticals tool the real agent would call."""
