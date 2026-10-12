@@ -221,9 +221,17 @@ function nameOf(slide: PeriodSlide): string {
   const form = formOf(slide)
   return form.name + kindTail(form.kind)
 }
+/* Where each slide's words end on its line, in px from the column's left: the left box of the sign grows into the room
+   they leave (ColumnBars.vue), the longest of the slides on show while two swap. */
+const wordsEnds = reactive<Record<number, number>>({})
+function onWords(slide: PeriodSlide, end: number): void {
+  wordsEnds[slide.id] = end
+}
+const wordsEnd = computed(() => Math.max(0, ...slides.value.map((slide) => wordsEnds[slide.id] ?? 0)))
 watch(slides, (list) => {
   const live = new Set(list.map((slide) => String(slide.id)))
   for (const id of Object.keys(forms)) if (!live.has(id)) delete forms[Number(id)]
+  for (const id of Object.keys(wordsEnds)) if (!live.has(id)) delete wordsEnds[Number(id)]
 })
 
 watch(
@@ -340,6 +348,7 @@ onBeforeUnmount(() => swapAnimation?.cancel())
     <ColumnBars
       v-if="paging && !dragging"
       :kind="kindOf(vertical)"
+      :words-end="wordsEnd"
       @step="(direction) => emit('period-step', vertical, direction)"
       @mode="emit('period-mode', vertical, periodKey)"
     />
@@ -361,7 +370,13 @@ onBeforeUnmount(() => swapAnimation?.cancel())
       >
         <!-- The line pinned at the top of the slide, over the header's kind row and the goals that scroll under it; it
              scrolls with its slide, which wheels and swaps as one. A click on its words is a click on the header. -->
-        <ColumnLine v-if="pinned" :kind="formOf(slide).kind" :name="nameOf(slide)" @click="onHeaderClick" />
+        <ColumnLine
+          v-if="pinned"
+          :kind="formOf(slide).kind"
+          :name="nameOf(slide)"
+          @words="(end) => onWords(slide, end)"
+          @click="onHeaderClick"
+        />
         <!-- Header click = expand/unfold toggle (KK ruling 2026-08-17). -->
         <ColumnHeader
           :title="slide.title"

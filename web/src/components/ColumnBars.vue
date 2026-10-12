@@ -6,7 +6,11 @@
 // assistive tech: "Previous week", "Week mode", "Next week".
 import { computed } from 'vue'
 
-const props = defineProps<{ kind: string }>()
+const props = withDefaults(defineProps<{
+  kind: string
+  /** Where the words on the line end, in px from the column's left (`ColumnLine.vue`): the left box grows no further. */
+  wordsEnd?: number
+}>(), { wordsEnd: 0 })
 const emit = defineEmits<{ step: [direction: -1 | 1]; mode: [] }>()
 const noun = computed(() => props.kind.toLowerCase())
 </script>
@@ -14,7 +18,7 @@ const noun = computed(() => props.kind.toLowerCase())
 <template>
   <!-- The sign's middle stands where it does with or without its sides; each button's own box reaches outward from its
        bars, so the three never overlap. -->
-  <div class="column-bars" data-cap="period-nav">
+  <div class="column-bars" :style="{ '--words-end': `${wordsEnd}px` }" data-cap="period-nav">
     <button
       class="column-bars__button column-bars__button--prev column-bars__button--side"
       type="button"
@@ -48,15 +52,23 @@ const noun = computed(() => props.kind.toLowerCase())
 
    The middle of the sign, 12 px wide, is 22 px in from the column's right edge and never moves: the bar that comes at
    its right brings the 14 px margin the kind line's left margin matches, and the sign stays under the pointer that
-   arrived on it. The buttons' boxes are as tall as the line, 28 px, and 15 to 18 px wide, reaching out from their
-   bars; a coarse pointer gets 44 px of height. */
+   arrived on it.
+
+   The boxes, 28 px tall (the line's height; a coarse pointer gets 44), tile the line from the middle of one gap between
+   marks to the middle of the next, measured from the column's right edge: the middle one is 18 px, 37 to 19 px in; the
+   right one reaches from there to the column's own edge, 19 px, which is as far as the edge lets it; the left one reaches
+   from 37 px in out to 61, 24 px, so none overlaps another and the marks stand as they were drawn. It stops short of
+   where the words on the line end (--words-end, ColumnLine.vue), so it never covers what a click on the line reads, and
+   it is never narrower than its own bar and the room round it, 8 px. The column's own width does the rest, so the
+   container takes the whole column and takes no pointer itself. */
 .column-bars {
   position: absolute;
   z-index: 12; /* over the line pinned at the slide's top (11, ColumnLine.vue) */
   top: var(--board-under-bar, 0px);
-  right: 22px;
-  width: 12px;
+  left: 0;
+  right: 0;
   height: var(--column-line);
+  pointer-events: none;
 }
 .column-bars__button {
   position: absolute;
@@ -72,10 +84,17 @@ const noun = computed(() => props.kind.toLowerCase())
   color: inherit;
   font: inherit;
   cursor: pointer;
+  pointer-events: auto;
 }
-.column-bars__button--mode { left: -3px; width: 18px; justify-content: center; }
-.column-bars__button--prev { right: calc(100% + 3px); width: 17px; padding-right: 3px; justify-content: flex-end; }
-.column-bars__button--next { left: calc(100% + 3px); width: 15px; padding-left: 3px; justify-content: flex-start; }
+.column-bars__button--mode { right: 19px; width: 18px; justify-content: center; }
+.column-bars__button--next { right: 0; width: 19px; padding-left: 3px; justify-content: flex-start; }
+.column-bars__button--prev {
+  --prev-left: min(max(var(--words-end, 0px), calc(100% - 61px)), calc(100% - 45px));
+  left: var(--prev-left);
+  width: calc(100% - 37px - var(--prev-left));
+  padding-right: 3px;
+  justify-content: flex-end;
+}
 @media (pointer: coarse) {
   .column-bars__button { height: 44px; }
 }

@@ -6,9 +6,13 @@
 //
 // It is the first child of the slide that scrolls and sticks to its top, so it wheels, swaps and scrolls with the slide
 // as the header does, and a wheel over it scrolls the column. It listens to that slide itself.
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+//
+// It also says where its words end, so the left box of the sign at the column's right (ColumnBars.vue) can grow into
+// the room they leave and no further: it never covers what a click on the line reads.
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { fontEpoch, fontOf, widthOf } from '../lib/fitName'
 
-defineProps<{
+const props = defineProps<{
   /** The kind, as the header's kind row says it: "Week", "Week · Dec ’27". */
   kind: string
   /** The period, the form of the big name that fits, with what the kind line carried: "5–11 Oct", "Wed", "21–27 · Dec". */
@@ -25,9 +29,27 @@ const HOLD = 4
  *  the line and nothing fades. */
 const FADE = 14
 
+const emit = defineEmits<{
+  /** Where the words end, in px from the column's left: the longer of the kind and the period, in their own type. */
+  words: [end: number]
+}>()
+
 const line = ref<HTMLElement | null>(null)
+const kindWord = ref<HTMLElement | null>(null)
+const nameWord = ref<HTMLElement | null>(null)
 const named = ref(false)
 let slide: HTMLElement | null = null
+
+/** The words stand 14 px in from the column's left (`.column-line__words`). A canvas measures them, as the header's fit
+ *  does (`lib/fitName.ts`), and again when a font arrives. */
+const WORDS_LEFT = 14
+function reachWords(): void {
+  if (!kindWord.value || !nameWord.value) return
+  const kind = widthOf(props.kind, fontOf(kindWord.value))
+  const name = widthOf(props.name, fontOf(nameWord.value))
+  emit('words', WORDS_LEFT + Math.max(kind, name))
+}
+watch([() => props.kind, () => props.name, fontEpoch], reachWords)
 
 /** The slide has scrolled to `top`. The fade follows it on the line itself, a frame at a time and without a render; the
  *  words change only at the thresholds. */
@@ -42,6 +64,7 @@ onMounted(() => {
   slide = line.value?.parentElement ?? null
   slide?.addEventListener('scroll', scrolled, { passive: true })
   scrolled()
+  reachWords()
 })
 onBeforeUnmount(() => slide?.removeEventListener('scroll', scrolled))
 </script>
@@ -50,8 +73,8 @@ onBeforeUnmount(() => slide?.removeEventListener('scroll', scrolled))
   <!-- A click on the line's words is a click on the header they cover (Column.vue). -->
   <div ref="line" class="column-line" data-role="column-line" :data-state="named ? 'period' : 'kind'">
     <div class="column-line__words">
-      <p class="column-line__kind" data-role="column-line-kind" aria-hidden="true">{{ kind }}</p>
-      <p class="column-line__name" data-role="column-line-name" aria-hidden="true">{{ name }}</p>
+      <p ref="kindWord" class="column-line__kind" data-role="column-line-kind" aria-hidden="true">{{ kind }}</p>
+      <p ref="nameWord" class="column-line__name" data-role="column-line-name" aria-hidden="true">{{ name }}</p>
     </div>
   </div>
 </template>
