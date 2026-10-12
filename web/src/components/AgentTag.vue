@@ -126,7 +126,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutside, tru
 .agent-picker {
   position: absolute;
   left: 0;
-  bottom: 36px;
+  bottom: calc(var(--vt-tag-size, 28px) + 8px);
   z-index: 10;
   box-sizing: border-box;
   width: min(760px, calc(100vw - 32px));

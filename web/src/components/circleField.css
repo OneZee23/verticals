@@ -29,9 +29,13 @@
 .circle-field__shape {
   position: relative;
   box-sizing: border-box;
+  /* Every state is 84 px wide or more. Under the pointer the circle widens by raising this minimum (below), so the way it
+     settles back has its own timing and never touches how the field opens and closes (docs/design/field-hover.md). */
+  min-width: 84px;
   cursor: none;
   pointer-events: auto;
-  transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large);
+  transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large),
+    min-width var(--dur-base) var(--ease-out);
 }
 .circle-field[data-state='open'] .circle-field__shape { transition-duration: var(--vt-dur-open); }
 .circle-field[data-state='typing'] .circle-field__shape { transition: none; }
@@ -124,6 +128,9 @@
   border-radius: 1.5px;
   background: #fff;
   pointer-events: none;
+  /* Under the pointer it grows (below); it settles back in 200 ms on the app's ease-out token. */
+  transition: width var(--dur-base) var(--ease-out), height var(--dur-base) var(--ease-out),
+    margin var(--dur-base) var(--ease-out), border-radius var(--dur-base) var(--ease-out);
 }
 .circle-field__line.is-hidden { opacity: 0; }
 .circle-field__line.is-blinking { animation: circle-field-blink 1060ms steps(1) infinite; }
@@ -253,8 +260,30 @@
 @keyframes circle-field-ball-x { from { transform: translateX(-44px); } to { transform: translateX(44px); } }
 @keyframes circle-field-ball-y { from { transform: translateY(-12px); } to { transform: translateY(12px); } }
 
+/* Under the pointer (docs/design/field-hover.md): the resting circle only widens, 84 to 116 px, and keeps its round ends; its
+   line grows from 3 × 24 to 5 × 46 px, stays upright and keeps its round ends; the pointer shows, as over any button. It
+   comes at once: the timings above are the ones the way back takes, so settling takes 200 ms on the app's ease-out token and
+   nothing else about the circle moves. The sizes are `--vt-field-hover-*` in style.css; the buttons above grow in
+   CircleTags.vue. */
+@media (hover: hover) and (pointer: fine) {
+  .circle-field[data-pointed] .circle-field__shape {
+    min-width: var(--vt-field-hover-width);
+    cursor: pointer;
+    transition: width var(--vt-dur-close) var(--vt-ease-large), height var(--vt-dur-close) var(--vt-ease-large), min-width 0s;
+  }
+  .circle-field[data-pointed] .circle-field__line {
+    width: var(--vt-field-hover-line-width);
+    height: var(--vt-field-hover-line);
+    margin: calc(var(--vt-field-hover-line) / -2) 0 0 calc(var(--vt-field-hover-line-width) / -2);
+    border-radius: calc(var(--vt-field-hover-line-width) / 2);
+    transition-duration: 0s;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .circle-field__shape, .circle-field[data-state='open'] .circle-field__shape { transition: none; }
+  .circle-field__shape, .circle-field[data-state='open'] .circle-field__shape,
+  .circle-field[data-pointed] .circle-field__shape { transition: none; }
+  .circle-field__line { transition: none; }
   .circle-field__words { transition: opacity var(--vt-crossfade) linear; }
   .circle-field[data-state='answer'] .circle-field__shape { transition: width var(--vt-crossfade) linear, height var(--vt-crossfade) linear; }
   .circle-field__answer { animation-duration: var(--vt-crossfade); animation-delay: 0ms; }

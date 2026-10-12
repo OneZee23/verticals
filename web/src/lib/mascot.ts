@@ -85,8 +85,10 @@ export function useMascot(parts: Parts, mayLook: () => boolean) {
   let lookingAt: string | null = null
   let ticker: ReturnType<typeof setInterval> | null = null
 
-  const resting = computed(() => circleState.value === 'rest' && !store.state.drag.id && !store.state.drag.pending
-    && !store.state.openGoalId && !circle.moving)
+  // The mascot plays, looks and pongs only while nobody points at the circle: under the pointer its line stands upright and
+  // still (docs/design/field-hover.md).
+  const resting = computed(() => circleState.value === 'rest' && !circle.pointed && !store.state.drag.id
+    && !store.state.drag.pending && !store.state.openGoalId && !circle.moving)
   const inFront = () => document.visibilityState === 'visible' && document.hasFocus()
 
   function stopPlay(): void {

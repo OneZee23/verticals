@@ -1,6 +1,7 @@
 // The circle at the bottom of the board (docs/design-handoff S1.P1): one state at a time, and the caption for the job
 // it is doing. The field sets `pointed` and `focused`; the conversation's store sets working and the answer (S2.P3,
-// S2.P4); moving a goal sets `moving` (S5.P3).
+// S2.P4); moving a goal sets `moving` (S5.P3). Pointing at the resting circle only widens it (SearchBar.vue); the field
+// opens on a click, a key or ⌘K (docs/design/field-hover.md).
 import { computed, reactive } from 'vue'
 import { commandFilter } from './commandFilter'
 import { agentChat, balloons, openAsk } from './agentChat'
@@ -65,7 +66,8 @@ export const circleState = computed<CircleState>(() => {
   if (agentChat.running) return 'working'
   // After an edit in an open document the circle asks "Ready?" (lib/go.ts); pointing at it doesn't open the field.
   if (goShown.value) return 'go'
-  if (circle.pointed || inboxWriting.value) return 'open'
+  // Pointing at the circle doesn't open it either: it stays `rest` and the field widens it (docs/design/field-hover.md).
+  if (inboxWriting.value) return 'open'
   return 'rest'
 })
 

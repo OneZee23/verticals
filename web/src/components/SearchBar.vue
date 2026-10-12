@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The circle and the field (docs/design-handoff S1.P1, S1.P2): one black shape. At rest a circle with the mascot's line;
-// pointed at, focused or holding words, a field whose line is your cursor, then your caret. Enter sends the words
+// pointed at, it only widens and its line stands upright (docs/design/field-hover.md); a click, a key or ⌘K opens it, a
+// field whose line is your cursor, then your caret. Enter sends the words
 // (`submit`); the board follows every letter through `commandFilter`. Open, it is as wide as its caption, and while you
 // type it never gets narrower than that (Inbox and Documents redesign, rounds 9–10). A message of the agent's inside it
 // takes a message's corners, and the documents it brings stand on its left, the first one's page under a short title
@@ -85,6 +86,13 @@ const state = circleState
 const text = computed(() => commandFilter.text)
 const maxWidth = computed(() => Math.max(CIRCLE, Math.min(720, room.width - 32)))
 
+/* Under a pointer that can hover, the resting circle only widens: 116 px, its line 5 × 46 px and upright, the buttons
+   above it 38 px (circleField.css). It opens on a click, a key or ⌘K, never on the pointer (docs/design/field-hover.md). */
+const hoverQuery = typeof matchMedia === 'function' ? matchMedia('(hover: hover) and (pointer: fine)') : null
+const canHover = ref(hoverQuery?.matches ?? false)
+function onCanHover(event: MediaQueryListEvent): void { canHover.value = event.matches }
+const hovered = computed(() => circle.pointed && canHover.value && state.value === 'rest')
+
 let measureCtx: CanvasRenderingContext2D | null = null
 /* A face loads its glyphs as they are first used (Cyrillic, say): until then words are measured in the fallback face,
    so the field measures them again once a face has loaded, or a pasted line wraps out of sight. */
@@ -152,12 +160,16 @@ const height = computed(() => {
 })
 const wide = computed(() => state.value === 'open' || state.value === 'typing' || state.value === 'answer'
   || (state.value === 'moving' && !holding.value))
-const tagsShown = computed(() => (circle.pointed && wide.value) || circle.focused || agentChat.open)
+const tagsShown = computed(() => hovered.value || (circle.pointed && wide.value) || circle.focused || agentChat.open)
 
-/* Where the line stands: the mascot's at rest, your hand over the field, your caret once the field has it. */
+/* Where the line stands: the mascot's at rest, upright under the pointer, your hand over the field, your caret once the
+   field has it. */
 const lineMode = computed(() => {
   if (carry.over) return 'mascot'
   if (state.value === 'answer' || state.value === 'go') return 'hidden'
+  // Under the pointer the circle only widens: its line neither leans towards a goal nor follows the hand
+  // (docs/design/field-hover.md).
+  if (hovered.value) return 'upright'
   if (!wide.value) return 'mascot'
   // Resting open in the Inbox, the field is an invitation to write, not the agent: no line until you write (lib/inbox.ts).
   if (inboxWriting.value && state.value === 'open' && !circle.focused && !hand.value) return 'hidden'
@@ -180,6 +192,8 @@ watch([lineMode, hand, caret, width, height], () => {
   if (!m) return
   const mode = lineMode.value
   if (mode === 'hand' && hand.value) m.set({ x: hand.value.x, y: hand.value.y, r: 0, sy: 1 })
+  // At once, a lean in flight included: the change comes with the pointer.
+  else if (mode === 'upright') { if (lastMode !== 'upright') m.set({ x: 0, y: 0, r: 0, sy: 1 }) }
   else if (mode === 'caret') {
     const slide = lastMode !== 'caret' && lastMode !== 'hidden'
     if (slide) void m.to({ ...caret.value, r: 0, sy: 1 }, 140, curve('large'))
@@ -399,6 +413,7 @@ onMounted(() => {
   if (match?.[1]) { try { commandFilter.text = decodeURIComponent(match[1]) } catch { commandFilter.text = match[1] } }
   window.addEventListener('keydown', onWindowKeyDown, true)
   window.addEventListener('resize', onResize)
+  hoverQuery?.addEventListener('change', onCanHover)
   document.fonts?.addEventListener('loadingdone', onFontsLoaded)
   stopNews = watchBoardNews()
   stopFinding = followWords(() => commandFilter.text, () => store.state.board)
@@ -407,6 +422,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onWindowKeyDown, true)
   window.removeEventListener('resize', onResize)
+  hoverQuery?.removeEventListener('change', onCanHover)
   document.fonts?.removeEventListener('loadingdone', onFontsLoaded)
   stopNews?.()
   stopFinding?.()
@@ -421,6 +437,7 @@ onBeforeUnmount(() => {
     data-cap="search"
     :data-state="state"
     :data-pong="mascot.pong ? '' : undefined"
+    :data-pointed="hovered ? '' : undefined"
     :data-focused="circle.focused ? '' : undefined"
     :data-holding="holding ? '' : undefined"
     :data-flying="flying ?? undefined"
