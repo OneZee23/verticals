@@ -56,6 +56,8 @@ class _Proc:
 
 
 class _Session:
+    id = "00000000-0000-4000-8000-000000000001"
+
     def __init__(self):
         self.asked = []
 
@@ -70,7 +72,7 @@ def _claude(settings):
     chat = _chat()
     chat.JsonProcess, chat.which = _Proc, lambda provider: "claude"
     session = _Session()
-    host = types.SimpleNamespace(claude_mcp=Path("mcp.json"), workdir=Path("."))
+    host = types.SimpleNamespace(claude_config=lambda session_id: Path("mcp.json"), workdir=Path("."))
     return chat.ClaudeAgent(host, session, settings, None), session
 
 

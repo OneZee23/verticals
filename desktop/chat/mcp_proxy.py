@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Stdio MCP server for agents that take MCP servers as commands (Codex): relays every
 JSON-RPC message to the demo's streamable-HTTP MCP endpoint. The URL and bearer token come
-from the environment (VERTICALS_MCP_URL, VERTICALS_MCP_TOKEN), never from arguments."""
+from the environment (VERTICALS_MCP_URL, VERTICALS_MCP_TOKEN), never from arguments. The
+conversation the agent belongs to (VERTICALS_MCP_SESSION) goes on every request as
+X-Verticals-Session, so the server can keep what each answer of that conversation wrote."""
 import json
 import os
 import sys
@@ -10,6 +12,7 @@ import urllib.request
 
 URL = os.environ["VERTICALS_MCP_URL"]
 TOKEN = os.environ["VERTICALS_MCP_TOKEN"]
+CONVERSATION = os.environ.get("VERTICALS_MCP_SESSION")
 session_id = None
 
 
@@ -24,6 +27,8 @@ def relay(message):
                "Authorization": f"Bearer {TOKEN}"}
     if session_id:
         headers["Mcp-Session-Id"] = session_id
+    if CONVERSATION:
+        headers["X-Verticals-Session"] = CONVERSATION
     req = urllib.request.Request(URL, data=json.dumps(message).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=600) as resp:
         session_id = resp.headers.get("Mcp-Session-Id") or session_id
