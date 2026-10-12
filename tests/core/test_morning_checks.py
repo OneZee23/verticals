@@ -193,11 +193,17 @@ def test_a_child_set_under_a_task_that_is_not_its_parent_fails_the_hierarchy(db:
     assert day.apply().failed == ()
 
 
-def test_a_row_with_no_task_behind_it_fails_where_each_item_went(db: psycopg.Connection) -> None:
+def test_a_row_linking_a_task_that_is_not_on_the_board_fails_where_each_item_went(db: psycopg.Connection) -> None:
     day = Day(db)
-    day.write([goal_row(day.launch, "Launch is planned"), "| Say thanks | Nobody owns it. | – | – |  |", goal_row("NOSUCHID", "A task that is not")])
+    day.write([goal_row(day.launch, "Launch is planned"), goal_row("NOSUCHID", "A task that is not")])
     applied = day.apply()
-    assert applied.failed == ("where",) and applied.outcomes["where"].note == "No task on the board behind Say thanks and A task that is not."
+    assert applied.failed == ("where",) and applied.outcomes["where"].note == "No task on the board behind A task that is not."
+
+
+def test_a_proposal_with_no_task_yet_links_nothing_and_is_not_failed_for_it(db: psycopg.Connection) -> None:
+    day = Day(db)
+    day.write([goal_row(day.launch, "Launch is planned"), "| Thanks are sent | Nobody owns it yet. | – | Decide who sends them. |  |"])
+    assert day.apply().failed == ()
 
 
 def test_the_copy_is_the_days_title_linked_to_the_morning_task(db: psycopg.Connection) -> None:

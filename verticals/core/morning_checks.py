@@ -135,7 +135,9 @@ def floor(conn: psycopg.Connection, *, owner: str, doc: core_docs.Doc, day: date
                 {"owner": owner, "ids": linked},
             ).fetchall()
         }
-    unlinked = [r.title or "a row" for r in task_rows if r.goal is None or r.goal not in state]
+    # A row that links nothing is a proposal, named by its result (the contract's rows part): the second agent judges those. A link
+    # to a task that is not on the board is a row pointing at nothing.
+    unlinked = [r.title or "a row" for r in task_rows if r.goal is not None and r.goal not in state]
     if unlinked:
         problem("where", f"No task on the board behind {_list(unlinked[:6])}.")
     closed = [r.title for r in task_rows if r.goal in state and state[r.goal][1]]
