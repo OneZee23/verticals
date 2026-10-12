@@ -333,7 +333,7 @@ def make_gateway(token, chat):
                 elif action == "reset":
                     chat.reset(body.get("session"))
                 elif action == "report-kind":
-                    return self.send_json({"kind": report_kind.ask(chat, body.get("words"), body.get("settings"))})
+                    return self.send_json(report_kind.ask(chat, body.get("words"), body.get("settings")))
                 else:
                     return self.deny(404, "not found")
             except (ChatError, ValueError) as e:

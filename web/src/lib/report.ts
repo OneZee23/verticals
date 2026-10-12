@@ -3,9 +3,11 @@
 // words, the pictures and the app's version; its task is made with it, so the report is the task's first document, and the
 // answer shows both as chips (docs/design/agent-chips.md). Then, if asked: Send to developers and Improve it (lib/reportActions.ts).
 //
-// The words say which kind it is, and the agent tells (desktop/chat/report_kind.py), so there is nothing to pick before sending.
-// Something that went wrong, a bug, also carries the last lines of the app's and the agent's logs; something that could be
-// better, a request, carries none. When the agent cannot tell, is slow or is not there, it is a request: that shape loses nothing.
+// The words say which kind it is and what the task is called, and the agent tells (desktop/chat/report_kind.py), so there is
+// nothing to pick or to name before sending. Something that went wrong, a bug, also carries the last lines of the app's and
+// the agent's logs; something that could be better, a request, carries none. The task is named by its result, as the board names
+// its tasks ("A card dragged to Friday stays there"), while the report keeps the person's words as they wrote them. When the
+// agent cannot tell, is slow or is not there, it is a request and the task takes the person's own words: that loses nothing.
 // The agent gets the words and nothing else. Pictures of that size are not for a model to carry through a tool call, and what the
 // logs may say is decided in code, not by a model (desktop/chat/report_facts.py).
 import { agentChat, reportKind, type ReportKind } from './agentChat'
@@ -104,14 +106,17 @@ export async function makeReport(words: string): Promise<void> {
   const files = pictures.list.map((picture) => picture.file)
   pictures.sending = true
   try {
-    // The agent tells the kind while the pictures are drawn smaller; a bug has the logs asked for, a request does not.
-    const [kind, encoded] = await Promise.all([reportKind(said), encodePictures(files)])
+    // The agent tells the kind and the task's name while the pictures are drawn smaller; a bug has the logs asked for, a request
+    // does not.
+    const [verdict, encoded] = await Promise.all([reportKind(said), encodePictures(files)])
+    const kind = verdict.kind
     const facts = await readFacts(kind === 'bug')
     const at = new Date()
     const title = reportTitle(at)
     const path = reportPath(at, kind)
     const doc = await createDoc({ path, title, body: reportBody(said, encoded.sources, facts) })
-    const task = wordsToGoal(said)
+    // The task is named by its result when the agent named it; the report below keeps the person's words as they are.
+    const task = wordsToGoal(verdict.name ?? said)
     let goal
     try {
       goal = await createGoal({ title: task.title, body: `[${noBrackets(title)}](doc:${path})` })

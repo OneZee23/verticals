@@ -1,9 +1,9 @@
 """A report from pictures, its task, and what can be done with it (docs/design/bug-reports.md): something is wrong, or could be
 better. The person drops pictures on the window, says what they see and what they want and presses ↵. The words say which kind
-it is and the agent tells (here the stand-in agent, by the words); the person picks nothing. A bug carries the last lines of the
-app's and the agent's logs, a request none, and with no agent, or one that cannot tell, it is a request. The report comes first,
-a document with the words, the pictures and the app's version, and its task is made with it, at once; the answer shows both as
-chips. Above the field stand two pills: Send to developers, a link that opens a GitHub issue filled in with the report (never
+it is and what the task is called, and the agent tells (here the stand-in agent, by the words); the person picks and names
+nothing. A bug carries the last lines of the app's and the agent's logs, a request none, and with no agent, or one that cannot
+tell, it is a request. The report comes first, a document with the person's words as they wrote them, the pictures and the app's
+version, and its task is made with it, at once, named by its result; the answer shows both as chips. Above the field stand two pills: Send to developers, a link that opens a GitHub issue filled in with the report (never
 with the board) and labelled for its kind, and Improve it, which asks the agent for a design document in the same task. F2
 behind the desktop gateway and its stand-in agent; the browser clock pinned to 2026-08-08. Nothing here opens a real issue or
 sends mail: the links are read, not followed."""
@@ -22,6 +22,7 @@ from playwright.sync_api import Page, expect
 from tests.ui.conftest import F2_OWNER, UiSession
 from tests.ui.report_support import ANSWER, FIELD, ITEM, drop, files
 from tests.ui.test_agent_conversation import ui_agent  # noqa: F401  (the fixture)
+from tests.ui.views import switch_view
 
 DOC_CHIP = f"{ANSWER} [data-role='doc-chip']"
 GOAL_CHIP = f"{ANSWER} [data-role='goal-chip']"
@@ -30,6 +31,9 @@ IMPROVE = '[data-role="report-improve"]'
 WORDS = "I dragged the card to Friday and it jumped back"
 # What the person would like instead of what went wrong: the stand-in agent tells it is a request by "I'd like".
 WISH = "I'd like the card to snap to Friday when I drop it near it"
+# The task's name by its result, which the stand-in agent gives for each of the two wordings (tests/ui/fake_agent/claude).
+RESULT = "A card dragged to Friday stays there"
+WISHED = "A card dropped near Friday snaps to it"
 ISSUES = "https://github.com/konstantinopolskii/verticals/issues/new"
 KIND = "/__chat/report-kind"
 FACTS = "/__report/facts"
@@ -104,19 +108,21 @@ def test_a_bug_and_its_task_come_at_once_with_the_logs(ui_agent: UiSession, tmp_
     # The agent was asked one thing, which kind it is, with the words and the person's own settings, and nothing else.
     assert sorted(json.loads(asked.value.post_data or "{}")) == ["settings", "words"]
     assert json.loads(asked.value.post_data)["words"] == WORDS
+    assert asked.value.response().json() == {"kind": "bug", "name": RESULT}
     # The report is the task's first document, made with it: one of each, linked, the task with no date (it waits in the Inbox).
     expect(page.locator(DOC_CHIP)).to_have_count(1, timeout=15000)
     expect(page.locator(GOAL_CHIP)).to_have_count(1)
     ((doc_id, path, title, body, goal_id, goal_title, vertical),) = _reports(session.backend.dsn)
     assert re.fullmatch(r"reports/bugs/\d{4}-\d\d-\d\d-\d{6}\.md", path), path
     assert re.fullmatch(r"Report — \d{1,2} \w+ \d{4}, \d\d:\d\d", title), title
-    assert goal_title == WORDS and vertical is None
+    # The task is named by its result; the report keeps the person's words as they wrote them, first.
+    assert goal_title == RESULT and vertical is None and body.startswith(WORDS)
     # The answer says what is in it, and shows both as chips: the document's name and the task's, where it is and when.
     expect(page.locator(ANSWER)).to_contain_text("Report made with 2 pictures and the last log lines.")
     expect(page.locator(f"{DOC_CHIP} .doc-chip__name")).to_have_text(title)
-    expect(page.locator(f"{GOAL_CHIP} .goal-chip__name")).to_have_text(WORDS)
+    expect(page.locator(f"{GOAL_CHIP} .goal-chip__name")).to_have_text(RESULT)
     expect(page.locator(f"{GOAL_CHIP} [data-role='goal-chip-when']")).to_have_text("Inbox · made just now")
-    # The pictures have left the field, and no conversation was started: the agent only sorted the words.
+    # The pictures have left the field, and no conversation was started: the agent only sorted and named.
     expect(page.locator(ITEM)).to_have_count(0)
     expect(page.locator(".circle-field")).to_have_attribute("data-state", "answer")
     assert sum(1 for r in session.request_log if r["url"].endswith("/__chat/send")) == sent_before
@@ -158,7 +164,7 @@ def test_a_request_and_its_task_come_at_once_with_no_logs(ui_agent: UiSession, t
     expect(page.locator(GOAL_CHIP)).to_have_count(1)
     ((_, path, title, body, _, goal_title, vertical),) = _reports(session.backend.dsn)
     assert re.fullmatch(r"reports/requests/\d{4}-\d\d-\d\d-\d{6}\.md", path), path
-    assert goal_title == WISH and vertical is None
+    assert goal_title == WISHED and vertical is None
     expect(page.locator(ANSWER)).to_contain_text("Report made with 2 pictures.")
     expect(page.locator(ANSWER)).not_to_contain_text("log lines")
     expect(page.locator(f"{DOC_CHIP} .doc-chip__name")).to_have_text(title)
@@ -192,40 +198,60 @@ def test_when_the_agent_cannot_tell_it_is_a_request(ui_agent: UiSession, tmp_pat
     expect(page.locator(ANSWER)).to_contain_text("Report made with 1 picture.")
     # The gateway's log says what it was told and why, in words the report's own cleaner keeps.
     log = (tmp_path / "desktop-state" / "agent.log").read_text()
-    assert re.search(r" report_kind result=request why=unclear ms=\d+", log), log
+    assert re.search(r" report_kind result=request why=unclear named=no ms=\d+", log), log
     assert words not in log
 
 
-def test_while_the_agent_tells_the_kind_the_field_works_and_a_second_press_does_nothing(ui_agent: UiSession) -> None:  # noqa: F811
+def test_a_kind_with_no_name_leaves_the_task_with_the_persons_words(ui_agent: UiSession) -> None:  # noqa: F811
     session = ui_agent
     page = session.page
     page.wait_for_selector(".goal-card__row")
-    words = f"{WORDS} [slow]"  # the stand-in agent takes a second and a half to answer
-    drop(page, files(2))
-    expect(page.locator(ITEM)).to_have_count(2)
+    words = f"{WORDS} [nameless]"
+
+    drop(page, files(1))
+    expect(page.locator(ITEM)).to_have_count(1)
     page.locator(FIELD).fill(words)
-    page.keyboard.press("Enter")
+    with page.expect_request(lambda r: r.url.endswith(KIND)) as asked:
+        page.keyboard.press("Enter")
 
-    # At once: the line turns, as it does while the agent works, and the pictures wait, dimmed, where they are.
-    expect(page.locator(".circle-field")).to_have_attribute("data-state", "working")
-    expect(page.locator('[data-role="field-pictures"]')).to_have_class(re.compile(r"\bis-sending\b"))
-    expect(page.locator(ITEM)).to_have_count(2)
-    assert not _reports(session.backend.dsn), "nothing is made until the agent has told"
-    # Another press while it waits starts nothing, and words typed meanwhile stay in the field: the pictures cannot be sent
-    # twice, and the person's next words are not lost.
-    page.locator(FIELD).fill("and one more thing")
-    page.keyboard.press("Enter")
-    expect(page.locator(FIELD)).to_have_value("and one more thing")
+    # The agent told the kind and no name, so it is a bug, with its logs, and the task is the person's words, as now.
+    assert asked.value.response().json() == {"kind": "bug", "name": None}
+    expect(page.locator(DOC_CHIP)).to_have_count(1, timeout=15000)
+    ((_, path, _, body, _, goal_title, _),) = _reports(session.backend.dsn)
+    assert path.startswith("reports/bugs/") and goal_title == words and body.startswith(words)
+    expect(page.locator(f"{GOAL_CHIP} .goal-chip__name")).to_have_text(words)
+    # The words are the task's title; with them written as they were, nothing says "result" where no one named one.
+    assert RESULT not in body and RESULT not in goal_title
 
-    expect(page.locator(ITEM)).to_have_count(0, timeout=20000)
-    assert len(_reports(session.backend.dsn)) == 1
-    assert len(_asked(session, KIND)) == 1, "the agent was asked once"
-    expect(page.locator(FIELD)).to_have_value("and one more thing")
-    # With the next words cleared, the answer is there: both chips.
-    page.locator(FIELD).fill("")
-    page.evaluate("document.activeElement?.blur()")
-    expect(page.locator(DOC_CHIP)).to_have_count(1)
-    expect(page.locator(GOAL_CHIP)).to_have_count(1)
+
+def test_the_page_of_a_report_chip_and_of_the_desk_shows_its_words_and_no_base64(ui_agent: UiSession, tmp_path: Path) -> None:  # noqa: F811
+    """A report's pictures are data URLs in its text, and the page a document is drawn as cuts the text at a fixed length: the
+    pictures, which stand between the words and the version, would fill it with base64 and push the rest out of it."""
+    session = ui_agent
+    page = session.page
+    page.wait_for_selector(".goal-card__row")
+    _plant_the_logs(tmp_path)
+    _say(page, 2)
+    expect(page.locator(DOC_CHIP)).to_have_count(1, timeout=15000)
+
+    # The chip's little page: the person's words, then what came after the pictures (the version), and not a character of data.
+    chip = page.locator(f"{DOC_CHIP} .doc-page__text")
+    expect(chip).to_contain_text(WORDS)
+    expect(chip).to_contain_text("Verticals")
+    assert "base64" not in chip.inner_text() and "data:image" not in chip.inner_text() and "/9j/" not in chip.inner_text()
+
+    # The Documents desk draws the same page from the server's preview, cut the same way: the task's stack, with the report on top.
+    switch_view(page, "docs")
+    stack = page.locator(".docs-stack", has_text=RESULT)
+    expect(stack).to_have_count(1)
+    desk = stack.locator(".doc-page__text")
+    expect(desk).to_contain_text(WORDS)
+    expect(desk).to_contain_text("Verticals")
+    assert "base64" not in desk.inner_text() and "data:image" not in desk.inner_text() and "/9j/" not in desk.inner_text()
+    # And the document itself, opened, still has its pictures: the person's own view keeps them.
+    stack.click()
+    page.locator('[data-role="docs-open"] .docs-open__page').first.click()
+    expect(page.locator('[data-role="doc-window"] img.goal-detail__body-image')).to_have_count(2)
 
 
 def test_the_chips_open_what_they_name(ui_agent: UiSession) -> None:  # noqa: F811
@@ -253,7 +279,7 @@ def test_a_report_works_with_no_gateway_and_says_nothing_it_does_not_know(ui_f2:
     _say(page, 1)
     expect(page.locator(DOC_CHIP)).to_have_count(1, timeout=15000)
     ((_, path, _, body, _, goal_title, _),) = _reports(session.backend.dsn)
-    assert goal_title == WORDS and path.startswith("reports/requests/")
+    assert goal_title == WORDS and path.startswith("reports/requests/"), "nobody named it: the task takes the person's words"
     assert "Verticals " not in body and "## App log" not in body and "## Agent log" not in body
     assert not _asked(session, KIND), "no agent, so nobody was asked"
     expect(page.locator(SEND)).to_be_visible()
@@ -276,7 +302,7 @@ def test_send_to_developers_is_a_link_to_a_new_issue_with_the_report_and_nothing
     # A link that opens in the browser, as a link does.
     assert page.locator(SEND).get_attribute("target") == "_blank"
     assert "noopener" in (page.locator(SEND).get_attribute("rel") or "")
-    assert query["title"] == WORDS
+    assert query["title"] == RESULT, "the issue is titled as its task is, by its result; the body starts with the person's words"
     text = query["body"]
     ((_, _, _, doc_body, _, _, _),) = _reports(session.backend.dsn)
     # What goes is the report's own text: its words, the version, the logs; the pictures are not in a link, and the issue says
@@ -300,7 +326,7 @@ def test_send_to_developers_is_a_link_to_a_new_issue_with_the_report_and_nothing
     expect(page.locator(SEND)).to_have_text("Send to developers")
     assert mail.startswith("mailto:?subject=") and len(mail) <= 6000
     assert unquote(mail.split("&body=", 1)[1]) == text
-    assert unquote(mail.split("?subject=", 1)[1].split("&", 1)[0]) == WORDS
+    assert unquote(mail.split("?subject=", 1)[1].split("&", 1)[0]) == RESULT
 
 
 def test_the_issue_for_a_request_reads_as_a_request_and_has_no_logs(ui_agent: UiSession, tmp_path: Path) -> None:  # noqa: F811
@@ -316,7 +342,7 @@ def test_the_issue_for_a_request_reads_as_a_request_and_has_no_logs(ui_agent: Ui
     assert href.startswith(ISSUES + "?") and len(href) <= 6000
     # The repository's label for a request, and the words as the title; the text is the words, the version and the picture's line.
     assert query["labels"] == "enhancement" and sorted(query) == ["body", "labels", "title"]
-    assert query["title"] == WISH
+    assert query["title"] == WISHED
     text = query["body"]
     assert text.startswith(WISH) and re.search(r"^Verticals .+, .+$", text, re.M)
     assert text.endswith("1 picture: drag it into this box before you submit.")

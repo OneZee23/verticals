@@ -417,13 +417,23 @@ function pageContext(goal: GoalRef | undefined) {
 
 /** Something wrong, or something that could be better: what a report is (docs/design/bug-reports.md). */
 export type ReportKind = 'bug' | 'request'
+/** What the agent tells of a report from the person's words: which kind it is, and the name of its task by its result ("A
+ *  card dragged to Friday stays there"), or none, when the agent could not name it. */
+export interface ReportVerdict {
+  kind: ReportKind
+  name: string | null
+}
 /** The longest the page waits for the agent to tell, a little over what the gateway waits for it (desktop/chat/report_kind.py). */
 const REPORT_KIND_WAIT_MS = 30_000
+/** A task's name the page takes from the gateway: one line, a few words (the gateway holds it to 8 words and 100 characters). */
+const NAME_LIMIT = 100
 
-/** Which kind of report these words are, told by the agent from the words alone, so the person picks nothing. A request when
- *  there is no agent, when it is slow or cannot tell: that shape loses nothing (the words, the pictures, the version). */
-export async function reportKind(words: string): Promise<ReportKind> {
-  if (!agentChat.available) return 'request'
+/** Which kind of report these words are, and what to call its task, told by the agent from the words alone, so the person
+ *  picks and names nothing. A request with no name when there is no agent, when it is slow or cannot tell: that shape loses
+ *  nothing (the words, the pictures, the version), and the task takes the person's own words. */
+export async function reportKind(words: string): Promise<ReportVerdict> {
+  const unknown: ReportVerdict = { kind: 'request', name: null }
+  if (!agentChat.available) return unknown
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REPORT_KIND_WAIT_MS)
   try {
@@ -431,10 +441,12 @@ export async function reportKind(words: string): Promise<ReportKind> {
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
       body: JSON.stringify({ words, settings: agentChat.selection ?? {} }),
     })
-    const data = await res.json().catch(() => ({})) as { kind?: string }
-    return res.ok && data.kind === 'bug' ? 'bug' : 'request'
+    const data = await res.json().catch(() => ({})) as { kind?: unknown; name?: unknown }
+    if (!res.ok) return unknown
+    const name = typeof data.name === 'string' ? data.name.replace(/\s+/g, ' ').trim() : ''
+    return { kind: data.kind === 'bug' ? 'bug' : 'request', name: name && name.length <= NAME_LIMIT ? name : null }
   } catch {
-    return 'request'
+    return unknown
   } finally {
     clearTimeout(timer)
   }

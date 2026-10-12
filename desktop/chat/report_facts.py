@@ -129,7 +129,7 @@ _AGENT_KINDS = {"gateway", "send", "agent_start", "turn_start", "tool", "tool_er
                 "permission_done", "done", "exit", "refused", "turn_failed_to_start", "report_kind"}
 # `key=value` fields that hold flags, counts and names of kinds, never words.
 _AGENT_FIELDS = {"provider", "permission", "morning", "chars", "mode", "queued", "session", "resume", "handoff", "model",
-                 "effort", "name", "id", "tool", "value", "error", "ms", "code", "pid", "result", "why"}
+                 "effort", "name", "id", "tool", "value", "error", "ms", "code", "pid", "result", "why", "named"}
 _FREE_KINDS = {"refused", "turn_failed_to_start"}  # the gateway's own message, or an OS error, then `session=`
 
 

@@ -11,9 +11,11 @@ second and a half, which is the time a test has to rewrite the document as the r
 lines. A message that opens with "Improve it" (a report's design asked for, web/src/lib/reportActions.ts) is answered as the
 real agent answers it through Verticals' tools: it writes a design document into the report's task, linked to it, and says
 it is waiting for the person's comments; this one reaches the API the tests' gateway was started with (FAKE_AGENT_API). A message that opens with "A person's report,
-in their words" (a report to sort, desktop/chat/report_kind.py) is answered with one word, request when the words say what
-the person would like ("I'd like", "would be nice", "I wish", "I want", "could be", "should be", "please add") and bug
-otherwise, or with a sentence that names neither when they carry `[unclear]`."""
+in their words" (a report to sort and name, desktop/chat/report_kind.py) is answered as the real agent answers it: two
+lines, the kind (request when the words say what the person would like: "I'd like", "would be nice", "I wish", "I want",
+"could be", "should be", "please add"; bug otherwise) and the task's name by its result, for the two sample wordings the tests
+use ("A card dragged to Friday stays there", "A card dropped near Friday snaps to it"). `[nameless]` in the words leaves the
+second line out, and `[unclear]` answers with a sentence that names neither kind."""
 import json
 import os
 import re
@@ -36,6 +38,9 @@ CHECKED = "Check again"
 IMPROVE = "Improve it"
 SORT = "A person's report, in their words"
 WISHES = ("i'd like", "i would like", "would be nice", "i wish", "i want", "could be", "should be", "please add")
+# The task's name by its result, for the sample wordings of the report tests: what the real agent would call each.
+NAMES = (("dragged the card to friday and it jumped back", "A card dragged to Friday stays there"),
+         ("snap to friday when i drop it near it", "A card dropped near Friday snaps to it"))
 
 # `[ask:NAME]`: a write the agent asks permission for. SYNDAY01 is "Draft the outline", a goal of 8 Aug 2026 in F2.
 ASKS = {
@@ -76,11 +81,13 @@ def improve(words):
 
 
 def sort_for(words):
-    """What the real agent answers when it is asked to sort a report: one word, by the person's own words."""
-    said = words.split("\n\n", 1)[-1].rsplit("\n\nIs it a bug or a request?", 1)[0].lower()
+    """What the real agent answers when it is asked to sort and name a report: by the person's own words."""
+    said = words.split("\n\n", 1)[-1].rsplit("\n\nIs it a bug or a request, and what is the task called?", 1)[0].lower()
     if "[unclear]" in said:
         return "It is hard to say from this."
-    return "request" if any(wish in said for wish in WISHES) else "bug"
+    kind = "request" if any(wish in said for wish in WISHES) else "bug"
+    name = next((named for key, named in NAMES if key in said), None)
+    return kind if "[nameless]" in said or not name else f"{kind}\n{name}"
 
 
 def answer_for(words):
