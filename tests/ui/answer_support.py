@@ -14,16 +14,19 @@ import signal
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import anyio
 import httpx
+import psycopg
 import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from verticals.core import morning as core_morning
 from tests.mcp.conftest import McpHttpServer, mcp_http_subprocess, open_mcp_http_session
-from tests.ui.conftest import F2_OWNER, TEST_TOKEN, UiSession, _backend, _make_ui_session
+from tests.ui.conftest import F2_OWNER, PINNED_DAY, TEST_TOKEN, UiSession, _backend, _make_ui_session
 from tests.ui.test_agent_conversation import _agent_gateway
 from tests.ui.undo_helpers import write_log, writes
 from tests.ui.views import FIELD
@@ -67,7 +70,11 @@ def ui_answers(
     browser: Browser, f2_dsn: str, mcp_server: McpHttpServer, tmp_path: Path, request: pytest.FixtureRequest, web_dist: None,
     ui_reduced_motion: str,
 ) -> Iterator[UiSession]:
-    """F2 served by the desktop gateway, whose fake agent calls the MCP server and whose answers the server keeps."""
+    """F2 served by the desktop gateway, whose fake agent calls the MCP server and whose answers the server keeps. The pinned day's
+    morning report is taken already, as `ui_agent` has it (docs/design/agent-fixes.md, fix 3): the app would otherwise ask the agent
+    for it as the window opens, and that extra answer would stand first in the conversation."""
+    with psycopg.connect(f2_dsn, autocommit=True) as conn:
+        core_morning.take(conn, owner=F2_OWNER, day=date.fromisoformat(PINNED_DAY))
     with _backend(f2_dsn, F2_OWNER, tmp_path) as backend:
         with _agent_gateway(backend, tmp_path, mcp_url=mcp_server.url) as base_url:
             yield from _make_ui_session(
