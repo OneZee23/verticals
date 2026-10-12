@@ -1,6 +1,7 @@
-// What the step bubble says while the agent works (docs/design-handoff S2.P3): one fixed phrase per tool, so the same
-// step always reads the same. Claude names Verticals' tools `mcp__verticals__<tool>` (the server shortens them), Codex
-// `verticals.<tool>` or `<tool>`; anything else, its own commands and file edits included, reads "Thinking".
+// What the field says while the agent works (docs/design-handoff S2.P3; the step stands inside the field): one fixed phrase
+// per tool, so the same step always reads the same. Claude names Verticals' tools `mcp__verticals__<tool>` (the server
+// shortens them), Codex `verticals.<tool>` or `<tool>`; anything else, its own commands and file edits included, reads
+// "Thinking". A tool that reads one of your own sources says which (`step` on the gateway's tool event, lib/agentChat.ts).
 const PHRASES: Record<string, string> = {
   board: 'Reading your board',
   outline: 'Reading the plan',
@@ -10,6 +11,7 @@ const PHRASES: Record<string, string> = {
   doc_tree: 'Reading the document',
   doc_history: 'Reading the document',
   doc_revision: 'Reading the document',
+  sources: 'Reading your sources',
   create: 'Writing a new goal',
   update: 'Rewriting the goal',
   reparent: 'Moving the goal',

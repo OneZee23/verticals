@@ -22,6 +22,7 @@ import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
 import CircleTags from './CircleTags.vue'
 import DocPage from './DocPage.vue'
+import AgentStep from './AgentStep.vue'
 import { docLinks, withoutDocLines } from '../lib/docLinks'
 import { docCard } from '../lib/docCard'
 import MovingStack from './MovingStack.vue'
@@ -52,6 +53,10 @@ const PAD_ASK = 36
 const NOTE_PAGE = 50
 const NOTE_PAGE_H = 67
 const NOTE_WORDS = 236
+/* While the agent works the circle is a pill with its step written beside the turning line (AgentStep.vue): the line stays where
+   the circle's centre was, 42 px in, and the stop square takes the right end. One width for every phrase, so the black moves
+   when the work begins and ends, not with each step. */
+const STEP_WIDTH = 360
 
 const body = ref<HTMLElement | null>(null)
 const shape = ref<HTMLElement | null>(null)
@@ -119,6 +124,8 @@ const leadText = computed(() => (circleWords.value?.kind === 'ask' && circleWord
 /* An ask says what it will change under its question: the goal and its date (lib/askDetail.ts). */
 const changesText = computed(() => (circleWords.value?.kind === 'ask' ? circleWords.value.changes : ''))
 const stopping = computed(() => state.value === 'working' && circle.pointed)
+/* With an ask waiting in the open conversation the circle only waits (no turning line, no step). */
+const stepShown = computed(() => state.value === 'working' && !openAsk.value)
 /* Holding a goal over the spans, the field is a pill with the mascot; let go over it, it widens to hold what stands above
    it (S5.P3.002, .007, .039). Let go anywhere else, it stays the pill while the goal lands and the board comes back. */
 const GO_WORD = 'Ready?'
@@ -131,6 +138,7 @@ const width = computed(() => {
   if (carry.over) return 120
   if (state.value === 'answer' && answerDocs.value.length) return 24 + NOTE_PAGE + behind.value + 16 + NOTE_WORDS + 32
   if (state.value === 'answer') return Math.max(CIRCLE, Math.min((leadLines.value ? ANSWER_MEASURE : answerWidth.value) + 2 * ANSWER_PAD, ANSWER_MEASURE + 2 * ANSWER_PAD))
+  if (stepShown.value) return Math.min(STEP_WIDTH, maxWidth.value)
   if (stopping.value) return 132
   // "Ready?": the pointed field's pill as wide as its word, the word in its middle (round 8).
   if (state.value === 'go') return Math.max(136, Math.ceil(PAD_ASK + textWidth(GO_WORD) + PAD_ASK))
@@ -153,6 +161,9 @@ const height = computed(() => {
   }
   return CIRCLE
 })
+/* The turning line stays 42 px from the left end, the circle's centre, while the circle is a pill: the pivot moves there and
+   follows the shape's own timing (circleField.css), so the line holds its place as the black widens and narrows. */
+const stepShift = computed(() => (stepShown.value ? CIRCLE / 2 - width.value / 2 : 0))
 const wide = computed(() => state.value === 'open' || state.value === 'typing' || state.value === 'answer'
   || (state.value === 'moving' && !holding.value))
 const tagsShown = computed(() => (circle.pointed && wide.value) || circle.focused || agentChat.open)
@@ -517,7 +528,9 @@ onBeforeUnmount(() => {
         <button v-if="stopping" type="button" class="circle-field__stop" aria-label="Stop the agent" @click.stop="stop()">
           <span aria-hidden="true"></span>
         </button>
-        <span ref="pivot" class="circle-field__pivot" :class="{ 'is-turning': state === 'working' && !openAsk, 'is-stopping': stopping }">
+        <AgentStep :shown="stepShown" />
+        <span ref="pivot" class="circle-field__pivot" :class="{ 'is-turning': state === 'working' && !openAsk, 'is-stopping': stopping && !stepShown }"
+          :style="{ translate: `${stepShift}px 0` }">
         <span
           ref="line"
           class="circle-field__line"

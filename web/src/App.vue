@@ -29,7 +29,6 @@ import { REPLAN_ASK, type CarriedPlan } from './lib/replan'
 import { closeWindows, frontWindow, openWindow, outOfFocus, stepWindow, windows } from './lib/windows'
 import WindowStack from './components/WindowStack.vue'
 import AgentConversation from './components/AgentConversation.vue'
-import AgentStep from './components/AgentStep.vue'
 import AgentTag from './components/AgentTag.vue'
 import { ensureMorning } from './lib/morning'
 import { takeSelection } from './lib/pageSelection'
@@ -264,7 +263,6 @@ onUnmounted(() => {
     <div class="app-veil" :class="{ 'is-shown': outOfFocus, 'app-veil--window': windows.list.length }" data-role="out-of-focus" aria-hidden="true" @click="onVeilClick"></div>
     <WindowStack />
     <AgentConversation @link="onConversationLink" />
-    <AgentStep />
     <SearchBar id="verticals-command-bar" ref="searchBar" :agent-available="agentChat.available" @submit="onSubmit">
       <template #agent-tag><AgentTag /></template>
     </SearchBar>

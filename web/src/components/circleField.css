@@ -136,6 +136,14 @@
 .circle-field__pivot { position: absolute; inset: 0; pointer-events: none; }
 .circle-field__pivot.is-turning { animation: circle-field-turn 1600ms var(--vt-ease-play) infinite; }
 .circle-field__pivot.is-stopping { left: -48px; }
+/* With the step beside it the circle is a pill, and the line turns at its left end, where the circle's centre was: SearchBar.vue
+   moves the pivot there (`translate`), and it follows the shape's own timing, so the line holds its place while the black
+   widens and narrows. Typing has no transition, as the shape has none. */
+.circle-field__pivot { transition: translate var(--vt-dur-close) var(--vt-ease-large); }
+.circle-field[data-state='open'] .circle-field__pivot { transition-duration: var(--vt-dur-open); }
+.circle-field[data-state='typing'] .circle-field__pivot { transition: none; }
+.circle-field[data-flying='sent'] .circle-field__pivot { transition-duration: var(--vt-dur-sent); }
+@media (prefers-reduced-motion: reduce) { .circle-field__pivot { transition: none; } }
 @keyframes circle-field-turn { from { transform: rotate(0); } to { transform: rotate(180deg); } }
 .circle-field__stop {
   position: absolute;
