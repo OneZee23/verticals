@@ -20,6 +20,7 @@ import { MONTH_NAMES } from '../lib/periods'
 import { leaveRoom, roomFor } from '../lib/columnRoom'
 import { contentTop, familyBlock, fitScroll, scrollerOf } from '../lib/columnFit'
 import { familyMoving } from '../lib/familyMotion'
+import { reducedMotion } from '../lib/motion'
 import {
   handleBodyBeforeInput,
   handleBodyKeydown,
@@ -433,7 +434,7 @@ function fitIntoView(): void {
   }
   // The glide starts from wherever the first frame finds the column: GoalCard.vue holds the clicked card in place first.
   // Without motion the column jumps at once, and keeps up with the goal while it grows.
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const reduced = reducedMotion()
   if (reduced) el.scrollTop = target(el.scrollTop)
   let from = reduced ? el.scrollTop : Number.NaN
   let ms = OPEN_MS

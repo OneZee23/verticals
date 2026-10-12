@@ -535,11 +535,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     // The page keeps its content below the title bar by `--titlebar-height`, in its own zoomed pixels; full screen has
-    // none. `verticalsPageZoom` tells the dev panel's zoom buttons where they start.
+    // none. `verticalsPageZoom` tells the dev panel's zoom buttons where they start. The Reduce Motion answer rides in
+    // the same script (below), because this call replaces every user script.
     func syncTitlebar() {
         let height = window.styleMask.contains(.fullScreen) ? 0 : window.frame.height - window.contentLayoutRect.height
         let js = "document.documentElement.style.setProperty('--titlebar-height', '\(Int((height / webView.pageZoom).rounded()))px');"
-            + "window.verticalsPageZoom = \(webView.pageZoom)"
+            + "window.verticalsPageZoom = \(webView.pageZoom);"
+            + reduceMotionScript
         let scripts = webView.configuration.userContentController
         scripts.removeAllUserScripts()
         scripts.addUserScript(WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -575,6 +577,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let reloadItem = item("Reload", #selector(reload(_:)), "r")
         reloadItem.target = self
         view.addItem(reloadItem)
+        let motionItem = item("Reduce Motion", #selector(toggleReduceMotion(_:)), "")
+        motionItem.target = self
+        view.addItem(motionItem)
         view.addItem(item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         let win = NSMenu(title: "Window")
         win.addItem(item("Minimize", #selector(NSWindow.miniaturize(_:)), "m"))
@@ -585,6 +590,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             main.addItem(top)
         }
         NSApp.mainMenu = main
+    }
+}
+
+// MARK: Reduce Motion (View menu), docs/design/column-bounce.md
+//
+// The checkmark shows macOS's own Reduce motion until the person clicks it; from then on it shows their choice, kept in the
+// app's defaults (`ReduceMotion`). A web view can't be told to change what it reads from macOS, so the app puts its answer
+// on <html> as `data-reduce-motion`, "on" or "off", from the start of every page and now (`syncTitlebar` sends it). With no
+// choice made it puts nothing there and the page asks macOS itself, as a browser does. Everything in the page that obeys
+// `prefers-reduced-motion` obeys the answer: styles through web/vite.config.ts, scripts through web/src/lib/motion.ts.
+extension AppDelegate: NSMenuItemValidation {
+    var reduceMotionChoice: Bool? { UserDefaults.standard.object(forKey: "ReduceMotion") as? Bool }
+    var reduceMotion: Bool { reduceMotionChoice ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    var reduceMotionScript: String {
+        guard let choice = reduceMotionChoice else { return "document.documentElement.removeAttribute('data-reduce-motion');" }
+        return "document.documentElement.setAttribute('data-reduce-motion', '\(choice ? "on" : "off")');"
+    }
+
+    @objc func toggleReduceMotion(_ sender: Any?) {
+        UserDefaults.standard.set(!reduceMotion, forKey: "ReduceMotion")
+        syncTitlebar()
+    }
+
+    // The checkmark is read when the menu opens, so it follows macOS while the person has not chosen.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleReduceMotion(_:)) { item.state = reduceMotion ? .on : .off }
+        return true
     }
 }
 

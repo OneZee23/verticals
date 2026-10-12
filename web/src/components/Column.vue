@@ -16,6 +16,7 @@ import { kindOf, kindTail, pluralOf } from '../lib/columnNames'
 import type { PeriodDirection } from '../lib/periodNavigation'
 import type { GoalCardData, NameForm } from '../types'
 import { filterActive } from '../lib/commandFilter'
+import { reducedMotion } from '../lib/motion'
 
 const props = withDefaults(
   defineProps<{
@@ -254,6 +255,13 @@ watch(
     }
     const version = ++swapVersion
     swapAnimation?.cancel()
+    if (reducedMotion()) {
+      // The new period replaces the old at once. Sliding them past each other is travel, and laying them on one another
+      // to cross-fade doubles every title and date mid-frame (docs/design/column-bounce.md).
+      latest = snapshot('current')
+      slides.value = [latest]
+      return
+    }
     const outgoing: PeriodSlide = { ...latest, id: ++slideId, state: 'outgoing' }
     const incoming = snapshot('incoming')
     latest = { ...incoming, state: 'current' }
@@ -311,6 +319,7 @@ const insertionSlot = computed(() => {
   return dragSlot.value?.insertBeforeId ?? null
 })
 watch(insertionSlot, async () => {
+  if (reducedMotion()) return // the gap simply opens, the goals below stand where they land (docs/design/column-bounce.md)
   const selector = ':scope > [data-role="period-track"] > [data-state]:not([data-state="outgoing"]) [data-goal-id]'
   const before = new Map(
     [...(columnRoot.value?.querySelectorAll<HTMLElement>(selector) ?? [])]
@@ -475,7 +484,11 @@ onBeforeUnmount(() => swapAnimation?.cancel())
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-@media (pointer: fine) {
+/* A column scrolled past its top or bottom bounces back, as everything on a Mac does (docs/design/column-bounce.md; a rule
+   for fine pointers took the bounce away on 4 Oct 2026). `contain` keeps the scroll inside the column and leaves the
+   bounce to the system. With motion reduced, by the system or by the app's Reduce Motion switch, the column stops at its
+   ends; the build copies this block for the switch (vite.config.ts). */
+@media (prefers-reduced-motion: reduce) {
   .period-slide { overscroll-behavior: none; }
 }
 .period-slide::-webkit-scrollbar {

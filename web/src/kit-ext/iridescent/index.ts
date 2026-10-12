@@ -1,4 +1,5 @@
 import './iridescent.css'
+import { reducedMotion } from '../../lib/motion'
 
 type FinishTier = 'webgl' | 'static' | 'flat'
 
@@ -288,9 +289,9 @@ export function mountIridescentOverlay(
 ): () => void {
   activeOverlay?.destroy()
   const observed = new Set<CardEntry>()
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const reduced = reducedMotion()
   const blendMode = supportsBlendMode()
-  let tier: FinishTier = !blendMode || reducedMotion ? (blendMode ? 'static' : 'flat') : 'webgl'
+  let tier: FinishTier = !blendMode || reduced ? (blendMode ? 'static' : 'flat') : 'webgl'
   let glState = tier === 'webgl' ? createGlState(canvas) : null
   if (tier === 'webgl' && !glState) tier = fallbackTier()
   canvas.dataset.tier = tier
