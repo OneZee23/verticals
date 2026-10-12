@@ -131,12 +131,43 @@ def test_start_work_begins_a_session_of_its_own_that_starts_with_the_tasks_link(
     assert len(starts) == 2 and all("--session-id" in args for args in starts)
 
 
+def _claude_starts(desk: "Desktop") -> list[list[str]]:
+    return [args for args in desk.logged("argv.log") if "--append-system-prompt" in args]
+
+
+def test_start_work_runs_in_the_permission_mode_the_chat_is_set_to(ui_agent: UiSession, tmp_path: Path) -> None:
+    desk, page = Desktop(ui_agent, tmp_path), ui_agent.page
+    page.wait_for_selector(f'[data-goal-id="{TASK}"]')
+    page.evaluate("() => localStorage.setItem('vt-chat:agent-prefs', JSON.stringify({ claude: { permission: 'bypassPermissions' } }))")
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{TASK}"]')
+    open_menu(page, TASK)
+    page.locator(f'{MENU} [data-menu-item="start-work"]').click()
+    (start,) = until(page, "the agent's start", lambda: _claude_starts(desk))
+    assert start[start.index("--permission-mode") + 1] == "bypassPermissions"
+
+
+def test_start_work_goes_to_an_agent_that_is_there_when_the_one_the_task_last_worked_with_is_not(ui_agent: UiSession, tmp_path: Path) -> None:
+    """The newest session of the task is Codex's, and there is no Codex on this computer: Claude takes the task, and the task has both."""
+    desk, page = Desktop(ui_agent, tmp_path), ui_agent.page
+    desk.codex_thread(ago=60)
+    desk.link("codex", CODEX_THREAD)
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{TASK}"]')
+    open_menu(page, TASK)
+    page.locator(f'{MENU} [data-menu-item="start-work"]').click()
+    until(page, "the agent's message", lambda: desk.logged("received.log"))
+    found = until(page, "both sessions", lambda: len(desk.sessions()[TASK]["sessions"]) == 2 and desk.sessions()[TASK]["sessions"])
+    assert sorted(s["provider"] for s in found) == ["claude", "codex"]
+
+
 def test_open_in_is_pale_for_a_task_with_no_session(ui_agent: UiSession) -> None:
     page = ui_agent.page
     page.wait_for_selector(f'[data-goal-id="{NO_SESSION}"]')
     open_menu(page, NO_SESSION)
     item = page.locator(f'{MENU} [data-menu-item="open-in"]')
     expect(item).to_be_disabled()
+    expect(item).to_have_attribute("title", "Start work or Discuss begins a session")  # what makes it available
     # The pale of every refused item of the menu (Repeat on a goal with steps): the ink at 35%.
     assert item.evaluate("el => getComputedStyle(el).color") == "rgba(0, 0, 0, 0.35)"
     item.hover(force=True)
@@ -180,6 +211,24 @@ def test_open_in_lists_the_sessions_newest_first_and_opens_each_where_it_lives(u
     assert lines[-1].endswith(f"/fake_agent/claude --resume {CLAUDE_SESSION}")
 
 
+def test_a_long_list_of_sessions_scrolls_inside_the_window_and_its_rows_keep_their_height(ui_agent: UiSession, tmp_path: Path) -> None:
+    desk, page = Desktop(ui_agent, tmp_path), ui_agent.page
+    threads = [f"0198f2c4-7b1e-7a35-b3d2-{n:012d}" for n in range(1, 41)]
+    for n, thread in enumerate(threads):
+        desk.codex_thread(thread, ago=60 * (n + 1))
+        desk.link("codex", thread)
+    page.reload()
+    page.wait_for_selector(f'[data-goal-id="{TASK}"]')
+    open_in(page)
+    items = page.locator(f'{SUBMENU} [data-role="session-item"]')
+    expect(items).to_have_count(40)
+    assert items.nth(0).get_attribute("data-session") == threads[0]  # the newest first
+    box = page.locator(SUBMENU).bounding_box()
+    assert box and box["y"] >= 0 and box["y"] + box["height"] <= page.viewport_size["height"]
+    assert page.locator(SUBMENU).evaluate("el => el.scrollHeight > el.clientHeight")
+    assert {round(items.nth(i).bounding_box()["height"]) for i in (0, 20, 39)} == {32}
+
+
 def test_a_session_row_says_when_it_moved_and_opens_where_it_lives(ui_agent: UiSession, tmp_path: Path) -> None:
     desk, page = Desktop(ui_agent, tmp_path), ui_agent.page
     desk.codex_thread(ago=2 * 86400)
@@ -194,7 +243,8 @@ def test_a_session_row_says_when_it_moved_and_opens_where_it_lives(ui_agent: UiS
     assert [t.strip() for t in agent.all_inner_texts()] == ["Start work", "Open in"]
     page.keyboard.press("Escape")
     expect(page.locator(MENU)).to_have_count(0)
-    (row,) = session_rows(page).all()
+    expect(session_rows(page)).to_have_count(1, timeout=10000)  # the page's first look at the gateway's list
+    row = session_rows(page).first
     expect(row.locator('[data-role="session-when"]')).to_have_text("2 days ago")
     expect(row.locator(".goal-links__title")).to_have_text("Draft the outline")
     open_arrow = row.locator("xpath=following-sibling::button[@data-role='open-session']")
@@ -211,7 +261,8 @@ def test_a_session_that_goes_on_outside_marks_its_row_and_the_card_and_discuss_r
     page.reload()
     page.wait_for_selector(f'[data-goal-id="{TASK}"]')
     open_task(page)
-    (row,) = session_rows(page).all()
+    expect(session_rows(page)).to_have_count(1, timeout=10000)  # the page's first look at the gateway's list
+    row = session_rows(page).first
     expect(row.locator('[data-role="session-when"]')).to_have_text("30 min ago")
     expect(page.locator(MARK)).to_have_count(0)
 

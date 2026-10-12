@@ -7,6 +7,8 @@ are the PR's owner checks."""
 from __future__ import annotations
 
 import json
+import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -86,6 +88,16 @@ def test_codex_is_given_the_relay_the_address_and_the_file_never_the_token(check
     # The name is not the one the app's own Codex keeps for itself (desktop/chat/chat.py refuses a config that uses it).
     chat_source = (REPO_ROOT / "desktop" / "chat" / "chat.py").read_text()
     assert "verticals_desktop" in chat_source and "verticals_desktop" not in checked["codexAdd"]
+
+
+def test_the_bundle_registers_the_verticals_scheme_and_compiles_the_link_file() -> None:
+    """Info.plist is written by desktop/macos/bundle.py: it names the scheme the app opens, and the compile line has AppLinks.swift."""
+    source = (REPO_ROOT / "desktop" / "macos" / "bundle.py").read_text()
+    plist = re.search(r'Info\.plist"\)\.write_text\(f"""(.*?)"""\)', source, re.S)
+    assert plist, "the Info.plist template was not found in bundle.py"
+    info = plistlib.loads(plist.group(1).replace("{VERSION}", "0.0.0").encode())
+    assert info["CFBundleURLTypes"] == [{"CFBundleURLName": "app.verticals.desktop.task", "CFBundleURLSchemes": ["verticals"]}]
+    assert '"AppLinks.swift"' in source
 
 
 class _Mcp(BaseHTTPRequestHandler):
