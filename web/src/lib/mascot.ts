@@ -1,4 +1,4 @@
-// The mascot's life at rest (docs/design-handoff S1.P1): plays when you leave it be, pong when nobody is there, its line
+// The mascot's life at rest (docs/design-handoff S1.P1): plays when you leave it be, a game when nobody is there, its line
 // watching the goal you point at, a jump for a goal just made and a blink for one moved. Every number is a hidden
 // setting (R.073). Nothing here runs with reduced motion (S0.P1.028).
 import { computed, onBeforeUnmount, onMounted, reactive, watch, type Ref } from '../reactivity'
@@ -13,7 +13,9 @@ defineKnobs('The circle', [
   ms('circle.firstPlayMs', 'First play, after you stop acting', 20000, 120000),
   ms('circle.playEveryMinMs', 'Next play, at the soonest', 40000, 180000),
   ms('circle.playEveryMaxMs', 'Next play, at the latest', 90000, 300000),
-  ms('circle.pongAfterMs', 'Pong, after no input at all', 15000, 300000),
+  ms('circle.gameAfterMs', 'A game, after no input at all', 15000, 300000),
+  { key: 'circle.snakeStepMs', label: 'Snake: one step', value: 150, min: 40, max: 600, step: 10, unit: 'ms' },
+  { key: 'circle.ballSpeed', label: 'Pong and arkanoid: the ball\'s speed', value: 80, min: 20, max: 300, step: 5, unit: 'px/s' },
   ms('circle.lookRestMs', 'Look at a goal after resting on it', 100, 1000),
   ms('circle.lookBackMs', 'Look ahead again after leaving the goals', 1200, 5000),
   ms('circle.newLookMs', 'Look at a new goal for', 1500, 5000),
@@ -59,8 +61,12 @@ export class Mover {
   stop(): void { this.anim?.cancel(); this.anim = null; this.el.style.transform = transformOf(this.pose) }
 }
 
-/** Pong's second line and ball show while this is on; the field widens into an oval for it. */
-export const mascot = reactive({ pong: false })
+export type MascotGame = 'snake' | 'pong' | 'breakout'
+const GAMES: MascotGame[] = ['snake', 'pong', 'breakout']
+
+/** The game being played (components/CircleGame.tsx); the field widens into an oval for it. */
+export const mascot = reactive({ game: null as MascotGame | null })
+let lastGame: MascotGame | null = null
 
 const wait = (duration: number, signal: { stopped: boolean }) =>
   new Promise<boolean>((resolve) => setTimeout(() => resolve(!signal.stopped), duration))
@@ -85,7 +91,7 @@ export function useMascot(parts: Parts, mayLook: () => boolean) {
   let lookingAt: string | null = null
   let ticker: ReturnType<typeof setInterval> | null = null
 
-  // The mascot plays, looks and pongs only while nobody points at the circle: under the pointer its line stands upright and
+  // The mascot plays, looks and plays a game only while nobody points at the circle: under the pointer its line stands upright and
   // still (docs/design/field-hover.md).
   const resting = computed(() => circleState.value === 'rest' && !circle.pointed && !store.state.drag.id
     && !store.state.drag.pending && !store.state.openGoalId && !circle.moving)
@@ -95,20 +101,20 @@ export function useMascot(parts: Parts, mayLook: () => boolean) {
     if (play) play.stopped = true
     play = null
   }
-  function stopPong(): void {
-    if (!mascot.pong) return
-    mascot.pong = false
+  function stopGame(): void {
+    if (!mascot.game) return
+    mascot.game = null
     line?.set({ x: 0, y: 0 })
   }
   function acted(): void {
     lastAct = lastInput = performance.now()
     nextPlay = knob('circle.firstPlayMs')
     stopPlay()
-    stopPong()
+    stopGame()
   }
   function moved(): void {
     lastInput = performance.now()
-    stopPong()
+    stopGame()
   }
 
   async function runPlay(): Promise<void> {
@@ -130,19 +136,23 @@ export function useMascot(parts: Parts, mayLook: () => boolean) {
     if (play === signal) play = null
   }
 
+  // A game counts the time without input whether or not the window is in front; the plays wait for it. One of the three,
+  // never the one just played.
   function tick(): void {
-    if (!resting.value || !inFront() || reducedMotion()) {
-      if (!resting.value) stopPong()
+    if (!resting.value || reducedMotion()) {
+      if (!resting.value) stopGame()
       return
     }
     const now = performance.now()
-    if (!mascot.pong && now - lastInput > knob('circle.pongAfterMs')) {
+    if (!mascot.game && now - lastInput > knob('circle.gameAfterMs')) {
       stopPlay()
       line?.set({ x: 0, y: 0, r: 0 })
-      mascot.pong = true
+      const choices = GAMES.filter((game) => game !== lastGame)
+      mascot.game = lastGame = choices[Math.floor(Math.random() * choices.length)]!
       return
     }
-    if (!mascot.pong && !play && !lookingAt && now - lastAct > nextPlay) {
+    if (!inFront()) return
+    if (!mascot.game && !play && !lookingAt && now - lastAct > nextPlay) {
       nextPlay = now - lastAct + between(knob('circle.playEveryMinMs'), knob('circle.playEveryMaxMs'))
       void runPlay()
     }
@@ -168,7 +178,7 @@ export function useMascot(parts: Parts, mayLook: () => boolean) {
   }
   function lookAhead(duration = 420): void {
     lookingAt = null
-    if (line && resting.value && !mascot.pong) void line.to({ x: 0, y: 0, r: 0 }, duration, curve('play'))
+    if (line && resting.value && !mascot.game) void line.to({ x: 0, y: 0, r: 0 }, duration, curve('play'))
   }
 
   watch(() => store.state.hoverChainId, (id) => {
@@ -181,7 +191,7 @@ export function useMascot(parts: Parts, mayLook: () => boolean) {
 
   watch(resting, (now) => {
     if (now) { lookingAt = null; line?.set({ x: 0, y: 0, r: 0, sy: 1 }) }
-    else { stopPlay(); stopPong(); if (lookTimer) clearTimeout(lookTimer) }
+    else { stopPlay(); stopGame(); if (lookTimer) clearTimeout(lookTimer) }
   })
 
   watch(() => circleNews.made, async (news) => {
