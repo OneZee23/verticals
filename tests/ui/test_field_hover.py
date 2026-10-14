@@ -14,7 +14,7 @@ from tests.ui.test_agent_conversation import ui_agent  # noqa: F401  (the fixtur
 from tests.ui.views import CIRCLE, FIELD, switch_view
 
 ROOT = ".circle-field"
-LINE = ".circle-field__line:not(.circle-field__line--second)"
+LINE = ".circle-field__line"
 GOAL_ROW = '[data-goal-id="SYNDAY01"] > .goal-card__row'
 IDENTITY = ("none", "matrix(1, 0, 0, 1, 0, 0)")
 
