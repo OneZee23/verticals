@@ -41,6 +41,7 @@ import { nextTick, onMounted, onUnmounted, ref } from './reactivity'
 import { cx } from './bind'
 import { tracked } from './tracked'
 import { useSetup } from './setup'
+import { CardDnd } from './components/CardDnd'
 import './app.css'
 
 export const App = tracked(function App() {
@@ -51,18 +52,6 @@ export const App = tracked(function App() {
     const devPanelsVisible = ref(false)
     const searchBar = ref<SearchBarApi | null>(null)
 
-    function onWindowPointerMove(event: PointerEvent) {
-      store.pointerMoveDrag(event.clientX, event.clientY, event.altKey)
-      if (store.state.drag.id) event.preventDefault()
-    }
-    function onWindowPointerUp(event: PointerEvent) {
-      // The release position, not the last processed move: the browser coalesces moves under load.
-      if (store.state.drag.id) store.pointerMoveDrag(event.clientX, event.clientY)
-      store.pointerUpDrag()
-    }
-    function onWindowPointerCancel() {
-      store.pointerUpDrag(true)
-    }
     function onWindowKeyDown(event: KeyboardEvent) {
       const target = event.target instanceof HTMLElement ? event.target : null
       const editing = target?.closest('input, textarea, select, [contenteditable="true"]') !== null
@@ -80,9 +69,7 @@ export const App = tracked(function App() {
       if (event.key === 'Alt' && (store.state.drag.pending || store.state.drag.id)) {
         store.setDragCombineMode(true)
         event.preventDefault()
-        return
       }
-      if (event.key === 'Escape' && (store.state.drag.pending || store.state.drag.id)) store.pointerUpDrag(true)
     }
     function onWindowKeyUp(event: KeyboardEvent) {
       if (event.key === 'Alt' && (store.state.drag.pending || store.state.drag.id)) {
@@ -94,9 +81,6 @@ export const App = tracked(function App() {
       stopDayRollover = store.startDayRollover()
       stopLiveBoard = store.startLiveBoard()
       stopHistoryKeys = startHistoryKeys()
-      window.addEventListener('pointermove', onWindowPointerMove)
-      window.addEventListener('pointerup', onWindowPointerUp)
-      window.addEventListener('pointercancel', onWindowPointerCancel)
       window.addEventListener('keydown', onWindowKeyDown)
       window.addEventListener('keyup', onWindowKeyUp)
     })
@@ -107,9 +91,6 @@ export const App = tracked(function App() {
       stopLiveBoard = null
       stopHistoryKeys?.()
       stopHistoryKeys = null
-      window.removeEventListener('pointermove', onWindowPointerMove)
-      window.removeEventListener('pointerup', onWindowPointerUp)
-      window.removeEventListener('pointercancel', onWindowPointerCancel)
       window.removeEventListener('keydown', onWindowKeyDown)
       window.removeEventListener('keyup', onWindowKeyUp)
     })
@@ -250,7 +231,7 @@ export const App = tracked(function App() {
   const windowOpen = windows.list.length > 0
   const detail = store.state.goalDetail
   return (
-    <>
+    <CardDnd>
       <div className="app-shell">
         {store.state.activeView === 'verticals' && store.state.openGoalVertical !== 'search' && !unfocused
           ? <div className="board-top-fade" aria-hidden="true"></div> : null}
@@ -287,6 +268,6 @@ export const App = tracked(function App() {
           <DevZoomPanel />
         </>
       ) : null}
-    </>
+    </CardDnd>
   )
 })

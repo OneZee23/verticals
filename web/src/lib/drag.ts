@@ -14,23 +14,13 @@ import { idsInColumn, resolveReorderSlot, slotBesideCard, sourceSlot } from './d
 import type { BoardResponse } from './api'
 import { destinationRect, SETTLE_GRACE_MS, settleDuration } from './dragSettle'
 
-/** P-02/M1: desktop stays a click through exactly 5 CSS px and arms strictly beyond it. */
+/** P-02/M1: desktop stays a click through exactly 5 CSS px and arms strictly beyond it (lib/dndSensor.ts). */
 export const DRAG_THRESHOLD_PX = 5
 export const DESKTOP_HOLD_MS = 200
-export const DESKTOP_HOLD_TOLERANCE_PX = 10
 export const TOUCH_HOLD_MS = 250
 export const TOUCH_HOLD_TOLERANCE_PX = 5
 
-export const AUTOSCROLL_TICK_MS = 10
-export const AUTOSCROLL_EDGE_RATIO = 0.2
-export const AUTOSCROLL_CROSS_AXIS_PX = 10
-export const AUTOSCROLL_MAX_PX = 25
-
 export { SETTLE_EASING, settleDuration } from './dragSettle'
-
-export function exceedsThreshold(dx: number, dy: number): boolean {
-  return Math.hypot(dx, dy) > DRAG_THRESHOLD_PX
-}
 
 /** `store.ts`'s own `state.drag` field shape (kept here so its per-field rationale sits beside
  *  the geometry it feeds). `pending` is set on `pointerdown`, before the threshold is crossed —
@@ -94,7 +84,6 @@ export interface DragState {
     | null
 }
 
-let holdTimer: number | null = null
 let settleTimer: number | null = null
 let lastPointerHit: PointerHit | null = null
 const rowRects = new Map<string, DOMRect>()
@@ -120,11 +109,6 @@ function clearTimer(timer: number | null): void {
   if (timer !== null) window.clearTimeout(timer)
 }
 
-function clearPendingTimer(): void {
-  clearTimer(holdTimer)
-  holdTimer = null
-}
-
 function applyTarget(drag: DragState, target: DropTarget): void {
   drag.target = target
   if (target?.kind !== 'combine') drag.slot = target
@@ -147,14 +131,14 @@ function retarget(drag: DragState, board: BoardResponse | null, hit: PointerHit)
   applyTarget(drag, computeDropTarget(board, drag.id, drag.y, hit, drag.combineMode, drag.slot, leadingEdgeY(drag)))
 }
 
-function activateDrag(drag: DragState, board: BoardResponse | null): void {
+/** The press becomes a drag (the sensor's activation): the goal is in the hand and aims at once. */
+export function activateDrag(drag: DragState, board: BoardResponse | null): void {
   if (!drag.pending || drag.id) return
   drag.id = drag.pending.id
   lastPointerHit = hitAt(drag)
   retarget(drag, board, lastPointerHit)
   ;(document.activeElement as HTMLElement | null)?.blur()
   window.getSelection()?.removeAllRanges()
-  clearPendingTimer()
 }
 
 /** `pointerdown` on a card row, before any threshold check — `store.ts::pointerDownCard`'s whole
@@ -173,7 +157,6 @@ export function armPointerDown(
   pointerType: string,
   altKey = false,
 ): void {
-  clearPendingTimer()
   clearTimer(settleTimer)
   settleTimer = null
   lastPointerHit = null
@@ -218,21 +201,12 @@ export function armPointerDown(
   drag.sourcePeriodKey = source?.vertical ? source.period_key : null
   drag.combineMode = altKey
   captureRowRects()
-  const delay = input === 'touch' ? TOUCH_HOLD_MS : DESKTOP_HOLD_MS
-  holdTimer = window.setTimeout(() => {
-    const pending = drag.pending
-    if (!pending) return
-    const tolerance = input === 'touch' ? TOUCH_HOLD_TOLERANCE_PX : DESKTOP_HOLD_TOLERANCE_PX
-    if (Math.hypot(drag.x - pending.x, drag.y - pending.y) <= tolerance) activateDrag(drag, board)
-  }, delay)
 }
 
-/** Window-level `pointermove` — `store.ts::pointerMoveDrag`'s whole body. Arms past the 5px
- *  threshold (an unarmed `pending` is left alone so a plain click's `click` event still fires
- *  normally), then keeps `drag.x/y` and `drag.target` live via `hitTest` + `computeDropTarget`.
- *  Returns the same `PointerHit` it just fed `computeDropTarget`, or `null` while unarmed — D246/
- *  D247's dwell/spring timers (`lib/dragHover.ts`) read column/card identity off this return value
- *  rather than re-running `elementFromPoint` a second time per move. */
+/** The pointer moved — `store.ts::pointerMoveDrag`'s whole body. Before the sensor arms the drag it only follows the
+ *  pointer; once armed it keeps `drag.x/y` and `drag.target` live via `hitTest` + `computeDropTarget`. Returns the same
+ *  `PointerHit` it just fed `computeDropTarget`, or `null` while unarmed — the hold timer (`lib/dragHover.ts`) reads
+ *  column/card identity off it rather than running `elementFromPoint` a second time per move. */
 export function trackPointerMove(
   drag: DragState,
   board: BoardResponse | null,
@@ -244,22 +218,6 @@ export function trackPointerMove(
   drag.x = clientX
   drag.y = clientY
   drag.combineMode = altKey
-  if (!drag.id) {
-    if (!drag.pending) return null
-    const dx = clientX - drag.pending.x
-    const dy = clientY - drag.pending.y
-    if (drag.pending.pointerType === 'touch') {
-      if (Math.hypot(dx, dy) > TOUCH_HOLD_TOLERANCE_PX) {
-        drag.pending = null
-        clearPendingTimer()
-        lastPointerHit = null
-        rowRects.clear()
-      }
-      return null
-    }
-    if (!exceedsThreshold(dx, dy)) return null
-    activateDrag(drag, board)
-  }
   if (!drag.id) return null
   lastPointerHit = hitAt(drag)
   retarget(drag, board, lastPointerHit)
@@ -282,75 +240,11 @@ export function setCombineMode(
   }
 }
 
-function scrollSpeed(pointer: number, start: number, size: number, maxZone = Infinity): number {
-  const zone = Math.min(size * AUTOSCROLL_EDGE_RATIO, maxZone)
-  if (pointer >= start && pointer < start + zone) {
-    return -AUTOSCROLL_MAX_PX * ((start + zone - pointer) / zone)
-  }
-  const end = start + size
-  if (pointer <= end && pointer > end - zone) {
-    return AUTOSCROLL_MAX_PX * ((pointer - (end - zone)) / zone)
-  }
-  return 0
-}
-
-/** P-02/M4: scroll every board ancestor whose axis edge contains the live pointer. */
-export function autoScrollAtPointer(drag: DragState): boolean {
-  if (!drag.id) return false
-  let moved = false
-  const candidates = document.querySelectorAll<HTMLElement>(
-    '.pattern-vertical-board, .pattern-vertical-board__column',
-  )
-  for (const el of candidates) {
-    const rect = el.getBoundingClientRect()
-    const canX = el.scrollWidth > el.clientWidth
-    const canY = el.scrollHeight > el.clientHeight
-    const inHorizontalCrossAxis = drag.y >= rect.top - AUTOSCROLL_CROSS_AXIS_PX
-      && drag.y <= rect.bottom + AUTOSCROLL_CROSS_AXIS_PX
-    const inVerticalCrossAxis = drag.x >= rect.left - AUTOSCROLL_CROSS_AXIS_PX
-      && drag.x <= rect.right + AUTOSCROLL_CROSS_AXIS_PX
-    // Our 1200px viewport has one 400px active column plus 225px standard columns. An uncapped
-    // 20% horizontal zone is 240px and therefore reaches 15px into the next complete column;
-    // the incumbent's 1130px viewport makes the same 20% zone one standard column wide. Keep
-    // M10's 20% law, but clamp this cross-column expansion to one rendered column so hovering
-    // the recorded adjacent slot does not start unrelated horizontal movement.
-    const columnWidths = el.matches('.pattern-vertical-board')
-      ? [...el.querySelectorAll<HTMLElement>(':scope > .pattern-vertical-board__column')]
-          .map((column) => column.getBoundingClientRect().width)
-          .filter((width) => width > 0)
-      : []
-    const horizontalZoneMax = columnWidths.length ? Math.min(...columnWidths) : Infinity
-    const dx = canX && inHorizontalCrossAxis
-      ? scrollSpeed(drag.x, rect.left, rect.width, horizontalZoneMax)
-      : 0
-    const dy = canY && inVerticalCrossAxis ? scrollSpeed(drag.y, rect.top, rect.height) : 0
-    if (dx !== 0 || dy !== 0) {
-      const oldLeft = el.scrollLeft
-      const oldTop = el.scrollTop
-      el.scrollBy(dx, dy)
-      const movedX = el.scrollLeft - oldLeft
-      const movedY = el.scrollTop - oldTop
-      moved ||= movedX !== 0 || movedY !== 0
-      if (movedX !== 0 || movedY !== 0) {
-        for (const card of el.querySelectorAll<HTMLElement>('[data-goal-id]')) {
-          const id = card.dataset.goalId
-          const rect = id ? rowRects.get(id) : null
-          if (id && rect) {
-            rowRects.set(id, new DOMRect(rect.x - movedX, rect.y - movedY, rect.width, rect.height))
-          }
-        }
-      }
-    }
-  }
-  return moved
-}
-
 /** Clear input state, animate overlay to drop/cancel destination, then keep 50 ms cleanup grace. */
 export function releasePointerDrag(
   drag: DragState,
   cancelled = false,
 ): { id: string; target: DropTarget } | null {
-  clearPendingTimer()
   lastPointerHit = null
   const id = drag.id
   const target = cancelled ? null : drag.target
@@ -602,7 +496,9 @@ function intoGoal(
   if (!source || !goal || !rect || goal.id === sourceId || goal.id === source.parent_id) return null
   const siblings = source.parent_id !== null && source.parent_id === goal.parent_id
   const band = whole ? 0 : siblings ? 0.375 : 0.25
-  return y >= rect.top + rect.height * band && y <= rect.bottom - rect.height * band ? goal.id : null
+  // From the band's top up to, not onto, its bottom: an edge right on the bottom is in the gap below the row, so a gap of a
+  // few px between subtasks stays a slot.
+  return y >= rect.top + rect.height * band && y < rect.bottom - rect.height * band ? goal.id : null
 }
 
 /** The ordered slot a CROSS-column drop asks for, in the destination column's own vocabulary.

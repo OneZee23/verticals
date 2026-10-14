@@ -18,8 +18,8 @@ import {
   type UpdatePatch,
 } from './api'
 import {
+  activateDrag,
   armPointerDown,
-  autoScrollAtPointer,
   recaptureRowRects,
   releasePointerDrag,
   reorderWrite,
@@ -125,9 +125,8 @@ export function createDragActions(deps: DragActionDeps) {
     },
   })
 
-  // Pointer drag, not HTML5 `draggable` (`docs/DEPENDENCIES.md` dep cap; `docs/PLANNER_DND.md`
-  // §0). `Board.tsx` owns the window listener/timer lifecycle; these wrappers keep its mutations
-  // in the one state tree.
+  // The gesture is dnd-kit's (components/CardDnd.tsx): a press, its moves, the arming, the release; these wrappers keep
+  // what they change in the one state tree.
   function pointerDownCard(
     id: string,
     clientX: number,
@@ -138,6 +137,14 @@ export function createDragActions(deps: DragActionDeps) {
   ): void {
     dragHover.reset() // no leaks across repeated gestures (a stray earlier release/cancel path)
     armPointerDown(state.drag, state.board, id, clientX, clientY, rect, pointerType, altKey)
+  }
+  /** The sensor armed the press: the goal is in the hand and aims where the pointer is. */
+  function armDrag(): void {
+    activateDrag(state.drag, state.board)
+    if (!state.drag.id) return
+    const target = state.drag.target
+    dragHover.onMove(state.drag.x, state.drag.y, target?.kind === 'combine' ? target.targetId : null)
+    deps.onMove?.(state.drag.x, state.drag.y)
   }
   function pointerMoveDrag(clientX: number, clientY: number, altKey = state.drag.combineMode): void {
     const hit = trackPointerMove(state.drag, state.board, clientX, clientY, altKey)
@@ -161,13 +168,6 @@ export function createDragActions(deps: DragActionDeps) {
   }
   function setDragCombineMode(enabled: boolean): void {
     setCombineMode(state.drag, state.board, enabled)
-  }
-  function autoScrollDrag(): void {
-    if (autoScrollAtPointer(state.drag)) {
-      const hit = trackPointerMove(state.drag, state.board, state.drag.x, state.drag.y)
-      const target = state.drag.target
-      if (hit) dragHover.onMove(state.drag.x, state.drag.y, target?.kind === 'combine' ? target.targetId : null)
-    }
   }
 
   /** The colour the goal would take where `pointerUpDrag` hangs it, undefined while it would keep its parent. */
@@ -418,10 +418,10 @@ export function createDragActions(deps: DragActionDeps) {
 
   return {
     pointerDownCard,
+    armDrag,
     pointerMoveDrag,
     setDragPreviewSize,
     setDragCombineMode,
-    autoScrollDrag,
     pointerUpDrag,
     colorAfterDrop,
   }
