@@ -9,11 +9,13 @@
   overflow: hidden;
   pointer-events: none;
   user-select: none;
-  filter: blur(var(--r));
+  background: var(--vt-window-bg, #fff);
   will-change: opacity;
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--a) * 100%), #000 calc(var(--b) * 100%));
   mask-image: linear-gradient(to bottom, transparent calc(var(--a) * 100%), #000 calc(var(--b) * 100%));
 }
+/* Blurred inside the copy's frame, so its edges soften into the window's colour, not into the sharp window. */
+.pblur__lens { height: 100%; overflow: hidden; filter: blur(var(--r)); }
 .pblur__copy--side {
   --r: var(--vt-blur-4);
   -webkit-mask-image: linear-gradient(to bottom, transparent var(--pblur-head), #000 calc(var(--pblur-head) + 12px));
