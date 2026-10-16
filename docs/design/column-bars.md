@@ -1,6 +1,6 @@
 # The period bars, | ||| |, on a line pinned at the column's top
 
-Verticals pages a column with vertical bars, its own sign, in place of ← • →. The middle bar opens the column's spans mode, the same one a dragged task opens when it rests on the column's corner; on a column paged away from today it first brings the board back to today.
+Vertical pages a column with vertical bars, its own sign, in place of ← • →. The middle bar opens the column's spans mode, the same one a dragged task opens when it rests on the column's corner; on a column paged away from today it first brings the board back to today.
 
 ## Behaviour
 

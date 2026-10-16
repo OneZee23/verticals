@@ -1,4 +1,4 @@
-# Verticals ladder
+# Vertical ladder
 
 Classify a card by the commitment it makes, not by how long it may take.
 

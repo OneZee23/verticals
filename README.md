@@ -1,7 +1,24 @@
-# Verticals
+# Vertical
 
-Verticals goal board: React UI, Python API/MCP and PostgreSQL 16.
-Open source under the GNU Affero General Public License v3.0, see [License](#license).
+![Vertical: one board for today, the week, the year and a whole life, with Claude and Codex working from it](docs/media/vertical-reel.avif)
+
+One board from today to your whole life, and the agents that work from it: an open-source
+agentic development environment and a life planner in one.
+
+Life is about to be built around agents, yet a life has no single place to build around, so
+agents stay in the same scattered apps as everything else. Vertical gives it one. Day, Week,
+Month, Quarter, Year, three years and Life stand side by side as columns. Claude or Codex read
+the board, write your morning report from your sources, keep your documents and move goals with you.
+
+## An experiment, in the open
+
+Agents write almost all of the code; two of us hold the bar and aim for an Apple Design Award.
+Most of what you see we still don't like, so tell us what you hate. For now, expect things to break.
+
+It runs on your Mac and keeps your data there. You need Claude Code or Codex, signed in.
+The app is in [Releases](https://github.com/konstantinopolskii/verticals/releases); it still
+carries its old name, Verticals. Open source under the GNU Affero General Public License v3.0,
+see [License](#license).
 
 ## Native local startup
 
@@ -52,7 +69,7 @@ and optional cadence in the owner's local workspace instructions; see its
 ## Verification
 
 Run `npm --prefix web run typecheck` and `npm --prefix web run build`.
-Browser smoke: create/complete a task, reload, navigate Inbox/Verticals, stop/restart,
+Browser smoke: create/complete a task, reload, move between the Inbox and the board, stop/restart,
 verify persistence. Database regression suites use the separate test database:
 `make db-up` (optional Docker), then `make test-core`, `make test-http`, `make test-mcp`
 or `make test-ui`. Never point those tests at personal data.
@@ -61,9 +78,24 @@ Historical document gates and reference screenshots are excluded for privacy.
 The full `make test` catalogue is not certified here: inherited document and visual
 tests need sanitized fixtures first.
 
+## Credits
+
+Made by
+
+- Konstantin Konstantinopolskii, KK: [t.me/superufastar](https://t.me/superufastar)
+- Kirill B.: [t.me/chtovyhodit](https://t.me/chtovyhodit)
+
+Thanks to
+
+- [Timestripe](https://timestripe.com), for the idea of a life laid out on its horizons, from a day
+  to all time. We used it hard; Vertical stands those horizons up as columns and points them at agents.
+- Mo, the founder of [Enjoy](https://enjoy.dev), whose product gave us ideas.
+- [Anthropic](https://www.anthropic.com), for Claude and Claude Code. Claude co-wrote 265 of the
+  first 372 commits here.
+
 ## License
 
-Verticals is licensed under the GNU Affero General Public License v3.0, see `LICENSE`.
+Vertical is licensed under the GNU Affero General Public License v3.0, see `LICENSE`.
 The package vendored in `web/vendor/` (`@konstantinopolskii/design-system`, version 2.1.1) is under the
 same license.
 Three parts keep their own terms:

@@ -1,11 +1,11 @@
 ---
 name: verticals-operator
-description: Read and mutate a Verticals board safely through its MCP tools. Use for board inventory, goal lookup, create/update/schedule/reparent/delete operations, evidence receipts, documents, comments, tags, sizing, carry-over handling, and post-write verification. Discover the live tool catalog, keep writes idempotent, preserve manual edits, and verify the rendered and raw state after every mutation.
+description: Read and mutate a Vertical board safely through its MCP tools. Use for board inventory, goal lookup, create/update/schedule/reparent/delete operations, evidence receipts, documents, comments, tags, sizing, carry-over handling, and post-write verification. Discover the live tool catalog, keep writes idempotent, preserve manual edits, and verify the rendered and raw state after every mutation.
 ---
 
-# Verticals Operator
+# Vertical Operator
 
-Use the configured Verticals MCP connection. Never print, copy, or store its bearer token in a command, document, card, tag, or log.
+Use the configured Vertical MCP connection. Never print, copy, or store its bearer token in a command, document, card, tag, or log.
 
 Read [mcp-operations.md](references/mcp-operations.md) before writing. Read [evidence.md](references/evidence.md) when evidence tools are available.
 
