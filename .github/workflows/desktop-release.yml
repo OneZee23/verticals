@@ -10,9 +10,11 @@ name: desktop release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Version, e.g. 0.4. Empty bumps the last number of the latest release.
-        required: false
+      bump:
+        description: "What goes up in the latest release's version: patch 0.5 → 0.5.1, minor → 0.6.0, major → 1.0.0"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: write
@@ -31,14 +33,16 @@ jobs:
 
       - name: Version
         env:
-          REQUESTED: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
         run: |
-          version="${REQUESTED#v}"
-          if [ -z "$version" ]; then
-            last=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo v0.2)
-            last="${last#v}"
-            version="${last%.*}.$(( ${last##*.} + 1 ))"
-          fi
+          last=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo v0.2)
+          IFS=. read -r major minor patch _ <<< "${last#v}"
+          minor=${minor:-0} patch=${patch:-0}
+          case "$BUMP" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="$major.$((minor + 1)).0" ;;
+            *) version="$major.$minor.$((patch + 1))" ;;
+          esac
           [[ "$version" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "::error::Not a version: $version"; exit 1; }
           if gh release list --limit 100 --json tagName --jq '.[].tagName' | grep -qx "v$version"; then
             echo "::error::v$version exists already, published or as a draft"; exit 1
