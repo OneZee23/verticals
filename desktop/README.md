@@ -131,8 +131,8 @@ quarantine (the app is ad-hoc signed, not notarized):
 ## Releases and updates
 
 A release is started by hand: Actions → desktop release → Run workflow (or
-`gh workflow run desktop-release.yml -f version=0.4`). An empty version bumps the last number of the
-latest release. `.github/workflows/desktop-release.yml` builds the UI and the app on a macOS runner
+`gh workflow run desktop-release.yml -f bump=minor`). The version is the latest release's with one part
+up: patch (the default) 0.5 → 0.5.1, minor 0.5 → 0.6.0, major 0.5 → 1.0.0. `.github/workflows/desktop-release.yml` builds the UI and the app on a macOS runner
 and leaves a draft release `v<version>` on the chosen commit with `Verticals.zip`,
 `Verticals-lite.zip`, `release.json` (`min_macos` and the runtime's fingerprint) and `Verticals.dmg`.
 Apps see the release only once it is published, so the last step is on GitHub: edit the draft's
