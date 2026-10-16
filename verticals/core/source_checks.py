@@ -13,8 +13,10 @@ JSON because it is the plainest block to read, write and check. The app's editor
 it and writes it back exactly as it was (`web/src/lib/bodyMarkdown.ts`), so a save of the words around it never changes
 the check or its hash. The block is the only copy of the check; the table beside it keeps answers, never a second check.
 
-Five kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns`. A sixth, `connections`, is written only by the app.
-Any of the five may also say `reads`: the tools of the owner's other MCP servers that read this source for the morning report,
+Six kinds are the agent's: `http`, `mcp`, `cmd`, `file`, `dns` and `servers`. A seventh, `connections`, is written only
+by the app. `servers` is for a source the morning report reads through Claude Code's own servers (a claude.ai connector, a
+plugin): their sign-in is Claude Code's, so the app asks Claude Code whether they answer instead of calling them itself.
+Any of the six may also say `reads`: the tools of the owner's other MCP servers that read this source for the morning report,
 each as Claude Code names it (`mcp__chat__list_messages`). They sit in the block so the one Approve covers them: the hash
 below changes with them, and the morning turn calls a source's tools only while that hash is the approved one.
 Unknown fields are refused, so a typo cannot quietly drop a limit. Every kind the agent writes is gated: each reaches
@@ -31,7 +33,7 @@ import json
 import math
 import re
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -39,13 +41,13 @@ from urllib.parse import urlsplit
 from verticals.core.errors import ValidationError
 
 PREFIX = "sources/"
-KINDS = ("http", "mcp", "cmd", "file", "dns")
+KINDS = ("http", "mcp", "cmd", "file", "dns", "servers")
 APP_KINDS = ("connections",)
 # Every check the agent writes reaches something, even a name lookup (the name it is given goes to a resolver), so each runs
 # only once the owner has approved the exact check (its hash). Only the app's own `connections` check runs without approval.
 GATED = frozenset(KINDS)
 # The kinds that read this Mac itself, so they always run here.
-ON_THIS_MAC = frozenset({"cmd", "file"})
+ON_THIS_MAC = frozenset({"cmd", "file", "servers"})
 WHERES = ("here", "anywhere")
 
 # The reading verbs the tool of an `mcp` check may start with, plus the words a health tool uses. The app calls that one
@@ -80,15 +82,18 @@ _FIELDS: dict[str, tuple[str, ...]] = {
     "cmd": ("argv", "exit", "parse", "min", "max", "say", "timeout", "reads"),
     "file": ("path", "max_age_hours", "last_line", "reads"),
     "dns": ("host", "reads"),
+    "servers": ("reads",),
     "connections": (),
 }
-_REQUIRED = {"http": ("url",), "mcp": ("url", "tool"), "cmd": ("argv",), "file": ("path",), "dns": ("host",), "connections": ()}
+_REQUIRED = {"http": ("url",), "mcp": ("url", "tool"), "cmd": ("argv",), "file": ("path",), "dns": ("host",),
+             "servers": ("reads",), "connections": ()}
 _DEFAULTS: dict[str, dict[str, Any]] = {
     "http": {"status": 200, "timeout": 10},
     "mcp": {"args": {}, "timeout": 15},
     "cmd": {"exit": 0, "timeout": 20},
     "file": {},
     "dns": {},
+    "servers": {},
     "connections": {},
 }
 _MAX_TIMEOUT = {"http": 30, "mcp": 30, "cmd": 60}
@@ -139,6 +144,11 @@ def reading_tools(raw: object) -> list[str]:
         if tool not in tools:
             tools.append(tool)
     return tools
+
+
+def reading_servers(tools: Iterable[str]) -> frozenset[str]:
+    """The servers a list of `mcp__<server>__<tool>` names reaches, each written as in those names."""
+    return frozenset(found.group(1) for tool in tools if (found := _TOOL_RE.match(tool)))
 
 
 def is_source_path(path: str) -> bool:
@@ -386,7 +396,10 @@ class Check:
             return f"Reads {f['path']} on this Mac every hour" + (f" and wants {wanted}" if wants else " and wants it to exist") + "."
         if self.kind == "dns":
             return f"Looks up {f['host']} every hour and wants it to resolve."
-        return "Asks Claude Code every hour which of its MCP servers answer."
+        if self.kind == "servers":
+            names = sorted(reading_servers(f["reads"]))
+            return f"Asks Claude Code every hour whether {_and(names)} {'answers' if len(names) == 1 else 'answer'}."
+        return "Asks Claude Code every hour which of the MCP servers the morning report reads answer."
 
 
 def _and(items: Sequence[str]) -> str:

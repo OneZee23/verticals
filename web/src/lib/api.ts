@@ -705,7 +705,7 @@ export interface SourceView {
   id: string
   path: string
   title: string | null
-  /** http, mcp, cmd, file, dns, or `connections` (the app's own check of the agent's servers); null with no check. */
+  /** http, mcp, cmd, file, dns, servers, or `connections` (the app's own check of the servers the report reads); null with no check. */
   kind: string | null
   where: 'here' | 'anywhere' | null
   status: 'ok' | 'red' | 'grey'

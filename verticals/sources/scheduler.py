@@ -31,6 +31,7 @@ from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
+from verticals.core import source_checks as sc
 from verticals.core import sources as core
 from verticals.sources import runner
 
@@ -71,6 +72,9 @@ def run_due(
         if "claude" in connections and runner.find_exe("claude", home=home, path=path or environ.get("PATH")):
             core.ensure_connections(conn, owner=owner)
         found = core.sources(conn, owner=owner)
+    # The servers the morning report may call: the `reads` of every check the owner approved, as the morning turn takes them.
+    read = sc.reading_servers(tool for s in found if s.check and s.approved for tool in s.check.fields.get("reads", ()))
+    listed: dict = {}
     ran: list[Ran] = []
     for source in found:
         if stop.is_set():
@@ -83,7 +87,8 @@ def run_due(
         with pool.connection() as conn:
             if not core.claim(conn, owner=owner, source=source, now=clock()):
                 continue  # another pass has it
-        result = runner.run_check(check, stop=stop, home=home, environ=environ, connections=connections, path=path)
+        result = runner.run_check(check, stop=stop, home=home, environ=environ, connections=connections, path=path,
+                                  servers=read, listed=listed)
         if result is None:
             break  # the app is closing: an unfinished check is no answer
         with pool.connection() as conn:
