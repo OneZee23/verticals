@@ -12,7 +12,7 @@ import stat
 import subprocess
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -437,3 +437,62 @@ def test_a_cli_that_does_not_come_back_is_given_up_on(home: Path, tmp_path: Path
     started = time.monotonic()
     assert _ask(home, slow, stop=stop) is None
     assert time.monotonic() - started < 3
+
+
+def _counted_claude(directory: Path, output: str) -> tuple[str, Callable[[], int]]:
+    """A fake `claude` that notes every run, and how many runs there were."""
+    directory.mkdir(parents=True, exist_ok=True)
+    runs = directory / "runs"
+    script = directory / "claude"
+    script.write_text(f"#!/bin/sh\necho run >> \"{runs}\"\ncat <<'END'\n{output}\nEND\n")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return f"{directory}:/usr/bin:/bin", lambda: len(runs.read_text().splitlines()) if runs.exists() else 0
+
+
+def test_a_server_is_named_in_tools_as_claude_code_names_it() -> None:
+    assert connections.tool_name("claude.ai Gmail") == "claude_ai_Gmail"
+    assert connections.tool_name("plugin:figma:figma") == "plugin_figma_figma"
+    assert connections.tool_name("icloud-mail") == "icloud-mail"
+
+
+def test_only_the_servers_the_report_reads_count_and_one_it_reads_counts_even_when_off_or_gone(home: Path, tmp_path: Path) -> None:
+    path = _fake_claude(tmp_path / "bin", LIST)
+
+    def ask(*only: str):
+        return runner.run_check(Check.from_dict({"kind": "connections"}, app=True), home=home, connections=["claude"],
+                                path=path, environ={}, servers=set(only))
+
+    read = ask("mail", "plugin_files_files")
+    assert (read.ok, read.detail, read.value) == (True, "all 2 answer", 2.0), "the server that needs a sign-in is not read"
+    assert (ask().ok, ask().detail) == (True, "the morning report reads no MCP server")
+    down = ask("mail", "chat", "old", "gone")
+    assert down.ok is False and down.value == 1.0
+    assert down.detail.startswith("1 of 4 answer; not answering: chat (needs sign-in), gone (not set up in Claude Code), "
+                                  "old (⊘ Disabled")
+
+
+def test_a_servers_check_asks_claude_code_about_the_servers_its_source_reads(home: Path, tmp_path: Path) -> None:
+    path = _fake_claude(tmp_path / "bin", LIST)
+
+    def run(*reads: str):
+        return runner.run_check(Check.from_dict({"kind": "servers", "reads": list(reads)}), home=home, path=path, environ={})
+
+    both = run("mcp__mail__search_threads", "mcp__plugin_files_files__get_file", "mcp__mail__get_thread")
+    assert (both.ok, both.detail) == (True, "all 2 answer")
+    chat = run("mcp__chat__list_messages")
+    assert (chat.ok, chat.detail, chat.value) == (False, "chat does not answer (needs sign-in)", 0.0)
+    assert run("mcp__mail__get_thread").detail == "mail answers"
+    assert "Needs authentication" in chat.raw
+
+
+def test_the_checks_of_one_pass_share_one_answer_of_the_cli(home: Path, tmp_path: Path) -> None:
+    path, runs = _counted_claude(tmp_path / "bin", LIST)
+    listed: dict = {}
+    mail = Check.from_dict({"kind": "servers", "reads": ["mcp__mail__search_threads"]})
+    every = Check.from_dict({"kind": "connections"}, app=True)
+    assert runner.run_check(mail, home=home, path=path, environ={}, listed=listed).ok is True
+    assert runner.run_check(every, home=home, path=path, environ={}, connections=["claude"], servers={"chat"},
+                            listed=listed).ok is False
+    assert runs() == 1
+    runner.run_check(mail, home=home, path=path, environ={})
+    assert runs() == 2, "a check outside a pass asks again"

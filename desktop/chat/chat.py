@@ -224,6 +224,9 @@ HANDOFF_CHARS = 12000
 # Parent-session variables must not leak into the agents (credentials excepted).
 ENV_KEEP = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
+# A whole day's `board` runs past Claude Code's default cap on one tool's answer (25,000 tokens). Over the cap the CLI puts
+# the answer in a file, and a seat with no file tools cannot open it.
+MCP_OUTPUT_TOKENS = "100000"
 READ_TOOLS = ["board", "goal", "outline", "search", "evidence_due", "tags", "size_report",
               "doc_get", "doc_tree", "doc_history", "doc_revision", "comments",
               "privacy", "sources"]
@@ -510,7 +513,9 @@ class ClaudeAgent:
             # A session that began outside Verticals recorded its own system prompt on its first request, and a resume keeps
             # that one unless told to build it again (code.claude.com/docs/en/cli-reference, "--system-prompt-snapshot").
             args += ["--system-prompt-snapshot", "off"]
-        self.proc = JsonProcess(args, cwd or chat.workdir, child_env(), self.handle, self.exited)
+        env = child_env()
+        env.setdefault("MAX_MCP_OUTPUT_TOKENS", MCP_OUTPUT_TOKENS)
+        self.proc = JsonProcess(args, cwd or chat.workdir, env, self.handle, self.exited)
         self.proc.send({"type": "control_request", "request_id": "initialize", "request": {"subtype": "initialize"}})
 
     def signature(self):

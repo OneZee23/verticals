@@ -1,4 +1,4 @@
-"""The check inside a source document (docs/design/sources.md, `core/source_checks.py`): the five kinds and what each may
+"""The check inside a source document (docs/design/sources.md, `core/source_checks.py`): every kind and what each may
 say, the one hash the owner approves, the fenced block that carries it, and the sections around it. Pure: no database."""
 
 from __future__ import annotations
@@ -238,3 +238,15 @@ def test_a_source_cannot_name_a_tool_of_verticals_or_anything_that_is_not_a_tool
 def test_the_apps_own_check_takes_no_reads() -> None:
     with pytest.raises(ValidationError):
         sc.Check.from_dict({"kind": "connections", "reads": READS[:1]}, app=True)
+
+
+def test_a_source_read_through_claude_codes_servers_is_checked_by_asking_claude_code() -> None:
+    reads = ["mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread"]
+    check = _check({"kind": "servers", "reads": reads})
+    assert (check.where, check.gated, check.fields) == ("here", True, {"reads": reads})
+    assert check.summary() == ("Asks Claude Code every hour whether claude_ai_Gmail answers. The morning report may call "
+                               "search_threads and get_thread on claude_ai_Gmail.")
+    assert "needs reads" in _refused({"kind": "servers"}, "reads")
+    assert "must run here" in _refused({"kind": "servers", "reads": reads, "where": "anywhere"}, "where")
+    _refused({"kind": "servers", "reads": reads, "url": "https://example.test/mcp"}, "url")
+    assert sc.reading_servers([*reads, "mcp__icloud-mail__list_messages", "not a tool"]) == {"claude_ai_Gmail", "icloud-mail"}

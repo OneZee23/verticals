@@ -13,8 +13,8 @@ Three rules live here and nowhere else:
     comes sooner than five minutes after a failure (the agent's run-once) does not count as the second.
   * **Grey is never red.** A source waiting for approval, with no check, with a check nobody can read, not yet checked,
     or last checked over two hours ago ("not checked since", the Mac was asleep) is grey. Only a fresh answer is red.
-  * **Every check runs only on approval, once.** `http`, `mcp`, `cmd`, `file` and `dns` need `approved_hash` to equal the
-    hash of the check in the document now; only the app's own `connections` check runs without it. `approve` is the one
+  * **Every check runs only on approval, once.** `http`, `mcp`, `cmd`, `file`, `dns` and `servers` need `approved_hash` to
+    equal the hash of the check in the document now; only the app's own `connections` check runs without it. `approve` is the one
     writer of that hash, and no MCP tool calls it.
 """
 
@@ -384,15 +384,16 @@ _CONNECTIONS = sc.Check.from_dict({"kind": "connections"}, app=True)
 
 
 def ensure_connections(conn: psycopg.Connection, *, owner: str) -> str:
-    """The document called Connections, made once when the app is told to ask Claude Code which of its MCP servers
-    answer. Returns its id. A document already there (the owner's, or an agent's) is left as it is."""
+    """The document called Connections, made once when the app is told to ask Claude Code whether the MCP servers the morning
+    report reads answer. Returns its id. A document already there (the owner's, or an agent's) is left as it is."""
     owner = validate_owner(owner)
     try:
         return core_docs.get_by_path(conn, owner=owner, path=CONNECTIONS_PATH).id
     except NotFound:
         pass
     body = sc.build_body(
-        gives="Which of the agent's tools answer: every MCP server Claude Code knows, as `claude mcp list` reports it.",
+        gives="Which of the agent's tools answer: the MCP servers the sources' `reads` name, as `claude mcp list` reports "
+              "them. A server no source reads does not count.",
         how="Read this source before the others. A server that does not answer is a source the report cannot read.",
         since="Every hour.",
         check=_CONNECTIONS,
