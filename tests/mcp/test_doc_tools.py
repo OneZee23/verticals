@@ -31,6 +31,7 @@ import anyio
 from tests.mcp.conftest import TEST_OWNER_OTHER, TEST_TOKEN, open_mcp_stdio
 
 DOC_PATH = "strategy/wp2-probe.md"
+UNLINK_NOTES = '```python\npayload = """first\n\n\nfourth"""\n```\n\n \t\n'
 
 
 # =================================================================================================
@@ -399,6 +400,8 @@ async def _unlink_noop(f2_dsn: str, tmp_path: Path):
     async with open_mcp_stdio(f2_dsn, tmp_path, label="d254-unlink-noop") as (session, streams):
         created = await session.call_tool("doc_create", {"path": "strategy/never-linked.md", "body": ""})
         doc_id = created.structured_content["doc"]["id"]
+        wrote = await session.call_tool("update", {"id": "SYNDAY01", "body": UNLINK_NOTES})
+        assert wrote.is_error is False
 
         before = await session.call_tool("goal", {"id": "SYNDAY01"})
         result = await session.call_tool("doc_unlink", {"goal_id": "SYNDAY01", "doc": doc_id})
@@ -417,6 +420,45 @@ def test_d254_doc_unlink_is_a_noop_when_not_linked(f2_dsn: str, tmp_path: Path) 
     assert before.structured_content["goal"]["body"] == after.structured_content["goal"]["body"], (
         "a no-op unlink must write nothing"
     )
+    assert before.structured_content["goal"]["updated_at"] == after.structured_content["goal"]["updated_at"]
+
+
+async def _unlink_preserves_notes(f2_dsn: str, tmp_path: Path):
+    async with open_mcp_stdio(f2_dsn, tmp_path, label="unlink-preserves-notes") as (session, streams):
+        target = await session.call_tool("doc_create", {"path": "strategy/remove.md"})
+        other = await session.call_tool("doc_create", {"path": "strategy/keep.md"})
+        target_id = target.structured_content["doc"]["id"]
+        other_id = other.structured_content["doc"]["id"]
+        body = (
+            UNLINK_NOTES + "[Keep](doc:strategy/keep.md)\n\n\n"
+            "[Remove](doc:strategy/remove.md)\n"
+            "Before [Again](doc:strategy/remove.md) after.\n\n\n"
+        )
+        wrote = await session.call_tool("update", {"id": "SYNDAY01", "body": body})
+        assert wrote.is_error is False
+
+        result = await session.call_tool("doc_unlink", {"goal_id": "SYNDAY01", "doc": target_id})
+        after = await session.call_tool("goal", {"id": "SYNDAY01"})
+        retry = await session.call_tool("doc_unlink", {"goal_id": "SYNDAY01", "doc": target_id})
+        after_retry = await session.call_tool("goal", {"id": "SYNDAY01"})
+        streams.assert_hygiene(token=TEST_TOKEN)
+    return target_id, other_id, result, after, retry, after_retry
+
+
+def test_doc_unlink_preserves_unrelated_notes_and_links(f2_dsn: str, tmp_path: Path) -> None:
+    target_id, other_id, result, after, retry, after_retry = anyio.run(_unlink_preserves_notes, f2_dsn, tmp_path)
+
+    assert result.is_error is False
+    assert result.structured_content["removed"] is True
+    assert after.structured_content["goal"]["body"] == (
+        UNLINK_NOTES + "[Keep](doc:strategy/keep.md)\n\n\nBefore  after.\n\n\n"
+    )
+    linked_ids = {doc["id"] for doc in after.structured_content["docs"]}
+    assert target_id not in linked_ids
+    assert other_id in linked_ids
+    assert retry.is_error is False
+    assert retry.structured_content["removed"] is False
+    assert after_retry.structured_content["goal"] == after.structured_content["goal"]
 
 
 # =================================================================================================
