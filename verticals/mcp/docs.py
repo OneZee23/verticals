@@ -341,13 +341,11 @@ def _append_link_line(body: str, link_line: str) -> str:
 
 
 def _strip_doc_links(body: str, doc_path: str) -> str:
-    """Removes every `[label](doc:<doc_path>)` occurrence from `body`'s text, then drops any line
-    that removal left with nothing but whitespace on it (D254: "tidy up a line left empty by the
-    removal") — a line that still carries other text around the removed link is left as-is.
-    Consecutive blank lines left behind collapse to at most one, and trailing blank lines are
-    trimmed, mirroring `core.markdown._body_lines`'s own collapse rule elsewhere in this codebase.
-    Returns `body` byte-identical when there was nothing to remove, which is what makes the
-    caller's idempotent no-op check (`new_body == original_body`) correct."""
+    """Remove target links and lines they leave empty, preserving all other text and whitespace.
+
+    Unrelated blank lines may be part of a code block or literal, so they must not be normalised.
+    An absent link leaves the body byte-identical for the caller's no-op check.
+    """
     pattern = re.compile(_DOC_LINK_MARKDOWN_RE_TEMPLATE.format(path=re.escape(doc_path)))
     lines = (body or "").split("\n")
 
@@ -358,18 +356,7 @@ def _strip_doc_links(body: str, doc_path: str) -> str:
             continue  # the removal left nothing (or only whitespace) on this line — drop it
         kept.append(stripped)
 
-    collapsed: list[str] = []
-    prev_blank = False
-    for line in kept:
-        blank = line.strip() == ""
-        if blank and prev_blank:
-            continue
-        collapsed.append(line)
-        prev_blank = blank
-    while collapsed and collapsed[-1].strip() == "":
-        collapsed.pop()
-
-    return "\n".join(collapsed)
+    return "\n".join(kept)
 
 
 def handle_doc_link(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
