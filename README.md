@@ -1,6 +1,6 @@
-# Verticals
+# Vertical
 
-Verticals goal board: React UI, Python API/MCP and PostgreSQL 16.
+Vertical goal board: React UI, Python API/MCP and PostgreSQL 16.
 Open source under the GNU Affero General Public License v3.0, see [License](#license).
 
 ## Native local startup
@@ -52,7 +52,7 @@ and optional cadence in the owner's local workspace instructions; see its
 ## Verification
 
 Run `npm --prefix web run typecheck` and `npm --prefix web run build`.
-Browser smoke: create/complete a task, reload, navigate Inbox/Verticals, stop/restart,
+Browser smoke: create/complete a task, reload, move between the Inbox and the board, stop/restart,
 verify persistence. Database regression suites use the separate test database:
 `make db-up` (optional Docker), then `make test-core`, `make test-http`, `make test-mcp`
 or `make test-ui`. Never point those tests at personal data.
@@ -63,7 +63,7 @@ tests need sanitized fixtures first.
 
 ## License
 
-Verticals is licensed under the GNU Affero General Public License v3.0, see `LICENSE`.
+Vertical is licensed under the GNU Affero General Public License v3.0, see `LICENSE`.
 The package vendored in `web/vendor/` (`@konstantinopolskii/design-system`, version 2.1.1) is under the
 same license.
 Three parts keep their own terms:

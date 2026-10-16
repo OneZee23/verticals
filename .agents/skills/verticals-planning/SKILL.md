@@ -1,9 +1,9 @@
 ---
 name: verticals-planning
-description: Guide planning sessions and build, audit, or revise a Verticals goal board as a causal chain from Life values through 3-year, Year, Quarter, Month, Week, and Day verticals. Use for goal mapping, retrospectives, priority decisions, backlog cleanup, task wording, parent-child linking, scheduling, or evidence reviews. Keep the board read-only while meaning is unresolved; require evidence, explicit approval, and live verification before mutations.
+description: Guide planning sessions and build, audit, or revise a Vertical goal board as a causal chain from Life values through 3-year, Year, Quarter, Month, Week, and Day verticals. Use for goal mapping, retrospectives, priority decisions, backlog cleanup, task wording, parent-child linking, scheduling, or evidence reviews. Keep the board read-only while meaning is unresolved; require evidence, explicit approval, and live verification before mutations.
 ---
 
-# Verticals Planning
+# Vertical Planning
 
 Treat the board as a causal forest rooted in Life values, not a flat task list.
 

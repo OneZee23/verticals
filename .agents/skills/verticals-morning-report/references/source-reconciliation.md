@@ -21,7 +21,7 @@ For each new discussion, decision, result, or reply, make this internal check be
 | Check | Question |
 | --- | --- |
 | Primary source | What was actually said, by whom, and at what read scope? Is it a promise, proposal, observation, or agent inference? |
-| Existing destination | Which exact Verticals goal and owning session carry this work? What do the current body, document, comments, and result actually say? |
+| Existing destination | Which exact Vertical goal and owning session carry this work? What do the current body, document, comments, and result actually say? |
 | Later state | Did subsequent messages, a delivered artifact, a merge, payment, or another decision supersede the older status? |
 | Authorized incorporation | Was an update permitted, saved to the *authoritative* destination, and read back with its revision or equivalent state? A source mentioned only in the report, or saved only to a mirror, is **not** incorporated into the live task. |
 | Remaining action | Who acts next, under what condition? Is a separate direct reader command or human acceptance still needed? A transferred comment or information-only notification is not execution authorization. |
@@ -30,7 +30,7 @@ One call may update several existing goals; several sources may explain one goal
 
 ## Adapted traces from actual use
 
-**Meeting summary → exact passage → task document.** A meeting index surfaced a proposed client-marketplace engagement. The underlying discussion showed a possible contractor pairing and field research, not an accepted client scope. The existing project brief and attached Verticals document initially lacked that discussion. After an authorized update, both were read back. The report could then say “saved to the brief,” but not “strategy approved” or “client accepted.”
+**Meeting summary → exact passage → task document.** A meeting index surfaced a proposed client-marketplace engagement. The underlying discussion showed a possible contractor pairing and field research, not an accepted client scope. The existing project brief and attached Vertical document initially lacked that discussion. After an authorized update, both were read back. The report could then say “saved to the brief,” but not “strategy approved” or “client accepted.”
 
 **Old status → later reply → corrected report.** An earlier report said a collaborator's skills PR awaited review. A later message said it was merged, another confirmed the skills were in use, and repository state confirmed the merge. The next report removed the obsolete review reminder. It did not mark the owner's overall sharing task accepted merely because the recipient could use the skills.
 
