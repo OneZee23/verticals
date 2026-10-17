@@ -24,7 +24,7 @@ import { commandFilter } from './lib/commandFilter'
 import { agentChat, currentThread, newThread, openForGoal, openThread, send, startAgentChat } from './lib/agentChat'
 import { circle, inboxWriting } from './lib/circle'
 import { inbox, loadInbox, writeDown } from './lib/inbox'
-import { endMove, moveContext } from './lib/moving'
+import { endMove, escape as letGoOfMove, moveContext, moving } from './lib/moving'
 import { findGoal } from './lib/boardIndex'
 import { spanGoal } from './lib/spans'
 import { REPLAN_ASK, type CarriedPlan } from './lib/replan'
@@ -188,14 +188,18 @@ export const App = tracked(function App() {
       if (!id || (frontWindow.value?.kind === 'goal' && frontWindow.value.target === id)) return
       openWindow({ kind: 'goal', target: id, title: title || 'Goal' })
     }
-    /* Esc, when nothing smaller takes it, peels one layer a press: the agent's conversation, the windows, then on the
-       Documents desk a laid-out stack. What has its own Esc keeps it: the text being typed, a menu, a dialog, a goal in
-       the hand, a goal open on the board (GoalDetail), the moving mode (SpansBoard). ⌘[ and ⌘] move one window. */
+    /* Esc, when nothing smaller takes it, peels one layer a press: the agent's conversation, the windows, then on a desk
+       a goal held on the field and on Documents a laid-out stack, and last the desk, Inbox or Documents, back to the
+       board. What has its own Esc keeps it: the text being typed, a menu, a dialog, a goal in the hand, and on the board
+       a goal open in place (GoalDetail) and the moving mode (SpansBoard). ⌘[ and ⌘] move one window. */
     function escapeStep(): (() => void) | null {
       if (agentChat.open) return () => { agentChat.open = false }
       if (windows.list.length) return closeWindows
-      if (store.state.activeView === 'docs' && desk.open) return () => { desk.open = null }
-      return null
+      const view = store.state.activeView
+      if (view === 'verticals') return null
+      if (moving.picked || circle.moving) return () => void letGoOfMove()
+      if (view === 'docs' && desk.open) return () => { desk.open = null }
+      return () => store.setView('verticals')
     }
     function onShellKey(event: KeyboardEvent): void {
       if (event.defaultPrevented) return
