@@ -189,16 +189,22 @@ export const App = tracked(function App() {
       openWindow({ kind: 'goal', target: id, title: title || 'Goal' })
     }
     /* Esc, when nothing smaller takes it, peels one layer a press: the agent's conversation, the windows, then on a desk
-       a goal held on the field and on Documents a laid-out stack, and last the desk, Inbox or Documents, back to the
-       board. What has its own Esc keeps it: the text being typed, a menu, a dialog, a goal in the hand, and on the board
-       a goal open in place (GoalDetail) and the moving mode (SpansBoard). ⌘[ and ⌘] move one window. */
+       a goal held on the field, on Documents a document's history, the document itself and a laid-out stack, and last the
+       desk, Inbox or Documents, back to the board. What has its own Esc keeps it: the text being typed, a menu, a dialog,
+       a goal in the hand, and on the board a goal open in place (GoalDetail) and the moving mode (SpansBoard). ⌘[ and ⌘]
+       move one window. */
     function escapeStep(): (() => void) | null {
       if (agentChat.open) return () => { agentChat.open = false }
       if (windows.list.length) return closeWindows
       const view = store.state.activeView
       if (view === 'verticals') return null
       if (moving.picked || circle.moving) return () => void letGoOfMove()
-      if (view === 'docs' && desk.open) return () => { desk.open = null }
+      if (view === 'docs') {
+        const docs = store.state.docs
+        if (docs.historyOpen && docs.current) return store.closeHistory
+        if (docs.historyOpen || docs.currentId || docs.currentLoading) return store.closeDoc
+        if (desk.open) return () => { desk.open = null }
+      }
       return () => store.setView('verticals')
     }
     function onShellKey(event: KeyboardEvent): void {
