@@ -179,6 +179,20 @@ def allocate_position(
     )
 
 
+def column_goals(conn: psycopg.Connection, *, owner: str, vertical: str, period_key: str) -> tuple[Goal, ...]:
+    """One board column's sibling group, `(owner, vertical, period_key)` regardless of `parent_id` — the group
+    `tree.renumber` orders — in position order. What a reorder reads to find the neighbour after `after_id`: only this
+    column, however many goals of its scale other periods hold."""
+    owner = _require_str(owner, "owner")
+    rows = conn.execute(
+        f"SELECT {COLUMNS} FROM goals"
+        " WHERE owner = %(owner)s AND vertical = %(vertical)s::vertical_scale AND period_key = %(period_key)s"
+        " ORDER BY position, id",
+        {"owner": owner, "vertical": vertical, "period_key": period_key},
+    ).fetchall()
+    return tuple(_to_goal(r) for r in rows)
+
+
 # --- move_between -------------------------------------------------------------------------------
 
 
