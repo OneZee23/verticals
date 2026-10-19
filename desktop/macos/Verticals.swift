@@ -595,12 +595,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc func reload(_ sender: Any?) { webView.reload() }
 
-    // The dev panel's zoom buttons (web DevZoomPanel.vue) set the page zoom; it is kept for the next launch.
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "zoom", let value = (message.body as? NSNumber)?.doubleValue else { return }
+    // Match the developer panel's browser-style steps; both controls keep the same PageZoom preference.
+    private static let zoomSteps: [Double] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+
+    func setPageZoom(_ value: Double) {
+        guard value.isFinite else { return }
         webView.pageZoom = min(max(value, 0.5), 2)
         UserDefaults.standard.set(webView.pageZoom, forKey: "PageZoom")
         syncTitlebar()
+    }
+
+    @objc func zoomIn(_ sender: Any?) {
+        if let next = Self.zoomSteps.first(where: { $0 > Double(webView.pageZoom) + 0.001 }) {
+            setPageZoom(next)
+        }
+    }
+
+    @objc func zoomOut(_ sender: Any?) {
+        if let next = Self.zoomSteps.reversed().first(where: { $0 < Double(webView.pageZoom) - 0.001 }) {
+            setPageZoom(next)
+        }
+    }
+
+    @objc func actualSize(_ sender: Any?) { setPageZoom(1) }
+
+    // The developer panel uses the same native zoom as the View menu and its shortcuts.
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "zoom", let value = (message.body as? NSNumber)?.doubleValue else { return }
+        setPageZoom(value)
     }
 
     // The page keeps its content below the title bar by `--titlebar-height`, in its own zoomed pixels; full screen has
@@ -646,6 +668,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let reloadItem = item("Reload", #selector(reload(_:)), "r")
         reloadItem.target = self
         view.addItem(reloadItem)
+        view.addItem(.separator())
+        for (title, action, key) in [("Zoom In", #selector(zoomIn(_:)), "+"),
+                                     ("Zoom Out", #selector(zoomOut(_:)), "-"),
+                                     ("Actual Size", #selector(actualSize(_:)), "0")] {
+            let command = item(title, action, key)
+            command.target = self
+            view.addItem(command)
+        }
+        // Browsers also accept the unshifted equals key on keyboards where + shares that key.
+        let equals = item("Zoom In", #selector(zoomIn(_:)), "=")
+        equals.target = self
+        equals.isHidden = true
+        equals.allowsKeyEquivalentWhenHidden = true
+        view.addItem(equals)
+        view.addItem(.separator())
         let motionItem = item("Reduce Motion", #selector(toggleReduceMotion(_:)), "")
         motionItem.target = self
         view.addItem(motionItem)
@@ -686,6 +723,9 @@ extension AppDelegate: NSMenuItemValidation {
     // The checkmark is read when the menu opens, so it follows macOS while the person has not chosen.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(toggleReduceMotion(_:)) { item.state = reduceMotion ? .on : .off }
+        if item.action == #selector(zoomIn(_:)) { return webView != nil && webView.pageZoom < 2 }
+        if item.action == #selector(zoomOut(_:)) { return webView != nil && webView.pageZoom > 0.5 }
+        if item.action == #selector(actualSize(_:)) { return webView != nil }
         return true
     }
 }

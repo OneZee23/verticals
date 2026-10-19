@@ -48,6 +48,12 @@ launcher has its own ports, database, state directory and UI build.
 
 The agent picker follows Enjoy's (strings, model artwork).
 
+## Page zoom
+
+View → Zoom In (⌘+, or ⌘=), Zoom Out (⌘−) and Actual Size (⌘0) change the page zoom, including while
+editing a task or writing in the chat. The browser-style steps range from 50% to 200% and use the
+same saved setting as the developer panel. The chosen scale survives a reload and the next launch.
+
 ## Reduce Motion
 
 View → Reduce Motion is a checkmark between Reload and Enter Full Screen. It starts as macOS's own Reduce motion
