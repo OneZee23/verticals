@@ -95,9 +95,10 @@ CODEX_HOME=~/.codex-personal
 ```
 
 Only these two variables are read, and only absolute paths (`~/` is your home folder). The chat, the morning report, the
-source checks, "Connect Claude Code" and "Connect Codex" in the menu bar, and a session opened in Terminal all use them.
-A folder that has never been signed in to needs one sign-in first: `CLAUDE_CONFIG_DIR=~/.claude-personal claude`, then
-`/login`.
+source checks, "Use Verticals in Claude Code" and "Use Verticals in Codex" in the menu bar, and a session opened in
+Terminal all use them. A folder that has never been signed in to needs one sign-in first:
+`CLAUDE_CONFIG_DIR=~/.claude-personal claude`, then `/login`. The ticks beside the two menu items belong to the app, not
+to an account: after a change to `agents.env`, click them again to connect the new folder.
 
 ## Run from the repository
 

@@ -472,8 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    // Whose sign-in Claude Code and Codex use: `agents.env` in the state folder, read at every start (AppLinks.agentEnvironment).
-    // The chat, the morning report, the source checks, "Connect Claude Code" and a session opened in Terminal all follow it.
+    // Whose sign-in Claude Code and Codex use: `agents.env` in the state folder (AppLinks.agentEnvironment).
     var agentEnvironment: [String: String] {
         let file = stateDir.appendingPathComponent("agents.env")
         guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [:] }
