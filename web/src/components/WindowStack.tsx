@@ -9,6 +9,7 @@ import { ProgressiveBlur } from './ProgressiveBlur'
 import { GoalWindowBody } from './GoalWindowBody'
 import { PageWindowBody } from './PageWindowBody'
 import { DocWindowBody } from './DocWindowBody'
+import { DocDeleteButton } from './DocDeleteButton'
 import { agentChat } from '../lib/agentChat'
 import { closeWindow, closeWindows, focusWindow, stepWindow, windows, type VtWindow } from '../lib/windows'
 import { goalLight } from '../lib/look'
@@ -235,6 +236,7 @@ export const WindowStack = tracked(function WindowStack(attrs: Record<string, un
                           </Fragment>
                         ))}
                       </p>
+                      <DocDeleteButton id={win.target} />
                     </>
                   ) : (
                     <h2 className="vt-window__name" title={win.title}>{win.title}</h2>

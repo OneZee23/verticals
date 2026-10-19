@@ -8,6 +8,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from '../r
 import { KChip } from '../kit'
 import { AppIcon } from './AppIcon'
 import { DocCommentCard } from './DocCommentCard'
+import { DocDeleteButton } from './DocDeleteButton'
 import { store } from '../store'
 import { openWindow } from '../lib/windows'
 import type { DocDetail as DocDetailWire } from '../lib/api'
@@ -237,12 +238,6 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
       pathDraft.value = props.doc.path
     }
 
-    // --- delete: a 409/422 refusal surfaces as it is, no confirm dialog ---
-
-    function onDelete(): void {
-      void store.deleteCurrentDoc()
-    }
-
     function onLinkedGoalClick(goalId: string, event?: { currentTarget: EventTarget | null }): void {
       if (props.inWindow) {
         const title = props.doc.linked_goals.find((g) => g.goal_id === goalId)?.title ?? 'Goal'
@@ -269,7 +264,7 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
     return {
       rootEl, bodyEl, editingBody, anchoring, cardOpen, onBodyClick, finishBodyEdit,
       editingTitle, titleDraft, titleInputEl, startTitleEdit, commitTitle, cancelTitleEdit,
-      editingPath, pathDraft, pathInputEl, startPathEdit, commitPath, cancelPathEdit, onDelete, onLinkedGoalClick,
+      editingPath, pathDraft, pathInputEl, startPathEdit, commitPath, cancelPathEdit, onLinkedGoalClick,
     }
   })
 
@@ -334,9 +329,7 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
             <button type="button" className="doc-detail__action" data-role="doc-history-trigger" onClick={() => void store.loadHistory()}>
               <AppIcon name="history" size={16} />{' History '}
             </button>
-            <button type="button" className="doc-detail__action" data-role="doc-delete" onClick={s.onDelete}>
-              <AppIcon name="trash" size={16} />{' Delete '}
-            </button>
+            <DocDeleteButton id={doc.id} />
             <button type="button" className="doc-detail__action" data-role="doc-close" onClick={() => store.closeDoc()}>
               <AppIcon name="x" size={16} />
             </button>
