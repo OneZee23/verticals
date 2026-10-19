@@ -7,7 +7,8 @@
   display: flex;
   flex-direction: column;
   border-radius: var(--vt-radius-window);
-  background: #fff;
+  --vt-window-bg: #fff;
+  background: var(--vt-window-bg);
   overflow: hidden;
   pointer-events: auto;
   transform: scale(var(--vt-window-scale, 1));
@@ -15,7 +16,7 @@
     box-shadow var(--vt-dur-shape) var(--vt-ease-large);
   will-change: transform;
 }
-.vt-window.vt-shadow--lit { background: rgb(var(--vt-pale)); }
+.vt-window.vt-shadow--lit { --vt-window-bg: rgb(var(--vt-pale)); }
 /* A document stands full height (docs/design/doc-full-height.md): half a pixel from the top and the bottom, one device
    pixel on a Retina screen and the room the window's hairline ring needs. Its width and its 24 px corners are any
    window's. A goal or a page stays a card that hugs what it holds: a sheet is a document, a card is a goal. */

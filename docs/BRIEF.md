@@ -1,4 +1,4 @@
-# Verticals
+# Vertical
 
 Single-owner goal planning across day, week, month, quarter, year, three years and life.
 Subgoals are full goals and may belong to another vertical.

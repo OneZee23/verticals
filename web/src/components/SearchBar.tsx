@@ -21,6 +21,7 @@ import { anyMenuOpen } from '../lib/cardLift'
 import { defineKnobs, knob } from '../lib/tuning'
 import { AgentChips } from './AgentChips'
 import { AnswerUndo } from './AnswerUndo'
+import { CircleGame } from './CircleGame'
 import { CircleTags } from './CircleTags'
 import { chipLinks, withoutChipLines } from '../lib/chipLinks'
 import { MovingStack } from './MovingStack'
@@ -194,7 +195,7 @@ export const SearchBar = tracked(function SearchBar(raw: Props & Record<string, 
       // The buttons stand at the stack's left end whenever they are shown, pointed at or holding the keys, and the stack
       // stands right of them (S5.P3.010, .012): the field is wide enough for both, with the hand on it or away.
       if (state.value === 'moving') return Math.min(tagsShown.value ? 434 : 300, maxWidth.value)
-      return mascot.pong ? 132 : CIRCLE
+      return mascot.game ? 132 : CIRCLE
     })
     /* Pictures waiting above the field widen it to hold them: the stack, and what stands at its left end (4 px, or the tags
        and 8) and keeps the stack's room as CSS reads it (FieldPictures). It is as wide as the stack needs and the open field
@@ -494,7 +495,8 @@ export const SearchBar = tracked(function SearchBar(raw: Props & Record<string, 
         void stop()
         return
       }
-      if (event.key === 'Escape' && circleWords.value?.kind === 'answer') {
+      if (event.key === 'Escape' && circleWords.value?.kind === 'answer' && !anyMenuOpen()) {
+        event.preventDefault() // one press does one thing: the answer goes back, and nothing under it closes with it
         sendBack()
         return
       }
@@ -587,7 +589,7 @@ export const SearchBar = tracked(function SearchBar(raw: Props & Record<string, 
       className: 'circle-field',
       'data-cap': 'search',
       'data-state': state,
-      'data-pong': mascot.pong ? '' : undefined,
+      'data-game': mascot.game ?? undefined,
       'data-pointed': s.hovered.value ? '' : undefined,
       'data-focused': circle.focused ? '' : undefined,
       'data-holding': s.holding.value ? '' : undefined,
@@ -693,12 +695,7 @@ export const SearchBar = tracked(function SearchBar(raw: Props & Record<string, 
               aria-hidden="true"
             ></span>
           </span>
-          {mascot.pong ? (
-            <>
-              <span className="circle-field__line circle-field__line--second" aria-hidden="true"></span>
-              <span className="circle-field__ball-run" aria-hidden="true"><span className="circle-field__ball"></span></span>
-            </>
-          ) : null}
+          {mascot.game ? <CircleGame key={mascot.game} game={mascot.game} /> : null}
         </div>
       </div>
     </div>

@@ -552,7 +552,7 @@ const {
   pointerMoveDrag,
   setDragPreviewSize,
   setDragCombineMode,
-  autoScrollDrag,
+  armDrag,
   pointerUpDrag,
   colorAfterDrop,
 } = createDragActions({
@@ -702,7 +702,7 @@ export const store = {
   pointerMoveDrag,
   setDragPreviewSize,
   setDragCombineMode,
-  autoScrollDrag,
+  armDrag,
   pointerUpDrag,
   colorAfterDrop,
   removeGoal,

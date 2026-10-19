@@ -1,6 +1,6 @@
 # Agent evidence metadata
 
-This is the contract for goal evidence in the shared Verticals repository. It documents the implemented database, core, and MCP behavior. The executable sources of truth are `verticals/db/migrations/007_evidence.sql`, `verticals/core/evidence.py`, and `verticals/mcp/evidence.py`.
+This is the contract for goal evidence in the shared Vertical repository. It documents the implemented database, core, and MCP behavior. The executable sources of truth are `verticals/db/migrations/007_evidence.sql`, `verticals/core/evidence.py`, and `verticals/mcp/evidence.py`.
 
 Evidence is separate from a goal's human-readable body and tags. The server stores a receipt; it does not discover sources or verify claims for an agent.
 

@@ -1,23 +1,18 @@
 // One behaviour for every list of messages (docs/design-handoff S2.P5): a balloon with half of it past the top line of
 // the column, or past its bottom line, goes out as it passes (fades, blurs, shrinks; at the bottom it also sinks toward
 // the circle) and comes back when half of it is inside again. The check is on position, so it works both ways at any
-// speed. While you move the column it blurs a little, most at the start; following its growing end doesn't blur it. The
-// lines are drawn by the caller and the column scrolls past them, so no balloon is ever cut by an edge.
+// speed. The lines are drawn by the caller and the column scrolls past them, so no balloon is ever cut by an edge.
 import { onBeforeUnmount, watch, type Ref } from '../reactivity'
-import { reducedMotion } from './motion'
 import { defineKnobs, knob } from './tuning'
 
 defineKnobs('Message scroll', [
   { key: 'scroll.exits', label: 'Balloons go out at the ends (1 = on)', value: 1, min: 0, max: 1, step: 1 },
-  { key: 'scroll.blurs', label: 'The column blurs while it moves (1 = on)', value: 1, min: 0, max: 1, step: 1 },
   { key: 'scroll.goneScale', label: 'Gone: scale', value: 0.78, min: 0.3, max: 1, step: 0.01 },
   { key: 'scroll.goneBlur', label: 'Gone: blur', value: 6, min: 0, max: 20, step: 0.5, unit: 'px' },
   { key: 'scroll.sinkX', label: 'Gone at the bottom: toward the middle', value: 22, min: 0, max: 80, step: 1, unit: 'px' },
   { key: 'scroll.sinkY', label: 'Gone at the bottom: down', value: 14, min: 0, max: 80, step: 1, unit: 'px' },
   { key: 'scroll.turn', label: 'Gone: turn', value: 2, min: 0, max: 15, step: 0.5, unit: '°' },
   { key: 'scroll.goneMs', label: 'Going out and back', value: 200, min: 0, max: 800, step: 10, unit: 'ms' },
-  { key: 'scroll.moveBlur', label: 'Moving: blur', value: 1.6, min: 0, max: 6, step: 0.1, unit: 'px' },
-  { key: 'scroll.moveMs', label: 'Moving: sharp again after', value: 600, min: 100, max: 2000, step: 50, unit: 'ms' },
 ])
 
 type Side = 'in' | 'top' | 'bottom'
@@ -25,9 +20,6 @@ export type Lines = () => { top: number; bottom: number }
 
 export function useMessageScroll(column: Ref<HTMLElement | null>, content: Ref<HTMLElement | null>, lines: Lines, items: () => unknown) {
   let frame = 0
-  let blurring: Animation | null = null
-  /* Where the column was put by code, so the scroll it fires isn't taken for your hand. */
-  let placedTop = -1
   /* A column read to its end stays at its end while it grows or the lines move, as a conversation does. */
   let atEnd = true
 
@@ -60,36 +52,16 @@ export function useMessageScroll(column: Ref<HTMLElement | null>, content: Ref<H
     const el = column.value
     if (!el) return
     el.scrollTop = el.scrollHeight
-    placedTop = el.scrollTop
   }
   function onResize(): void {
     if (atEnd) toBottom()
     schedule()
-  }
-  /* One blur per move: it rises at the start, stays at its top while the column keeps moving, and is gone within the
-     rest of its time once it stops; a new one starts only from sharp. */
-  function blur(): void {
-    if (knob('scroll.blurs') !== 1 || reducedMotion() || !content.value) return
-    const ms = knob('scroll.moveMs')
-    const peak = ms * 0.22
-    if (blurring?.playState === 'running') {
-      if (Number(blurring.currentTime) > peak) blurring.currentTime = peak
-      return
-    }
-    blurring = content.value.animate(
-      [{ filter: 'blur(0)', easing: 'ease-out' }, { filter: `blur(${knob('scroll.moveBlur')}px)`, offset: 0.22, easing: 'ease-out' },
-        { filter: 'blur(0)' }],
-      { duration: ms },
-    )
   }
   function onScroll(): void {
     const el = column.value
     if (!el) return
     atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 2
     schedule()
-    const own = Math.abs(el.scrollTop - placedTop) < 1
-    placedTop = -1
-    if (!own) blur()
   }
 
   const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize)
@@ -105,7 +77,6 @@ export function useMessageScroll(column: Ref<HTMLElement | null>, content: Ref<H
   onBeforeUnmount(() => {
     column.value?.removeEventListener('scroll', onScroll)
     resize?.disconnect()
-    blurring?.cancel()
     if (frame) cancelAnimationFrame(frame)
   })
   watch(items, schedule, { flush: 'post' })

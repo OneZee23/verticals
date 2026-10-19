@@ -40,7 +40,7 @@
 }
 .circle-field[data-state='open'] .circle-field__shape { transition-duration: var(--vt-dur-open); }
 .circle-field[data-state='typing'] .circle-field__shape { transition: none; }
-.circle-field[data-pong] .circle-field__shape { transition-duration: var(--vt-dur-shape); }
+.circle-field[data-game] .circle-field__shape { transition-duration: var(--vt-dur-shape); }
 .circle-field[data-focused] .circle-field__shape { cursor: text; }
 .circle-field[data-flying='sent'] .circle-field__shape { transition-duration: var(--vt-dur-sent); transition-delay: 0ms; }
 .circle-field[data-flying='reply'] .circle-field__shape { transition-duration: var(--vt-dur-shape); transition-delay: 90ms; }
@@ -263,30 +263,18 @@
 .circle-field__answer { animation: circle-field-answer-in 170ms linear 295ms backwards; }
 @keyframes circle-field-answer-in { from { opacity: 0; } }
 
-/* Pong (S1.P1.067): the oval, two lines and a ball. */
-.circle-field[data-pong] .circle-field__line { animation: circle-field-paddle 1300ms var(--vt-ease-breath) infinite alternate; --side: -50px; }
-.circle-field[data-pong] .circle-field__line--second { --side: 50px; animation-delay: -650ms; }
-@keyframes circle-field-paddle {
-  from { transform: translate(var(--side), -10px); }
-  to { transform: translate(var(--side), 10px); }
-}
-.circle-field__ball-run {
+/* A game when nobody is there (CircleGame.tsx): the oval, and the mascot's line handed over to the game, which starts as it. */
+.circle-field[data-game] .circle-field__line { opacity: 0; }
+.circle-field__game {
   position: absolute;
   left: 50%;
   top: 50%;
-  animation: circle-field-ball-x 900ms linear infinite alternate;
+  width: 132px;
+  height: 84px;
+  margin: -42px 0 0 -66px;
+  color: #fff;
+  pointer-events: none;
 }
-.circle-field__ball {
-  display: block;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
-  border-radius: 3px;
-  background: #fff;
-  animation: circle-field-ball-y 1300ms var(--vt-ease-breath) infinite alternate;
-}
-@keyframes circle-field-ball-x { from { transform: translateX(-44px); } to { transform: translateX(44px); } }
-@keyframes circle-field-ball-y { from { transform: translateY(-12px); } to { transform: translateY(12px); } }
 
 /* Under the pointer (docs/design/field-hover.md): the resting circle only widens, 84 to 116 px, and keeps its round ends; its
    line grows from 3 × 24 to 5 × 46 px, stays upright and keeps its round ends; the pointer shows, as over any button. It

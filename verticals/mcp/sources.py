@@ -6,8 +6,8 @@ the document), then runs the check once and puts the answer beside what the chec
 still read the wrong thing. The app runs the same check every hour on its own, with no model.
 
 What the agent cannot do, by design: approve. Every check it writes (an address, an MCP tool, a command, a file, a name
-lookup) runs only once the owner has approved that exact check in the app, and no tool here (or anywhere in this server)
-records an approval, so the agent proposes and the owner decides.
+lookup, a question to Claude Code) runs only once the owner has approved that exact check in the app, and no tool here (or
+anywhere in this server) records an approval, so the agent proposes and the owner decides.
 Every handler is argument shaping around `core/sources.py`, `core/source_docs.py` and the runner; no SQL lives here
 (`tests/static/test_seam.py`).
 """
@@ -50,9 +50,12 @@ _CHECK_PROP: dict[str, Any] = {
         "with one group around the number to read), min, max, say, timeout. "
         "file: path (~/... or absolute, inside the home folder), max_age_hours, last_line (a pattern). "
         "dns: host. "
-        "Any kind may also say reads: the tools of the owner's other MCP servers that read this source for the morning report, "
-        "each as Claude Code names it (mcp__<server>__<tool>, never a tool of Verticals). The morning report calls exactly "
-        "these for this source, once the owner has approved the check, and asks the owner for any other tool."
+        "servers: reads only. For a source read through Claude Code's own servers (a claude.ai connector, a plugin), the "
+        "app asks Claude Code whether the servers its reads name answer. Use it whenever such a server needs a sign-in: an "
+        "mcp check calls the address itself, with no sign-in, and is refused every time. "
+        "Any other kind may also say reads: the tools of the owner's other MCP servers that read this source for the morning "
+        "report, each as Claude Code names it (mcp__<server>__<tool>, never a tool of Verticals). The morning report calls "
+        "exactly these for this source, once the owner has approved the check, and asks the owner for any other tool."
     ),
     "properties": {
         "kind": {"enum": list(sc.KINDS)},
@@ -137,7 +140,8 @@ TOOLS: tuple[types.Tool, ...] = (
             "give an existing one (by id) only the parts that change, the rest of the document stays as the owner left it. "
             "The check is read-only and the app runs it every hour with no model: http (an address answers), mcp (one "
             "reading tool of an MCP server answers), cmd (a command exits well and a number in its output stays within "
-            "limits), file (a file is fresh and its last line says the right thing), dns (a host resolves). Every check "
+            "limits), file (a file is fresh and its last line says the right thing), dns (a host resolves), servers (Claude "
+            "Code says the servers that read the source answer: the one for a claude.ai connector). Every check "
             "reaches something, so each runs only once the owner has approved that exact check in the app, and any later "
             "change asks again: you cannot approve, so say that it waits and what it will do. Once the owner has approved "
             "it, a call with only the id runs it once now (`run` is true by default) and returns the answer with `raw`, "

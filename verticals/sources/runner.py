@@ -1,4 +1,4 @@
-"""Running a check (docs/design/sources.md): the five kinds, each read-only, none of them with a model.
+"""Running a check (docs/design/sources.md): every kind, each read-only, none of them with a model.
 
 `core/source_checks.py` says what a check may be; `core/sources.py` keeps the answers. This module is the only code that
 reaches out: an address, an MCP tool, a command, a file, a host name. It lives beside `core/`, not in it, because `core/`
@@ -37,13 +37,13 @@ import socket
 import subprocess
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from http.client import HTTPConnection, HTTPSConnection
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from verticals.core.source_checks import Check
+from verticals.core.source_checks import Check, reading_servers
 from verticals.core.sources import Result, one_line
 
 MAX_OUTPUT = 256 * 1024     # what a command may print before it is stopped
@@ -426,7 +426,7 @@ def _deadline(check: Check) -> float:
     f = check.fields
     if check.kind in ("http", "mcp", "cmd"):
         return float(f["timeout"]) + GRACE
-    return 90.0 + GRACE if check.kind == "connections" else 10.0
+    return 90.0 + GRACE if check.kind in ("connections", "servers") else 10.0
 
 
 def run_check(
@@ -437,9 +437,12 @@ def run_check(
     environ: Mapping[str, str] | None = None,
     connections: Sequence[str] = (),
     path: str | None = None,
+    servers: Collection[str] | None = None,
+    listed: dict | None = None,
 ) -> Result | None:
     """Run one check and answer. None only when the app stopped first. Never raises: a run that cannot run is a run that
-    failed, and says why in one line."""
+    failed, and says why in one line. `servers` are the ones the Connections check judges (None: every one); `listed`
+    keeps one answer of `claude mcp list` for every check of a pass that asks it."""
     stop = stop or threading.Event()
     home = home or Path.home()
     environ = os.environ if environ is None else environ
@@ -461,7 +464,10 @@ def run_check(
             else:
                 from verticals.sources import connections as agents
 
-                box["result"] = agents.check(connections, home=home, stop=stop, environ=environ, path=path)
+                asked, only = (("claude",), reading_servers(check.fields["reads"])) if check.kind == "servers" else (
+                    connections, servers)
+                box["result"] = agents.check(asked, home=home, stop=stop, environ=environ, path=path, only=only,
+                                             listed=listed)
         except BaseException as exc:  # noqa: BLE001 - whatever went wrong is the answer
             box["error"] = exc
 
@@ -470,7 +476,7 @@ def run_check(
     limit = time.monotonic() + _deadline(check)
     while thread.is_alive():
         if stop.is_set():
-            if check.kind in ("cmd", "connections"):
+            if check.kind in ("cmd", "connections", "servers"):
                 # The check's own thread ends its command within `POLL`, the whole group killed and reaped; waiting for it is
                 # what makes "stopped" mean "gone". An address or a lookup cannot be cut short and is simply let go.
                 thread.join(STOP_GRACE)

@@ -1,8 +1,9 @@
 /* Out of focus for a window: under the conversation the window is itself at 1 px
    and four still copies of it, each more blurred and shown from further down, so its name reads and its foot is soft;
    its veil builds the same way in its own pale colour. At the side, its whole body below the name takes the strongest
-   step. The copies are pictures of the window taken as it steps back and again when its words change; they stay out of
-   the reader's selection and the find bar. */
+   step. The copies are pictures of the window taken as it steps back and again when its words change; each lies on the
+   window's own background, so it hides the sharp window under it instead of doubling it. They stay out of the reader's
+   selection and the find bar. */
 import { Fragment, type ReactNode, type Ref as ReactRef } from 'react'
 import { nextTick, onBeforeUnmount, ref, watch } from '../reactivity'
 import { bindRef, cx, fallthrough, sx } from '../bind'
@@ -93,14 +94,17 @@ export const ProgressiveBlur = tracked(function ProgressiveBlur(raw: Props) {
       {mode === 'under' ? (
         <Fragment key="under">
           {STEPS.map((step, i) => (
-            <div key={i} ref={keep(i)} className="pblur__copy" style={sx({ '--r': step.r, '--a': step.a, '--b': step.b })} inert
-              aria-hidden="true"></div>
+            <div key={i} className="pblur__copy" style={sx({ '--r': step.r, '--a': step.a, '--b': step.b })} inert aria-hidden="true">
+              <div ref={keep(i)} className="pblur__lens"></div>
+            </div>
           ))}
           <div className="pblur__veil" aria-hidden="true"></div>
         </Fragment>
       ) : mode === 'side' ? (
         <Fragment key="side">
-          <div ref={keep(0)} className="pblur__copy pblur__copy--side" inert aria-hidden="true"></div>
+          <div className="pblur__copy pblur__copy--side" inert aria-hidden="true">
+            <div ref={keep(0)} className="pblur__lens"></div>
+          </div>
           <div className="pblur__veil pblur__veil--side" aria-hidden="true"></div>
         </Fragment>
       ) : null}

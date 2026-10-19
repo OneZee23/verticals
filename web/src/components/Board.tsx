@@ -8,7 +8,6 @@ import { DragOverlay } from './DragOverlay'
 import { SpansBoard } from './SpansBoard'
 import { openSpans, spans, type SpanScale } from '../lib/spans'
 import { store, todayIso } from '../store'
-import { AUTOSCROLL_TICK_MS } from '../lib/drag'
 import { wheelIntent } from '../lib/boardWheel'
 import { adjacentPeriodAnchor, type AdjustableVertical, type PeriodDirection } from '../lib/periodNavigation'
 import type { BoardColumnData } from '../types'
@@ -124,18 +123,6 @@ export const Board = tracked(function Board(raw: Props) {
     onBeforeUnmount(() => {
       window.removeEventListener('wheel', onWindowWheel, { capture: true })
       window.removeEventListener('keydown', onWindowKeyDown)
-    })
-
-    let autoScrollTimer: number | null = null
-    watch(
-      () => store.state.drag.id,
-      (id) => {
-        if (autoScrollTimer !== null) window.clearInterval(autoScrollTimer)
-        autoScrollTimer = id ? window.setInterval(() => store.autoScrollDrag(), AUTOSCROLL_TICK_MS) : null
-      },
-    )
-    onBeforeUnmount(() => {
-      if (autoScrollTimer !== null) window.clearInterval(autoScrollTimer)
     })
 
     /* Selection stays available at rest and on press, then locks from arm through settle; on body, since the gesture can

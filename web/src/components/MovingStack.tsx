@@ -4,6 +4,7 @@
    and the Inbox's own drag takes it out again. The pictures dropped on the window or pasted wait in the same row, after
    them (FieldPictures). */
 import { computed, ref } from '../reactivity'
+import { pressToDrag } from './CardDnd'
 import { store } from '../store'
 import { findGoal } from '../lib/boardIndex'
 import { inbox } from '../lib/inbox'
@@ -41,19 +42,21 @@ export const MovingStack = tracked(function MovingStack(attrs: Record<string, un
     const hideSource = computed(() => (moving.goalId && store.state.activeView !== 'inbox'
       ? `[data-goal-id="${CSS.escape(moving.goalId)}"]:not([data-parked]) { display: none !important; }` : ''))
 
-    function onGoalDown(event: PointerEvent): void {
+    /* On the board the card is dragged as the board's are, its press handed to dnd-kit's sensor (CardDnd.tsx). */
+    function pressGoal(event: PointerEvent): boolean {
       const id = goal.value?.id
-      if (!id || event.button !== 0) return
-      // In the Inbox no board is in view to land it on: its own drag takes the card out, and lets it go back to its place.
-      if (store.state.activeView === 'inbox' && task.value) {
-        pressCard(event, task.value)
-        return
-      }
-      const row = (event.currentTarget as HTMLElement).querySelector<HTMLElement>('.goal-card__row')
-      if (!row) return
+      const row = goalEl.value?.querySelector<HTMLElement>('.goal-card__row')
+      if (!id || !row) return false
       store.pointerDownCard(id, event.clientX, event.clientY, row.getBoundingClientRect(), event.pointerType, event.altKey)
+      return true
     }
-    // A native listener on the card: the handlers read the event's currentTarget.
+    function onGoalDown(event: PointerEvent): void {
+      if (event.button !== 0) return
+      // In the Inbox no board is in view to land it on: its own drag takes the card out, and lets it go back to its place.
+      if (store.state.activeView === 'inbox' && task.value) pressCard(event, task.value)
+      else pressToDrag(event, pressGoal)
+    }
+    // A native listener on the card: the Inbox's drag reads the event's currentTarget.
     listen(goalEl, 'pointerdown', onGoalDown)
     return { goalEl, view, goal, lit, inHand, hidden, hideSource }
   })

@@ -1,6 +1,6 @@
-# Every task has its session, in Verticals, Claude or Codex
+# Every task has its session, in Vertical, Claude or Codex
 
-A task's conversation is one session with two doors: Verticals, and the place it lives, Claude or Codex. Either door opens the same session, and a session begun outside links back to its task.
+A task's conversation is one session with two doors: Vertical, and the place it lives, Claude or Codex. Either door opens the same session, and a session begun outside links back to its task.
 
 ## Behaviour
 
@@ -8,10 +8,10 @@ A task's conversation is one session with two doors: Verticals, and the place it
 - **The menu's Agent section** gets Start work and Open in ›. Start work hands the task to the agent in a new session of its own, in the chat's permission mode, with the agent the task last worked with. Open in › lists the task's sessions, newest first ("Claude · 5 min ago", "Codex · 2 days ago"), and opens the one picked where it lives; with no session it is pale.
 - **Where it lives:** a Codex thread opens by its link (`codex://threads/<id>`); a Claude session opens in the Claude app by its id, or in Terminal with `claude --resume <id>` from the session's folder. The open icon at the end of a session's row in the task's links does the same.
 - **Visible:** each session's row says when it last moved, read from the session's file on disk. While a session works on the task, the task's card shows the field's turning line at its end.
-- **And back:** in Claude or Codex the agent links its session to the task with one new tool in Verticals' MCP server, which both already reach. A new `verticals://goal/<id>` address opens the task in the app, and a session started from Verticals begins with it.
-- **Continued outside without a word to Verticals:** Verticals watches the files of each task's known sessions, their size and time on disk, with no model and no tokens. When one grows while Verticals didn't drive it, the row says "Continued in Claude · 3 min ago" and the card shows the agent's mark. Discuss then resumes the same session, so its context is already in sync and nothing is read again. A session started outside is linked when its agent calls the tool, or when it carries the task's `verticals://` link.
+- **And back:** in Claude or Codex the agent links its session to the task with one new tool in Vertical's MCP server, which both already reach. A new `verticals://goal/<id>` address opens the task in the app, and a session started from Vertical begins with it.
+- **Continued outside without a word to Vertical:** Vertical watches the files of each task's known sessions, their size and time on disk, with no model and no tokens. When one grows while Vertical didn't drive it, the row says "Continued in Claude · 3 min ago" and the card shows the agent's mark. Discuss then resumes the same session, so its context is already in sync and nothing is read again. A session started outside is linked when its agent calls the tool, or when it carries the task's `verticals://` link.
 - **Connecting:** the menu bar's "Connect Claude Code" is named by what it does, "Use Verticals in Claude Code", with a tick once it is done, and "Use Verticals in Codex" stands beside it. The click is the consent: nothing is written into another app's settings before it.
-- **To test first:** whether the Claude app opens a session the app's agent started; whether a session begun in another folder resumes from Verticals, since Claude keeps sessions per folder; whether the Codex app lists the threads the app's Codex starts.
+- **To test first:** whether the Claude app opens a session the app's agent started; whether a session begun in another folder resumes from Vertical, since Claude keeps sessions per folder; whether the Codex app lists the threads the app's Codex starts.
 
 ## Done when
 

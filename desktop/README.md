@@ -1,8 +1,12 @@
-# Verticals desktop (MVP)
+# Vertical desktop (MVP)
 
-A macOS app around Verticals: one window with the board, a bundled PostgreSQL, the API, the MCP
+A macOS app around Vertical: one window with the board, a bundled PostgreSQL, the API, the MCP
 server for agents and a chat with a local agent CLI (Claude Code or Codex) that works on the board
 through MCP. Everything runs on 127.0.0.1.
+
+The app itself still carries the old name: it is built as `Verticals.app`, keeps its data in
+`~/Library/Application Support/Verticals` and says Verticals in its menus. Where this file quotes
+those names, they are written as the app shows them today.
 
 It is additive: the web variant (`tools/local.py`, Docker, `web/dist`) is not touched. The desktop
 launcher has its own ports, database, state directory and UI build.
@@ -26,10 +30,10 @@ launcher has its own ports, database, state directory and UI build.
   titles, so a bug report can carry its last lines.
 - `chat/agent_sessions.py` — the sessions of tasks (docs/design/task-sessions.md). A session is a file its agent writes
   (Claude Code's `projects/<folder>/<id>.jsonl`, Codex's `sessions/<y>/<m>/<d>/rollout-<time>-<id>.jsonl`, under
-  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`), and Verticals reads only its size and modified time:
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, else `~/.claude` / `~/.codex`), and Vertical reads only its size and modified time:
   never a byte of what is in it, no model, no token. The gateway keeps each task's sessions in `chat-sessions.json`
   (`GET /__chat/sessions` is what the board polls), looks at their files every two seconds (a stat each), marks one that grew
-  while Verticals wasn't driving it as "continued in Claude/Codex", and opens one where it lives (`POST /__chat/open`: a Codex
+  while Vertical wasn't driving it as "continued in Claude/Codex", and opens one where it lives (`POST /__chat/open`: a Codex
   thread by `codex://threads/<id>`, a Claude session in Terminal by `claude --resume <id>` from its folder). A session begun
   from a task starts with its link, `verticals://goal/<id>`; the MCP tool `session_link` (the MCP server is told where the
   gateway is by `--gateway-url`) ties a session begun in Claude Code or Codex to a task, and it is the only way one is linked.
@@ -58,7 +62,7 @@ the switch, and scripts through `reducedMotion()` in `web/src/lib/motion.ts`. A 
 
 ## Menu bar
 
-Closing the window keeps Verticals running: PostgreSQL, the API and MCP stay up for agents, the Dock
+Closing the window keeps Vertical running: PostgreSQL, the API and MCP stay up for agents, the Dock
 icon goes away and the mascot stays in the menu bar. Its menu opens the window, says whether the
 board and MCP are running, and has:
 
@@ -75,7 +79,7 @@ board and MCP are running, and has:
   connection. Both need a full release of the app (a web-only update doesn't carry the menu).
 - A link `verticals://goal/<id>` — the app is registered for the `verticals` scheme: a click on one in Terminal or
   Codex brings the window forward and opens that task (`board/#goal/<id>`); a link in the board's own page does the same.
-- Open at Login — a login item (`SMAppService`); at login Verticals starts in the menu bar only.
+- Open at Login — a login item (`SMAppService`); at login Vertical starts in the menu bar only.
 - Quit Verticals — the only way, with ⌘Q, to stop the board and MCP.
 
 ## Run from the repository
@@ -127,8 +131,8 @@ quarantine (the app is ad-hoc signed, not notarized):
 ## Releases and updates
 
 A release is started by hand: Actions → desktop release → Run workflow (or
-`gh workflow run desktop-release.yml -f version=0.4`). An empty version bumps the last number of the
-latest release. `.github/workflows/desktop-release.yml` builds the UI and the app on a macOS runner
+`gh workflow run desktop-release.yml -f bump=minor`). The version is the latest release's with one part
+up: patch (the default) 0.5 → 0.5.1, minor 0.5 → 0.6.0, major 0.5 → 1.0.0. `.github/workflows/desktop-release.yml` builds the UI and the app on a macOS runner
 and leaves a draft release `v<version>` on the chosen commit with `Verticals.zip`,
 `Verticals-lite.zip`, `release.json` (`min_macos` and the runtime's fingerprint) and `Verticals.dmg`.
 Apps see the release only once it is published, so the last step is on GitHub: edit the draft's
@@ -162,8 +166,8 @@ Updates never interrupt work:
   6 h).
 - A downloaded release with a `summary` shows a grey Update button in the title bar's right corner,
   the summary on its left. The button opens the notes, Restart and Skip This Version. Nothing else
-  asks: ignored, the update installs when Verticals quits, and the next launch is the new version.
-- With the window closed, a downloaded update installs once no agent is answering: Verticals quits,
+  asks: ignored, the update installs when Vertical quits, and the next launch is the new version.
+- With the window closed, a downloaded update installs once no agent is answering: Vertical quits,
   installs and comes back in the menu bar; MCP is away for those seconds. An install that failed
   waits for Restart instead.
 - Restart waits while an agent is answering (`/__chat/busy`), sends the edits still waiting to be
@@ -185,7 +189,7 @@ The database survives an update three ways:
 - Before publishing, the workflow runs `desktop/macos/upgrade_check.py` with the previous
   release: the old app makes a board, the new one starts on it. No release if the new one does not
   come up, does not serve the board, or has fewer rows in any table. Run it by hand on a copy of
-  real data before a risky migration (Verticals quit, the folder is only read):
+  real data before a risky migration (Vertical quit, the folder is only read):
   `python3 desktop/macos/upgrade_check.py /Applications/Verticals.app desktop/dist/Verticals.app --state ~/Library/Application\ Support/Verticals`
 - The install waits for PostgreSQL to stop (up to a minute, otherwise it waits for the next quit),
   then copies `postgres/` to `backups/<date>-<old version>/`; its last three copies stay, and
@@ -193,15 +197,15 @@ The database survives an update three ways:
   to `update.log`.
 - Migrations run in one transaction (`verticals/db/runner.py`): a failing one changes nothing.
 
-To roll back, quit Verticals, move `postgres/` aside, copy a backup to `postgres/` and install the
+To roll back, quit Vertical, move `postgres/` aside, copy a backup to `postgres/` and install the
 matching `.dmg` from the release page.
 
 - Chat bar at the bottom (⌘K); the conversation list opens on the left; agent picker with
   Agent / Model / Effort / Speed / Permissions; Enter queues while the agent works, ⌘Enter sends now.
 - Each goal card gets a "discuss" button (on hover, next to the "…" menu) that opens a new
   conversation bound to that goal; the agent receives its id and link with every message.
-- Agents see the screen context and use only the Verticals MCP tools (Claude runs with no built-in
-  tools). Links to goals, docs and board dates open inside Verticals.
+- Agents see the screen context and use only the Vertical MCP tools (Claude runs with no built-in
+  tools). Links to goals, docs and board dates open inside Vertical.
 - Uses the local CLI's own sign-in; every answer counts against that account's limits.
 
 ## Reports
@@ -239,7 +243,7 @@ cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a requ
   again, or a word in the chat), the agent makes the change in a checkout of the source, with its tests, and opens a pull
   request whose address it adds to the task's notes. The installed app ships without a checkout: the gateway looks for one at
   `VERTICALS_SOURCE`, then `source` in the state folder's `config.json`, then the repository it runs from, then the usual
-  folders (`~/verticals`, `~/Developer/verticals`, …). With none, or with Verticals-only access, the task and its documents
+  folders (`~/verticals`, `~/Developer/verticals`, …). With none, or with Vertical-only access, the task and its documents
   still come and only the pull request waits.
 
 ## Security notes

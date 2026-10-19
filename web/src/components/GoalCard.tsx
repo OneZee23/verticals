@@ -4,6 +4,7 @@
    and carry the open goal's family light (lib/cardFamily.ts). Two roots, so nothing a parent passes falls through. */
 import { Fragment, type MemoExoticComponent, type ReactNode } from 'react'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from '../reactivity'
+import { pressToDrag } from './CardDnd'
 import { KCard } from '../kit'
 import { COMPLETION_LOTTIE, useCompletionCelebration } from '../lib/completionCelebration'
 import { caretAt, useInlineTitleEdit } from '../lib/inlineTitleEdit'
@@ -381,16 +382,17 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
       )
     }
 
-    /* Arms nothing by itself: `pointerDownCard` remembers where the press started and the row's rect; moving past 5 px
-       turns it into a drag in `lib/drag.ts`, on the next `pointermove` the board forwards. */
-    function onRowPointerDown(event: PointerEvent) {
-      if (fromControl(event) || inWindow.value) return
-      const row = event.currentTarget as HTMLElement
+    /* A press on the row, handed to dnd-kit's sensor (CardDnd.tsx, lib/dndSensor.ts), which arms it: `pointerDownCard`
+       remembers where it started and the row's rect. */
+    function pressRow(event: PointerEvent): boolean {
+      const row = rowEl.value
+      if (!row || fromControl(event) || inWindow.value) return false
       row.focus({ preventScroll: true })
       // A drag starts from the board at rest, lifted or not: its row, the gap it leaves, the rows it may land on.
       liftAtRest(() => store.pointerDownCard(
         props.id, event.clientX, event.clientY, row.getBoundingClientRect(), event.pointerType, event.altKey,
       ))
+      return true
     }
 
     /* An armed drag produces no `click`, so open and drop never both fire from one gesture. A plain click opens the
@@ -412,13 +414,13 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
     }
 
     // Native listeners: a menu teleported out of the card is outside it and its list in the DOM, so its events don't reach
-    // them, and the row's handler reads `currentTarget`.
+    // them.
     const rowEl = ref<HTMLElement | null>(null)
     listen(cardRoot, 'mouseenter', onCardEnter)
     listen(cardRoot, 'mouseleave', onCardLeave)
-    listen(rowEl, 'pointerdown', onRowPointerDown)
     listen(childrenListEl, 'mouseenter', liftEnter)
     listen(childrenListEl, 'mouseleave', liftLeave)
+    listen(rowEl, 'pointerdown', (event) => pressToDrag(event, pressRow))
 
     return {
       checked, blurred, titleParts, filterContext, cardStyle, cardRoot, isParent, onToggle, isInlineDetailHost, isOpenRelated,

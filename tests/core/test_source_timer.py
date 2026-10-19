@@ -242,10 +242,11 @@ def test_a_pass_that_is_told_to_stop_runs_nothing_and_records_nothing(db: psycop
     assert core.find(db, owner=OWNER, ref=doc).row.checked_at is None
 
 
-def _fake_claude(directory: Path, output: str) -> str:
+def _fake_claude(directory: Path, output: str, *, runs: Path | None = None) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     script = directory / "claude"
-    script.write_text(f"#!/bin/sh\ncat <<'END'\n{output}\nEND\n")
+    noted = f"echo run >> \"{runs}\"\n" if runs else ""
+    script.write_text(f"#!/bin/sh\n{noted}cat <<'END'\n{output}\nEND\n")
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return f"{directory}:/usr/bin:/bin"
 
@@ -257,12 +258,36 @@ def test_the_connections_source_exists_only_where_the_app_is_told_to_ask(db: psy
     assert core.sources(db, owner=OWNER) == [], "asked nothing, made nothing"
 
     ran = _pass(pool, clock, home, connections=["claude"], path=path)
-    assert [(r.path, r.result.ok) for r in ran] == [("sources/connections.md", False)]
+    assert [(r.path, r.result.ok) for r in ran] == [("sources/connections.md", True)]
     view = _view(db, core.find(db, owner=OWNER, ref=core.CONNECTIONS_PATH).id, clock)
-    assert (view.title, view.kind, view.detail) == ("Connections", "connections", "1 of 2 answer: a; not answering: b (failed to connect)")
+    assert (view.title, view.kind, view.detail) == ("Connections", "connections", "the morning report reads no MCP server")
     # Taken off the list of agents, the document stays and is left alone.
     clock.move(hours=2)
     assert _pass(pool, clock, home, connections=[], path=path) == []
+
+
+def test_connections_judge_only_what_an_approved_source_reads_and_a_pass_asks_the_cli_once(db: psycopg.Connection, pool, home: Path, tmp_path: Path) -> None:
+    clock = Clock()
+    runs = tmp_path / "bin" / "runs"
+    path = _fake_claude(tmp_path / "bin", "Checking MCP server health…\n\na: https://a.test (HTTP) - ✓ Connected\n"
+                        "b: ./b - ✗ Failed to connect\nplugin:design:design: https://d.test (HTTP) - ! Needs authentication",
+                        runs=runs)
+    mail = _add(db, "mail", {"kind": "servers", "reads": ["mcp__a__list_messages"]})
+    chat = _add(db, "chat", {"kind": "servers", "reads": ["mcp__b__list_messages"]})
+    _approve(db, mail, clock)
+    ran = _pass(pool, clock, home, connections=["claude"], path=path)
+    assert {r.path: r.result.detail for r in ran} == {"sources/connections.md": "a answers", "sources/mail.md": "a answers"}
+    assert len(runs.read_text().splitlines()) == 1
+
+    _approve(db, chat, clock)
+    clock.move(hours=1, minutes=1)
+    ran = _pass(pool, clock, home, connections=["claude"], path=path)
+    assert {r.path: r.result.detail for r in ran} == {
+        "sources/chat.md": "b does not answer (failed to connect)",
+        "sources/connections.md": "1 of 2 answer: a; not answering: b (failed to connect)",
+        "sources/mail.md": "a answers",
+    }
+    assert len(runs.read_text().splitlines()) == 2
 
 
 # --- the thread ------------------------------------------------------------------------------------------------------

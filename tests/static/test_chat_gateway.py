@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -49,7 +50,7 @@ def test_replan_reaches_the_agent_with_its_plans_and_how_to_write_the_document()
 
 class _Proc:
     def __init__(self, args, cwd, env, handle, exited):
-        self.args, self.sent = args, []
+        self.args, self.env, self.sent = args, env, []
 
     def send(self, message):
         self.sent.append(message)
@@ -278,6 +279,22 @@ def test_the_morning_turn_keeps_the_owners_settings_and_asks_the_gateway_about_e
     assert json.loads(_flag(second, "--settings"))["permissions"] == {"ask": ["mcp__*"]}
     # The rule asks, it does not allow: nothing is passed to run unasked but what the command line already lists.
     assert "allow" not in json.loads(_flag(second, "--settings"))["permissions"]
+
+
+def test_a_whole_days_board_reaches_an_agent_that_cannot_open_files_in_one_answer() -> None:
+    """Over Claude Code's default cap on one tool's answer the CLI writes the answer to a file, which a seat with no file
+    tools cannot read. Every seat takes a larger cap, unless the owner set their own."""
+    owners = os.environ.pop("MAX_MCP_OUTPUT_TOKENS", None)
+    try:
+        for settings, role in (({}, None), ({"sources": "connected"}, None), ({"sources": "connected"}, "checker")):
+            agent, _ = _claude(settings, sources=[], role=role)
+            assert agent.proc.env["MAX_MCP_OUTPUT_TOKENS"] == "100000", (settings, role)
+        os.environ["MAX_MCP_OUTPUT_TOKENS"] = "300000"
+        assert _claude({"sources": "connected"}, sources=[])[0].proc.env["MAX_MCP_OUTPUT_TOKENS"] == "300000"
+    finally:
+        os.environ.pop("MAX_MCP_OUTPUT_TOKENS", None)
+        if owners is not None:
+            os.environ["MAX_MCP_OUTPUT_TOKENS"] = owners
 
 
 def test_every_mcp_tool_comes_to_the_gateway_and_a_declared_one_runs_with_no_question_to_the_reader() -> None:
