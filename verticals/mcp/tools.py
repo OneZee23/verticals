@@ -642,6 +642,7 @@ _HANDLERS: dict[str, Any] = {
     "size_report": mcp_sizes.handle_size_report,
     "doc_create": mcp_docs.handle_doc_create,
     "doc_get": mcp_docs.handle_doc_get,
+    "doc_image": mcp_docs.handle_doc_image,
     "doc_save": mcp_docs.handle_doc_save,
     "doc_tree": mcp_docs.handle_doc_tree,
     "doc_history": mcp_docs.handle_doc_history,
