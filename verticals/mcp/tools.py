@@ -27,8 +27,8 @@ stays in `core/`, avoiding `jsonschema` as a seventh runtime dependency.
 `tree.renumber` raises `NotFound` for a non-member id but never checks the *pair* is adjacent, so
 a wrong-but-plausible midpoint would be computed silently. The schema below exposes only
 `after_id`; `_derive_before_id` reads the real sibling group fresh, every call, and hands
-`move_between` a `before_id` that is adjacent by construction. No raw SQL, no `core/` edits —
-built entirely from already-shipped `core/` reads (`goal`, `children_of`, `moves.column_goals`, `board`).
+`move_between` a `before_id` that is adjacent by construction. No raw SQL here: it reads through
+`core/` (`goal`, `children_of`, `moves.column_goals`, `board`).
 """
 
 from __future__ import annotations

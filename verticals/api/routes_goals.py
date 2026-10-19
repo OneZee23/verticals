@@ -206,9 +206,9 @@ _CONTENT_FIELDS = (
 # `verticals.api` -> `verticals.mcp` — that would make one transport depend on another) and rather
 # than relocated into `core/` — `core/goals.py` already imports `core/moves.py` (its own
 # idempotency/child-creation plumbing), so a `core/moves.py` function that itself called
-# `core_goals.goal`/`children_of` the way this one does would be a straight import cycle. Built
-# entirely from already-shipped `core/` reads (`goal`, `moves.column_goals`, `children_of`, `board`), same as
-# the MCP original: no raw SQL, no `core/` edits. See `docs/PENDING_DOC_FIXES.md` row 32.
+# `core_goals.goal`/`children_of` the way this one does would be a straight import cycle. It reads
+# through `core/` (`goal`, `moves.column_goals`, `children_of`, `board`), same as the MCP original:
+# no raw SQL here. See `docs/PENDING_DOC_FIXES.md` row 32.
 
 
 def _sibling_ids(conn, *, owner: str, target_id: str) -> list[str]:
