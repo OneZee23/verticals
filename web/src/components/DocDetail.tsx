@@ -400,9 +400,9 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
         <Teleport to="body">
           <button
             type="button"
-            className="goal-detail__comment-selection"
+            className="goal-detail__comment-selection doc-detail__comment-selection"
             data-cap="comment-selection"
-            style={sx({ left: `${selectionAt.x}px`, top: `${selectionAt.y}px`, zIndex: 300 })}
+            style={sx({ left: `${selectionAt.x}px`, top: `${selectionAt.y}px` })}
             onMouseDown={(event) => event.preventDefault()}
             onClick={s.commentOnSelection}
           >Comment</button>

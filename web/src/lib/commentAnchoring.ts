@@ -89,7 +89,7 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     pendingSelection.value = null
   }
 
-  /** Documents allow comments while editing too. The button stands above the selected words. */
+  /** Documents allow comments while editing too, with the button below the selection's right edge. */
   function onBodyMouseUp(): void {
     if (opts.editing.value && !opts.inline) return
     const el = opts.bodyEl.value
@@ -105,7 +105,9 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     }
     const rect = selection.getRangeAt(0).getBoundingClientRect()
     pendingSelection.value = anchor
-    selectionButtonPos.value = { x: rect.left + rect.width / 2, y: rect.top }
+    selectionButtonPos.value = opts.inline
+      ? { x: rect.right, y: rect.bottom }
+      : { x: rect.left + rect.width / 2, y: rect.top }
   }
 
   function onSelectionChange(): void {

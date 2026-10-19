@@ -39,11 +39,13 @@ def _drag_words(page: Page, phrase: str) -> None:
     assert page.evaluate("getSelection().toString()") == phrase
 
 
-@pytest.mark.parametrize("mode,width", [("reading", 1458), ("editing", 1458), ("marked", 1458), ("keyboard", 1458), ("reading", 390)])
+@pytest.mark.parametrize("mode,width", [("reading", 1458), ("editing", 1458), ("marked", 1458), ("keyboard", 1458), ("reading", 390), ("multiline", 1458), ("multiline", 390)])
 def test_selected_words_can_always_be_commented(ui_f2: UiSession, mode: str, width: int) -> None:
     session, page = ui_f2, ui_f2.page
     page.set_viewport_size({"width": width, "height": 844 if width == 390 else 779})
     phrase = "The release" if mode == "keyboard" else "Added text." if mode == "editing" else "the sample board"
+    if mode == "multiline":
+        phrase = SHORT.split("\n\n")[0]
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         doc = _doc(conn, "syn-selection/plan.md", "Selection review", SHORT)
         if mode == "marked":
@@ -70,11 +72,15 @@ def test_selected_words_can_always_be_commented(ui_f2: UiSession, mode: str, wid
     expect(page.locator('[data-cap="comment-selection"]')).to_be_visible()
     button = page.locator('[data-cap="comment-selection"]').bounding_box()
     words = page.evaluate("""() => {
-      const rect = getSelection().getRangeAt(0).getBoundingClientRect()
-      return { x: rect.x, y: rect.y, width: rect.width }
+      const range = getSelection().getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      return { right: rect.right, bottom: rect.bottom, lines: range.getClientRects().length }
     }""")
-    assert button and abs(button["x"] + button["width"] / 2 - words["x"] - words["width"] / 2) < 2
-    assert 0 <= words["y"] - button["y"] - button["height"] <= 12
+    assert button and abs(button["x"] + button["width"] / 2 - words["right"]) < 2
+    assert 8 <= button["y"] - words["bottom"] <= 12
+    assert 8 <= button["x"] and button["x"] + button["width"] <= width - 8
+    if mode == "multiline":
+        assert words["lines"] > 1
     expect(page.locator(CARD)).to_have_count(0)
     if mode == "keyboard":
         page.locator('[data-cap="comment-selection"]').focus()
