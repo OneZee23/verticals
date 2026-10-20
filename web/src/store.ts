@@ -130,7 +130,7 @@ const state = reactive<State>({
   goalDetail: null,
   goalDetailLoading: false,
   hasOpenedGoal: false,
-  collapsed: [],
+  collapsed: viewState.readCollapsed(),
   expandedVertical: null,
   hoverChainId: null,
   restChainId: null,
