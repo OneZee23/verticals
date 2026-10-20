@@ -25,6 +25,7 @@ import {
 } from '../lib/bodyTextarea'
 import { bindRef, fallthrough, sx, valueOf } from '../bind'
 import { tracked } from '../tracked'
+import { Teleport } from '../Teleport'
 import { listen, useSetup, withDefaults } from '../setup'
 import './docDetail.css'
 
@@ -147,7 +148,14 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
       if (!editingBody.value) return
       void flushBodySave()
       editingBody.value = false
-      paintBody()
+      // Keep freshly edited words in place while their comment opens and the save is still in flight.
+      if (anchoring.pendingSelection.value) anchoring.paintHighlights()
+      else paintBody()
+    }
+
+    function commentOnSelection(): void {
+      finishBodyEdit()
+      anchoring.commitSelectionToComment()
     }
 
     onBeforeUnmount(onBeforeQuit(flushBodySave))
@@ -262,7 +270,7 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
     watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) paintBody() })
 
     return {
-      rootEl, bodyEl, editingBody, anchoring, cardOpen, onBodyClick, finishBodyEdit,
+      rootEl, bodyEl, editingBody, anchoring, cardOpen, onBodyClick, finishBodyEdit, commentOnSelection,
       editingTitle, titleDraft, titleInputEl, startTitleEdit, commitTitle, cancelTitleEdit,
       editingPath, pathDraft, pathInputEl, startPathEdit, commitPath, cancelPathEdit, onLinkedGoalClick,
     }
@@ -382,16 +390,16 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
         <DocCommentCard host={s.rootEl.value} body={s.bodyEl.value} paints={s.anchoring.paints.value} />
       ) : null}
       {pendingSelection ? (
-        <button
-          type="button"
-          className="goal-detail__comment-selection"
-          data-cap="comment-selection"
-          style={sx({ left: `${selectionAt.x}px`, top: `${selectionAt.y}px` })}
-          onMouseDown={(event) => {
-            event.preventDefault()
-            s.anchoring.commitSelectionToComment()
-          }}
-        >Comment</button>
+        <Teleport to="body">
+          <button
+            type="button"
+            className="goal-detail__comment-selection doc-detail__comment-selection"
+            data-cap="comment-selection"
+            style={sx({ left: `${selectionAt.x}px`, top: `${selectionAt.y}px` })}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={s.commentOnSelection}
+          >Comment</button>
+        </Teleport>
       ) : null}
 
       {doc.linked_goals.length ? (
