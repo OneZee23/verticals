@@ -229,7 +229,7 @@ ENV_KEEP = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BED
 # the answer in a file, and a seat with no file tools cannot open it.
 MCP_OUTPUT_TOKENS = "100000"
 READ_TOOLS = ["board", "goal", "outline", "search", "evidence_due", "tags", "size_report",
-              "doc_get", "doc_tree", "doc_history", "doc_revision", "comments",
+              "doc_get", "doc_image", "doc_tree", "doc_history", "doc_revision", "comments",
               "privacy", "sources"]
 
 # Agent descriptors: labels and details are Enjoy's own (see its provider registry).

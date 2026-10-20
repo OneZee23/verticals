@@ -258,7 +258,8 @@ cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a requ
   of a document or a goal (`doc_get`, `doc_revision`, `doc_create`/`doc_save`/`doc_restore`'s answers, `goal`) returns each as
   `[picture 1]`, `[picture 2]` and so on with every word as it is (`verticals/core/pictures.py`), and a placeholder the agent keeps
   in a body it saves (`doc_save`, `update` of one goal) is the picture again, so editing a report's words never costs it its
-  pictures. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
+  pictures. The agent can open a screenshot with `doc_image`, giving its document id and placeholder number; it receives
+  image content without adding base64 to the text read. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
   text without its pictures.
 - **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
   knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the

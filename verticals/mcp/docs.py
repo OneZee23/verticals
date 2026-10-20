@@ -45,7 +45,7 @@ from verticals.core import goals as core_goals
 from verticals.core.docs import MAX_DOC_BODY_BYTES, MAX_DOC_TITLE_CHARS, MAX_PATH_CHARS
 from verticals.core.errors import ValidationError
 from verticals.core.idem import MAX_CLIENT_TOKEN_CHARS
-from verticals.core.pictures import for_agent, from_agent
+from verticals.core.pictures import for_agent, from_agent, image_at
 from verticals.core.doc_delete import unlink_and_delete, without_doc_links
 from verticals.models import Doc, DocRevision, DocRevisionSummary, DocSummary, GoalLink
 from verticals.mcp.shapes import ok
@@ -193,6 +193,11 @@ DOC_UNLINK_SCHEMA: dict[str, Any] = {
 }
 
 TOOLS: tuple[types.Tool, ...] = (
+    types.Tool(name="doc_image", description="Open one embedded picture from a document as image content. picture is the number in [picture N] returned by doc_get. Read the picture when a report depends on what it shows; text reads keep their small placeholders.", input_schema={
+        "type": "object", "additionalProperties": False,
+        "properties": {"id": {"type": "string"}, "picture": {"type": "integer", "minimum": 1}},
+        "required": ["id", "picture"],
+    }),
     types.Tool(name="doc_create", description="Create a document at a given path, revision 1. A duplicate path for this owner is refused, never silently overwritten. Links between goals and documents live as plain markdown in text — '[label](doc:path)' in a goal's body, '[label](goal:id)' in a document's body — but doc_link/doc_unlink are the safe verbs for editing a goal's side; use them instead of hand-writing the link. A goal already inherits every document its ancestors link (see the goal tool's inherited_from) — do not link the same document again on a descendant goal.", input_schema=DOC_CREATE_SCHEMA),
     types.Tool(name="doc_get", description="Read one document in full, by id or by path, including every goal it links to or is linked from. linked_goals is derived from '[label](goal:id)' markdown links in this document's own body — doc_link/doc_unlink manage the same relationship from a goal's side, safely, without hand-editing text. A picture inside the text comes as [picture 1], [picture 2] and so on, never its data; keep those where they are in a body you save and the pictures stay.", input_schema=DOC_GET_SCHEMA),
     types.Tool(name="doc_save", description="Edit a document's title, body or path. Optimistically locked on expected_revision; every save appends a new revision, nothing is ever rewritten in place. A link a goal holds to this document lives in the GOAL's own body, not here, so it survives any doc_save untouched. A [picture N] placeholder you kept in the body is the document's Nth picture again. A goal already inherits every document its ancestors link — do not link the same document again on a descendant goal.", input_schema=DOC_SAVE_SCHEMA),
@@ -258,6 +263,12 @@ def handle_doc_get(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -
     doc = core_docs.get(conn, owner=owner, id=id_) if id_ is not None else core_docs.get_by_path(conn, owner=owner, path=path)
     links = core_docs.links_for_doc(conn, owner=owner, doc_id=doc.id)
     return ok(f"{doc.path!r} [{doc.id}]", {"doc": _doc_detail_dict(doc, links=links)})
+
+
+def handle_doc_image(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
+    doc = core_docs.get(conn, owner=owner, id=args["id"])
+    mime, data = image_at(doc.body, args["picture"])
+    return types.CallToolResult(content=[types.ImageContent(type="image", data=data, mime_type=mime)])
 
 
 def handle_doc_save(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
